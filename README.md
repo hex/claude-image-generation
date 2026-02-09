@@ -12,10 +12,14 @@ Claude Code plugin for generating and editing images using Google Gemini and Ope
 
 ## Installation
 
-### From marketplace
+### From marketplace (recommended)
 
 ```bash
-/plugin install hex/claude-image-generation
+# Add the hex-plugins marketplace (once)
+/plugin marketplace add hex/claude-marketplace
+
+# Install the plugin
+/plugin install claude-image-generation
 ```
 
 ### From GitHub
