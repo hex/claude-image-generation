@@ -124,3 +124,32 @@
 - Can generate 1-10 images per request (n parameter)
 - Text rendering: "Significantly improved" but can still struggle with precise placement
 
+## Claude Code Plugin Development Discoveries (2026-02-09)
+
+### Plugin hooks.json Format
+- Plugin `hooks/hooks.json` uses a wrapper format: `{"hooks": {"EventName": [...]}}`
+- This differs from settings `.claude/settings.json` which uses a flat format
+- The plugin-validator agent incorrectly flagged this as non-standard - it's actually correct for plugins
+
+### Base64 Decoding Cross-Platform
+- macOS uses `base64 -D` (capital D) to decode
+- Linux uses `base64 -d` (lowercase d)
+- Both scripts handle this with a `uname` check
+
+### Both APIs Return Base64 Only
+- Neither Gemini nor OpenAI GPT Image 1.5 returns URLs for generated images
+- Everything is base64-encoded inline in the response body
+- This means responses can be large (several MB for high-quality images)
+- `jq` is needed to extract the base64 data from nested JSON responses
+
+### Gemini Uses Unified Endpoint
+- Gemini's image generation uses the same `generateContent` endpoint as text chat
+- Images are passed as `inlineData` parts alongside text parts
+- The `responseModalities: ["TEXT", "IMAGE"]` config tells the API to include image output
+- This means editing is natural: send image + text instruction in same request
+
+### OpenAI Uses Separate Endpoints
+- Generation: `POST /v1/images/generations` (JSON body)
+- Editing: `POST /v1/images/edits` (multipart/form-data)
+- Different content types for different operations adds complexity to the script
+

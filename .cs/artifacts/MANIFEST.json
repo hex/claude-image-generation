@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "filename": "plugin.json",
+    "original_path": "/Users/alex.geana/.claude-sessions/image-generation/.claude-plugin/plugin.json",
+    "timestamp": "2026-02-09T16:01:03Z",
+    "contains_secrets": 0
+  },
+  {
+    "filename": "gemini.sh",
+    "original_path": "/Users/alex.geana/.claude-sessions/image-generation/scripts/gemini.sh",
+    "timestamp": "2026-02-09T16:01:33Z",
+    "contains_secrets": 0
+  },
+  {
+    "filename": "openai.sh",
+    "original_path": "/Users/alex.geana/.claude-sessions/image-generation/scripts/openai.sh",
+    "timestamp": "2026-02-09T16:01:44Z",
+    "contains_secrets": 0
+  },
+  {
+    "filename": "hooks.json",
+    "original_path": "/Users/alex.geana/.claude-sessions/image-generation/hooks/hooks.json",
+    "timestamp": "2026-02-09T16:03:03Z",
+    "contains_secrets": 0
+  },
+  {
+    "filename": "check-keys.sh",
+    "original_path": "/Users/alex.geana/.claude-sessions/image-generation/scripts/check-keys.sh",
+    "timestamp": "2026-02-09T16:03:08Z",
+    "contains_secrets": 1
+  }
+]
