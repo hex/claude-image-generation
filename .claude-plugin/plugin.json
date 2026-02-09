@@ -1,0 +1,8 @@
+{
+  "name": "image-generation",
+  "version": "2026.2.0",
+  "description": "Generate and edit images using Google Gemini and OpenAI GPT Image APIs",
+  "author": {
+    "name": "hex"
+  }
+}
