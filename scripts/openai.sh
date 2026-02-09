@@ -31,7 +31,7 @@ INPUT_IMAGE=""
 SIZE="1024x1024"
 QUALITY="high"
 BACKGROUND="auto"
-MODEL="gpt-image-1.5"
+MODEL="${OPENAI_IMAGE_MODEL:-gpt-image-1.5}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

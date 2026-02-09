@@ -27,7 +27,7 @@ PROMPT=""
 OUTPUT=""
 INPUT_IMAGE=""
 ASPECT_RATIO="1:1"
-MODEL="gemini-3-pro-image-preview"
+MODEL="${GEMINI_MODEL:-gemini-3-pro-image-preview}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

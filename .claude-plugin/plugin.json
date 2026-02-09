@@ -4,5 +4,6 @@
   "description": "Generate and edit images using Google Gemini and OpenAI GPT Image APIs",
   "author": {
     "name": "hex"
-  }
+  },
+  "keywords": ["image-generation", "gemini", "openai", "gpt-image", "text-to-image", "image-editing"]
 }
