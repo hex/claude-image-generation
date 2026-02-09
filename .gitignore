@@ -1,0 +1,21 @@
+# Transient files
+*.lock
+*.tmp
+*.bak
+
+# Archives (large, regenerated from artifacts)
+.cs/archives/
+
+# Session cooldown markers
+.cs/.discoveries-reminder-cooldown
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
