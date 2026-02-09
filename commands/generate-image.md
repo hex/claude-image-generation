@@ -1,6 +1,6 @@
 ---
 description: Generate or edit images using AI (Gemini/OpenAI)
-allowed-tools: Bash, Read, AskUserQuestion, Task
+allowed-tools: Bash, Read, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList
 argument-hint: <prompt> [--edit <image-path>]
 ---
 
@@ -22,26 +22,34 @@ Generate or edit an image based on the user's request.
    - Current directory (e.g., `./generated-image.png`)
    - Custom path (let them type)
 
-4. Execute the generation:
+4. Execute the generation using tasks for progress tracking:
 
    **If single provider selected:**
-   Run the appropriate script via Bash:
-   ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/<provider>.sh" \
-     --mode <generate|edit> \
-     --prompt "<prompt>" \
-     --output "<output-path>" \
-     [--input-image "<input-path>"]
-   ```
+   a. Create a task with TaskCreate:
+      - subject: "Generate image with <Provider>"
+      - activeForm: "Generating image with <Provider>..."
+   b. Mark it in_progress with TaskUpdate
+   c. Run the script via Bash:
+      ```bash
+      bash "${CLAUDE_PLUGIN_ROOT}/scripts/<provider>.sh" \
+        --mode <generate|edit> \
+        --prompt "<prompt>" \
+        --output "<output-path>" \
+        [--input-image "<input-path>"]
+      ```
+   d. Mark the task completed (or note the error if it failed)
 
    **If both providers selected:**
-   Use the Task tool to launch two Bash subagents in parallel:
-   - One running gemini.sh
-   - One running openai.sh
-   Use different output filenames (e.g., `image-gemini.png` and `image-openai.png`).
+   a. Create two tasks with TaskCreate:
+      - "Generate image with Gemini" (activeForm: "Generating image with Gemini...")
+      - "Generate image with OpenAI" (activeForm: "Generating image with OpenAI...")
+   b. Mark both in_progress with TaskUpdate
+   c. Launch two Task subagents in parallel (subagent_type: Bash), each running one script.
+      Use different output filenames (e.g., `image-gemini.png` and `image-openai.png`).
+   d. As each subagent returns, mark its corresponding task completed (or note the error)
 
 5. After generation completes, confirm the output path(s) to the user.
-   If both were generated, let the user know both files are available.
+   If both were generated, let the user know both files are available so they can compare.
 
 ## Environment Requirements
 - `GEMINI_API_KEY` for Gemini provider

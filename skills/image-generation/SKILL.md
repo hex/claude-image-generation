@@ -63,7 +63,15 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/openai.sh" \
 
 ### Parallel Generation
 
-To generate with both providers simultaneously, use the Task tool to launch two Bash agents in parallel, each calling one script. Present both results to the user.
+To generate with both providers simultaneously:
+
+1. Create a task per provider with TaskCreate, using `activeForm` for spinner text:
+   - "Generate image with Gemini" (activeForm: "Generating image with Gemini...")
+   - "Generate image with OpenAI" (activeForm: "Generating image with OpenAI...")
+2. Mark both tasks in_progress with TaskUpdate
+3. Launch two Task subagents (subagent_type: Bash) in the **same message** so they run concurrently
+4. As each subagent returns, mark its task completed via TaskUpdate
+5. Present both output file paths to the user
 
 ## Prompting Tips
 
