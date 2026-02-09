@@ -5,11 +5,11 @@
 
 ## Objective
 
-[Describe what you're trying to accomplish in this session]
+Research the OpenAI GPT Image 1.5 API to understand its capabilities, API structure, pricing, rate limits, and how it differs from DALL-E 3.
 
 ## Environment
 
-[Describe the system, server, or context you're working in]
+Web research using OpenAI documentation, API reference, and community resources.
 
 ## Outcome
 
