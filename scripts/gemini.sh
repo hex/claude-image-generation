@@ -84,7 +84,7 @@ build_request_body() {
       "contents": [{"parts": $parts}],
       "generationConfig": {
         "responseModalities": ["TEXT", "IMAGE"],
-        "imageGenerationConfig": {
+        "imageConfig": {
           "aspectRatio": $aspect
         }
       }
