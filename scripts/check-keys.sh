@@ -17,6 +17,12 @@ else
   missing+=("OPENAI_API_KEY")
 fi
 
+if [[ -n "${XAI_API_KEY:-}" ]]; then
+  available+=("xAI")
+else
+  missing+=("XAI_API_KEY")
+fi
+
 message=""
 
 if [[ ${#available[@]} -gt 0 ]]; then
@@ -28,7 +34,7 @@ if [[ ${#missing[@]} -gt 0 ]]; then
 fi
 
 if [[ ${#available[@]} -eq 0 ]]; then
-  message="No image generation API keys found. Set GEMINI_API_KEY and/or OPENAI_API_KEY to enable image generation."
+  message="No image generation API keys found. Set GEMINI_API_KEY, OPENAI_API_KEY, and/or XAI_API_KEY to enable image generation."
 fi
 
 jq -n --arg msg "$message" '{

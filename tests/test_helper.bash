@@ -6,6 +6,7 @@ PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Dummy API keys for tests that need them (no real calls are made)
 export DUMMY_GEMINI_KEY="test-gemini-key-not-real"
 export DUMMY_OPENAI_KEY="test-openai-key-not-real"
+export DUMMY_XAI_KEY="test-xai-key-not-real"
 
 # Assert that output contains a substring
 # Usage: assert_output_contains "expected substring"

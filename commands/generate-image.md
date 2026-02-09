@@ -1,5 +1,5 @@
 ---
-description: Generate or edit images using AI (Gemini/OpenAI)
+description: Generate or edit images using AI (Gemini/OpenAI/xAI)
 allowed-tools: Bash, Read, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList
 argument-hint: <prompt> [--edit <image-path>]
 ---
@@ -16,7 +16,8 @@ Generate or edit an image based on the user's request.
 2. Ask the user which provider to use with AskUserQuestion:
    - **Gemini** (gemini-3-pro-image-preview): Best for aspect ratio control and iterative editing
    - **OpenAI** (gpt-image-1.5): Best for text rendering and transparent backgrounds
-   - **Both in parallel**: Generate with both and pick the best result
+   - **xAI** (grok-2-image): Flat per-image pricing, prompt revision, diverse styles
+   - **All in parallel**: Generate with all available providers and pick the best result
 
 3. Ask the user where to save the output with AskUserQuestion:
    - Current directory (e.g., `./generated-image.png`)
@@ -39,18 +40,20 @@ Generate or edit an image based on the user's request.
       ```
    d. Mark the task completed (or note the error if it failed)
 
-   **If both providers selected:**
-   a. Create two tasks with TaskCreate:
+   **If multiple providers selected:**
+   a. Create a task per provider with TaskCreate:
       - "Generate image with Gemini" (activeForm: "Generating image with Gemini...")
       - "Generate image with OpenAI" (activeForm: "Generating image with OpenAI...")
-   b. Mark both in_progress with TaskUpdate
-   c. Launch two Task subagents in parallel (subagent_type: Bash), each running one script.
-      Use different output filenames (e.g., `image-gemini.png` and `image-openai.png`).
+      - "Generate image with xAI" (activeForm: "Generating image with xAI...")
+   b. Mark all in_progress with TaskUpdate
+   c. Launch Task subagents in parallel (subagent_type: Bash), each running one script.
+      Use different output filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`).
    d. As each subagent returns, mark its corresponding task completed (or note the error)
 
 5. After generation completes, confirm the output path(s) to the user.
-   If both were generated, let the user know both files are available so they can compare.
+   If multiple were generated, let the user know all files are available so they can compare.
 
 ## Environment Requirements
 - `GEMINI_API_KEY` for Gemini provider
 - `OPENAI_API_KEY` for OpenAI provider
+- `XAI_API_KEY` for xAI provider

@@ -132,3 +132,72 @@ size=1024x1024
 - Up to 16 input images for editing
 - Organization verification required
 - Rate limits: 5 IPM (Tier 1) to 250 IPM (Tier 5)
+
+---
+
+## xAI Grok Image
+
+### Endpoint
+```
+POST https://api.x.ai/v1/images/generations
+```
+
+Both generation and editing use the same endpoint. Editing passes the source image via `image_url`.
+
+### Authentication
+Header: `Authorization: Bearer YOUR_API_KEY`
+
+### Generation Request
+```json
+{
+  "model": "grok-2-image",
+  "prompt": "description",
+  "n": 1,
+  "response_format": "b64_json"
+}
+```
+
+### Edit Request (same endpoint, JSON body)
+```json
+{
+  "model": "grok-2-image",
+  "prompt": "edit instruction",
+  "n": 1,
+  "response_format": "b64_json",
+  "image_url": "data:image/png;base64,<base64-encoded-image>"
+}
+```
+
+The `image_url` field accepts either a public URL or a base64 data URI. The OpenAI SDK's `images.edit()` method is not compatible because it uses multipart/form-data.
+
+### Optional Parameters
+| Parameter | Values | Notes |
+|-----------|--------|-------|
+| `aspect_ratio` | 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, auto | Model-dependent |
+| `n` | 1-10 | Images per request |
+| `response_format` | url, b64_json | Default: url |
+
+### Response Format
+```json
+{
+  "data": [
+    {
+      "b64_json": "<base64-encoded-image>",
+      "revised_prompt": "chat-model-revised version of your prompt"
+    }
+  ]
+}
+```
+
+When `response_format` is `"url"`, the response contains `url` instead of `b64_json`. URLs are temporary.
+
+### Models
+- `grok-imagine-image`: Supports editing via `image_url` and `aspect_ratio` (default)
+- `grok-2-image`: Basic generation, no editing or aspect ratio support
+
+### Constraints
+- Max 10 images per request
+- Generated URLs are temporary (download promptly)
+- Flat per-image pricing (not token-based)
+- Prompts are revised by a chat model before generation
+- `quality`, `size`, and `style` parameters are not supported

@@ -7,16 +7,19 @@ setup() {
   # Start each test with a clean slate
   unset GEMINI_API_KEY 2>/dev/null || true
   unset OPENAI_API_KEY 2>/dev/null || true
+  unset XAI_API_KEY 2>/dev/null || true
 }
 
-@test "check-keys: both keys set reports both available" {
+@test "check-keys: all keys set reports all available" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
   run "$CHECK_KEYS_SH"
   assert_status 0
   assert_valid_json
   assert_output_contains "Gemini"
   assert_output_contains "OpenAI"
+  assert_output_contains "xAI"
   assert_output_contains "Image generation available"
   assert_output_not_contains "Missing API keys"
 }
@@ -29,6 +32,7 @@ setup() {
   assert_output_contains "Gemini"
   assert_output_contains "Image generation available"
   assert_output_contains "OPENAI_API_KEY"
+  assert_output_contains "XAI_API_KEY"
   assert_output_contains "Missing API keys"
 }
 
@@ -40,6 +44,19 @@ setup() {
   assert_output_contains "OpenAI"
   assert_output_contains "Image generation available"
   assert_output_contains "GEMINI_API_KEY"
+  assert_output_contains "XAI_API_KEY"
+  assert_output_contains "Missing API keys"
+}
+
+@test "check-keys: only XAI_API_KEY set" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  run "$CHECK_KEYS_SH"
+  assert_status 0
+  assert_valid_json
+  assert_output_contains "xAI"
+  assert_output_contains "Image generation available"
+  assert_output_contains "GEMINI_API_KEY"
+  assert_output_contains "OPENAI_API_KEY"
   assert_output_contains "Missing API keys"
 }
 

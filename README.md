@@ -1,12 +1,12 @@
 # claude-image-generation
 
-Claude Code plugin for generating and editing images using Google Gemini and OpenAI GPT Image APIs.
+Claude Code plugin for generating and editing images using Google Gemini, OpenAI GPT Image, and xAI Grok Image APIs.
 
 ## Features
 
-- **Text-to-image generation** with Google Gemini or OpenAI GPT Image 1.5
-- **Image editing** with text instructions (both providers)
-- **Parallel generation** using both providers simultaneously via Task tool
+- **Text-to-image generation** with Google Gemini, OpenAI GPT Image 1.5, or xAI Grok Image
+- **Image editing** with text instructions (all providers)
+- **Parallel generation** using multiple providers simultaneously via Task tool
 - **Interactive provider selection** via AskUserQuestion at runtime
 - **Session start check** that reports which API keys are configured
 
@@ -45,6 +45,7 @@ Set one or both as environment variables:
 |----------|----------|-----------|
 | `GEMINI_API_KEY` | Google Gemini | [Google AI Studio](https://aistudio.google.com/apikey) |
 | `OPENAI_API_KEY` | OpenAI | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| `XAI_API_KEY` | xAI | [xAI Console](https://console.x.ai) |
 
 At least one key is required. The plugin reports available providers at session start.
 
@@ -56,6 +57,7 @@ Override the default model per provider via environment variables:
 |----------|---------|---------|
 | `GEMINI_MODEL` | `gemini-3-pro-image-preview` | Gemini model used for generation and editing |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-1.5` | OpenAI model used for generation and editing |
+| `XAI_IMAGE_MODEL` | `grok-imagine-image` | xAI model used for generation and editing |
 
 Command-line `--model` flag on the scripts takes precedence over environment variables.
 
@@ -71,6 +73,13 @@ Command-line `--model` flag on the scripts takes precedence over environment var
 | Model | Characteristics |
 |-------|-----------------|
 | `gpt-image-1.5` | Superior text rendering, transparent backgrounds, quality tiers |
+
+### Available xAI Models
+
+| Model | Characteristics |
+|-------|-----------------|
+| `grok-imagine-image` | Editing via `image_url`, aspect ratio support (default) |
+| `grok-2-image` | Basic generation, no editing or aspect ratio support |
 
 ## Usage
 
@@ -172,16 +181,60 @@ bash scripts/openai.sh \
 | `--background` | `transparent`, `opaque`, `auto` | `auto` | No |
 | `--model` | OpenAI model name | `gpt-image-1.5` | No |
 
+#### xai.sh
+
+```bash
+# Generate
+bash scripts/xai.sh \
+  --mode generate \
+  --prompt "a mountain at sunset" \
+  --output ./mountain.png
+
+# Generate with aspect ratio
+bash scripts/xai.sh \
+  --mode generate \
+  --prompt "a wide landscape" \
+  --output ./landscape.png \
+  --aspect-ratio 16:9
+
+# Edit
+bash scripts/xai.sh \
+  --mode edit \
+  --prompt "add snow to the peaks" \
+  --input-image ./mountain.png \
+  --output ./snowy.png
+
+# Use a different model
+bash scripts/xai.sh \
+  --mode generate \
+  --prompt "a cat in a tree" \
+  --output ./cat.png \
+  --model grok-imagine-image
+```
+
+**Flags:**
+
+| Flag | Values | Default | Required |
+|------|--------|---------|----------|
+| `--mode` | `generate`, `edit` | -- | Yes |
+| `--prompt` | text | -- | Yes |
+| `--output` | file path | -- | Yes |
+| `--input-image` | file path | -- | Edit mode only |
+| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, etc. | (none) | No |
+| `--model` | xAI model name | `grok-imagine-image` | No |
+
 ## Provider Comparison
 
-| Feature | Gemini | OpenAI |
-|---------|--------|--------|
-| Default model | gemini-3-pro-image-preview | gpt-image-1.5 |
-| Text rendering | Good | Excellent |
-| Transparent BG | No | Yes |
-| Aspect ratios | 10 options (1:1 to 21:9) | 3 fixed sizes |
-| Image editing | Multi-turn refinement | Up to 16 input images |
-| Quality tiers | N/A | low / medium / high |
+| Feature | Gemini | OpenAI | xAI |
+|---------|--------|--------|-----|
+| Default model | gemini-3-pro-image-preview | gpt-image-1.5 | grok-imagine-image |
+| Text rendering | Good | Excellent | Good |
+| Transparent BG | No | Yes | No |
+| Aspect ratios | 10 options (1:1 to 21:9) | 3 fixed sizes | 14 options (1:1 to 20:9) |
+| Image editing | Multi-turn refinement | Up to 16 input images | Same endpoint, via image_url |
+| Quality tiers | N/A | low / medium / high | N/A |
+| Pricing | Token-based | Token-based | Flat per-image |
+| Prompt revision | No | No | Yes (by chat model) |
 
 ## Plugin Components
 
@@ -195,6 +248,7 @@ bash scripts/openai.sh \
 | Key checker | `scripts/check-keys.sh` | Reports available providers |
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
+| xAI script | `scripts/xai.sh` | xAI API call execution |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 
 ## Development
@@ -229,14 +283,14 @@ scripts/                       -- Shell scripts for API calls
 tests/                         -- Automated tests (bats)
 ```
 
-The scripts (`gemini.sh`, `openai.sh`) are standalone bash programs that handle API communication, base64 encoding/decoding, and error reporting. They are invoked by the command, agent, and skill layers.
+The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs that handle API communication, base64 encoding/decoding, and error reporting. They are invoked by the command, agent, and skill layers.
 
 ## Requirements
 
 - `curl` -- HTTP requests to provider APIs
 - `jq` -- JSON construction and parsing
 - `base64` -- Image data encoding/decoding (included in macOS and most Linux distributions)
-- At least one API key: `GEMINI_API_KEY` or `OPENAI_API_KEY`
+- At least one API key: `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `XAI_API_KEY`
 
 ## License
 

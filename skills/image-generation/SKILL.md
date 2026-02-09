@@ -1,12 +1,12 @@
 ---
 name: image-generation
-description: Generates and edits images using Google Gemini and OpenAI GPT Image APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "gpt image", or "gemini image".
-version: 2026.2.0
+description: Generates and edits images using Google Gemini, OpenAI GPT Image, and xAI Grok Image APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "gpt image", "gemini image", or "grok image".
+version: 2026.2.1
 ---
 
-# Image Generation with Gemini and OpenAI
+# Image Generation with Gemini, OpenAI, and xAI
 
-Generate and edit images using Google Gemini and OpenAI GPT Image 1.5 APIs via shell scripts.
+Generate and edit images using Google Gemini, OpenAI GPT Image 1.5, and xAI Grok Image APIs via shell scripts.
 
 ## Available Providers
 
@@ -23,6 +23,13 @@ Generate and edit images using Google Gemini and OpenAI GPT Image 1.5 APIs via s
 - **Quality**: low (fast/cheap), medium, high (best fidelity)
 - **Env var**: `OPENAI_API_KEY`
 
+### xAI Grok Image
+- **Model**: `grok-imagine-image` (default), `grok-2-image` (basic generation only)
+- **Strengths**: Prompt revision by chat model, flat per-image pricing, diverse style range, many aspect ratios
+- **Aspect ratios**: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, auto
+- **Editing**: Same endpoint as generation; source image passed as data URI
+- **Env var**: `XAI_API_KEY`
+
 ## Usage
 
 ### Text-to-Image Generation
@@ -38,6 +45,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/gemini.sh" \
 
 # OpenAI
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/openai.sh" \
+  --mode generate \
+  --prompt "a serene mountain landscape at sunset" \
+  --output ./generated.png
+
+# xAI
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" \
   --mode generate \
   --prompt "a serene mountain landscape at sunset" \
   --output ./generated.png
@@ -59,19 +72,27 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/openai.sh" \
   --prompt "change the sky to a starry night" \
   --input-image ./original.png \
   --output ./edited.png
+
+# xAI
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" \
+  --mode edit \
+  --prompt "change the sky to a starry night" \
+  --input-image ./original.png \
+  --output ./edited.png
 ```
 
 ### Parallel Generation
 
-To generate with both providers simultaneously:
+To generate with multiple providers simultaneously:
 
 1. Create a task per provider with TaskCreate, using `activeForm` for spinner text:
    - "Generate image with Gemini" (activeForm: "Generating image with Gemini...")
    - "Generate image with OpenAI" (activeForm: "Generating image with OpenAI...")
-2. Mark both tasks in_progress with TaskUpdate
-3. Launch two Task subagents (subagent_type: Bash) in the **same message** so they run concurrently
+   - "Generate image with xAI" (activeForm: "Generating image with xAI...")
+2. Mark all tasks in_progress with TaskUpdate
+3. Launch Task subagents (subagent_type: Bash) in the **same message** so they run concurrently
 4. As each subagent returns, mark its task completed via TaskUpdate
-5. Present both output file paths to the user
+5. Present all output file paths to the user
 
 ## Prompting Tips
 
@@ -90,13 +111,14 @@ To generate with both providers simultaneously:
 - Be specific about which elements to preserve vs modify
 - For Gemini: supports iterative multi-turn refinement
 - For OpenAI: can accept up to 16 reference images
+- For xAI: prompts are revised by a chat model before generation
 
 ## Error Handling
 
 - Scripts exit with code 1 on failure and print error details to stderr
 - If an API key is missing, the script exits immediately with a clear message
 - HTTP errors include the status code and API error message
-- If both providers are used in parallel and one fails, report the error and present the successful result
+- If multiple providers are used in parallel and one fails, report the error and present the successful results
 - Rate limit errors (HTTP 429) mean the provider's quota is exhausted - try again later or use the other provider
 
 ## Script Options Reference
@@ -122,3 +144,13 @@ To generate with both providers simultaneously:
 | `--quality` | low, medium, high | high |
 | `--background` | transparent, opaque, auto | auto |
 | `--model` | OpenAI model name | gpt-image-1.5 |
+
+### xai.sh
+| Flag | Values | Default |
+|------|--------|---------|
+| `--mode` | generate, edit | (required) |
+| `--prompt` | text | (required) |
+| `--output` | file path | (required) |
+| `--input-image` | file path | (edit only) |
+| `--aspect-ratio` | 1:1, 16:9, 9:16, 4:3, 3:4, etc. | (none) |
+| `--model` | xAI model name | grok-imagine-image |
