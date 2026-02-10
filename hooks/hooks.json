@@ -3,9 +3,13 @@
   "hooks": {
     "SessionStart": [
       {
-        "type": "command",
-        "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-keys.sh",
-        "timeout": 5
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-keys.sh",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }
