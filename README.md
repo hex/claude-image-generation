@@ -45,9 +45,9 @@ Set one or both as environment variables:
 |----------|----------|-----------|
 | `GEMINI_API_KEY` | Google Gemini | [Google AI Studio](https://aistudio.google.com/apikey) |
 | `OPENAI_API_KEY` | OpenAI | [OpenAI Platform](https://platform.openai.com/api-keys) |
-| `XAI_API_KEY` | xAI | [xAI Console](https://console.x.ai) |
+| `XAI_API_KEY` or `GROK_API_KEY` | xAI | [xAI Console](https://console.x.ai) |
 
-At least one key is required. The plugin reports available providers at session start.
+At least one key is required.
 
 ### Model Selection
 
@@ -244,8 +244,6 @@ bash scripts/xai.sh \
 | Skill | `skills/image-generation/SKILL.md` | API knowledge, prompting tips, script reference |
 | Command | `commands/generate-image.md` | `/generate-image` slash command |
 | Agent | `agents/image-generator.md` | Autonomous image generation |
-| Hook | `hooks/hooks.json` | SessionStart API key check |
-| Key checker | `scripts/check-keys.sh` | Reports available providers |
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
@@ -290,7 +288,7 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 - `curl` -- HTTP requests to provider APIs
 - `jq` -- JSON construction and parsing
 - `base64` -- Image data encoding/decoding (included in macOS and most Linux distributions)
-- At least one API key: `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `XAI_API_KEY`
+- At least one API key: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, or `GROK_API_KEY`
 
 ## License
 

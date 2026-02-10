@@ -56,4 +56,4 @@ Generate or edit an image based on the user's request.
 ## Environment Requirements
 - `GEMINI_API_KEY` for Gemini provider
 - `OPENAI_API_KEY` for OpenAI provider
-- `XAI_API_KEY` for xAI provider
+- `XAI_API_KEY` or `GROK_API_KEY` for xAI provider

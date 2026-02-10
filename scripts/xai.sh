@@ -17,7 +17,7 @@ Options:
   --model         xAI model (default: grok-imagine-image)
 
 Environment:
-  XAI_API_KEY     xAI API key (required)
+  XAI_API_KEY     xAI API key (or GROK_API_KEY)
 EOF
   exit 1
 }
@@ -51,8 +51,9 @@ if [[ "$MODE" == "edit" && -z "$INPUT_IMAGE" ]]; then
   usage
 fi
 
-if [[ -z "${XAI_API_KEY:-}" ]]; then
-  echo "Error: XAI_API_KEY environment variable is not set" >&2
+XAI_API_KEY="${XAI_API_KEY:-${GROK_API_KEY:-}}"
+if [[ -z "$XAI_API_KEY" ]]; then
+  echo "Error: XAI_API_KEY or GROK_API_KEY environment variable is not set" >&2
   exit 1
 fi
 

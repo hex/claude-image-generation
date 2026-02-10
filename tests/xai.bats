@@ -4,8 +4,9 @@
 setup() {
   load test_helper
   XAI_SH="${PLUGIN_ROOT}/scripts/xai.sh"
-  # Clear API key by default; tests that need it set it explicitly
+  # Clear API keys by default; tests that need them set them explicitly
   unset XAI_API_KEY 2>/dev/null || true
+  unset GROK_API_KEY 2>/dev/null || true
   unset XAI_IMAGE_MODEL 2>/dev/null || true
 }
 
@@ -41,11 +42,18 @@ setup() {
   assert_output_contains "Error: --input-image is required for edit mode"
 }
 
-@test "xai: missing XAI_API_KEY prints error" {
+@test "xai: missing XAI_API_KEY and GROK_API_KEY prints error" {
   unset XAI_API_KEY 2>/dev/null || true
+  unset GROK_API_KEY 2>/dev/null || true
   run "$XAI_SH" --mode generate --prompt "a cat" --output "/tmp/out.png"
   assert_status 1
-  assert_output_contains "Error: XAI_API_KEY environment variable is not set"
+  assert_output_contains "XAI_API_KEY or GROK_API_KEY"
+}
+
+@test "xai: GROK_API_KEY works as fallback" {
+  export GROK_API_KEY="$DUMMY_XAI_KEY"
+  run "$XAI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-xai-out.png"
+  assert_output_contains "Calling xAI API"
 }
 
 @test "xai: unknown flag prints error and usage" {

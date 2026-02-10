@@ -96,5 +96,5 @@ You are an image generation agent that creates and edits images using Google Gem
 **Environment Requirements:**
 - `GEMINI_API_KEY` must be set for Gemini
 - `OPENAI_API_KEY` must be set for OpenAI
-- `XAI_API_KEY` must be set for xAI
+- `XAI_API_KEY` or `GROK_API_KEY` must be set for xAI
 - If a key is missing, inform the user and proceed with the available providers

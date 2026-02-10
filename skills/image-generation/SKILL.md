@@ -28,7 +28,7 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 1.5, and xAI Grok
 - **Strengths**: Prompt revision by chat model, flat per-image pricing, diverse style range, many aspect ratios
 - **Aspect ratios**: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, auto
 - **Editing**: Same endpoint as generation; source image passed as data URI
-- **Env var**: `XAI_API_KEY`
+- **Env var**: `XAI_API_KEY` or `GROK_API_KEY`
 
 ## Usage
 

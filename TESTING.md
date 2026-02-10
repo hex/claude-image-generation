@@ -43,7 +43,6 @@ bats tests/
 # Run a single test file
 bats tests/gemini.bats
 bats tests/openai.bats
-bats tests/check-keys.bats
 ```
 
 ### Test Coverage
@@ -52,9 +51,8 @@ bats tests/check-keys.bats
 |-----------|-------------------|----------------|
 | `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, edit mode requires `--input-image` |
 | `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, edit mode requires `--input-image` |
-| `tests/check-keys.bats` | `scripts/check-keys.sh` | JSON output structure, provider detection with/without keys |
 
-Tests do not make real API calls. They validate argument parsing, error messages, exit codes, and the check-keys JSON output format.
+Tests do not make real API calls. They validate argument parsing, error messages, and exit codes.
 
 ## 2. Script-Level Tests
 
@@ -111,28 +109,6 @@ export OPENAI_IMAGE_MODEL="gpt-image-1.5"
 bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
 # Expected: stderr includes "model: gpt-image-1.5"
 ```
-
-### check-keys.sh JSON Output
-
-```bash
-# Both keys set
-export GEMINI_API_KEY="test" OPENAI_API_KEY="test"
-bash scripts/check-keys.sh | jq .
-# Expected: {"continue": true, "suppressOutput": false, "systemMessage": "Image generation available: Gemini OpenAI."}
-
-# Only Gemini
-unset OPENAI_API_KEY
-export GEMINI_API_KEY="test"
-bash scripts/check-keys.sh | jq .
-# Expected: systemMessage mentions "available: Gemini" and "Missing API keys: OPENAI_API_KEY"
-
-# No keys
-unset GEMINI_API_KEY OPENAI_API_KEY
-bash scripts/check-keys.sh | jq .
-# Expected: systemMessage starts with "No image generation API keys found"
-```
-
-Verify that in all cases the output is valid JSON with `continue: true` and `suppressOutput: false`.
 
 ## 3. Feature Tests (Via Slash Command)
 
@@ -203,15 +179,6 @@ These tests require a running Claude Code session with the plugin loaded. They v
 4. As each completes, it is marked completed
 5. Both output paths are reported
 
-### 3.6 SessionStart Hook
-
-1. Start a session with the plugin loaded and both API keys set
-2. Verify the session start message reports both providers as available
-3. Start a session with only `GEMINI_API_KEY` set
-4. Verify the message reports Gemini available and OPENAI_API_KEY missing
-5. Start a session with no API keys
-6. Verify the message reports no keys found
-
 ## 4. Edge Cases
 
 ### Missing API Key at Runtime
@@ -269,13 +236,10 @@ These tests require a running Claude Code session with the plugin loaded. They v
 | Unknown flag | Manual | Exit code 1, "Unknown option" |
 | Model env var override | Manual | Correct model name in stderr |
 | `--model` flag override | Manual | Flag takes precedence over env var |
-| check-keys.sh JSON structure | Automated | Valid JSON, `continue: true`, correct providers |
-| check-keys.sh all key combos | Automated | Correct messages for 0, 1, 2 keys |
 | Single-provider generation | Feature | Image file created, valid PNG |
 | Single-provider editing | Feature | Edited image created, original untouched |
 | Both-providers parallel | Feature | Two tasks, two output files, both completed |
 | Output directory creation | Feature | Nonexistent directory is created |
-| SessionStart hook messages | Feature | Correct provider availability report |
 | Invalid API key | Edge case | HTTP error reported, script exits 1 |
 | Nonexistent input image | Edge case | Script exits with error |
 | Unreachable output path | Edge case | Script exits with error |
