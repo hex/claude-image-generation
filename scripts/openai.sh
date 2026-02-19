@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/display.sh"
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [options]
@@ -131,5 +134,7 @@ echo "Image saved to: ${OUTPUT}" >&2
 echo "Format: png" >&2
 echo "Size: ${SIZE}" >&2
 echo "Quality: ${QUALITY}" >&2
+
+display_image "$OUTPUT"
 
 echo "$OUTPUT"

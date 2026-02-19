@@ -41,6 +41,20 @@ assert_status() {
   fi
 }
 
+# Assert a file contains a substring
+# Usage: assert_output_contains_file "/path/to/file" "expected substring"
+assert_output_contains_file() {
+  local file="$1"
+  local expected="$2"
+  local content
+  content=$(cat "$file")
+  if [[ "$content" != *"$expected"* ]]; then
+    echo "Expected file to contain: $expected"
+    echo "Actual content: $content"
+    return 1
+  fi
+}
+
 # Assert output is valid JSON
 # Usage: assert_valid_json
 assert_valid_json() {

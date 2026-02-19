@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/display.sh"
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [options]
@@ -128,5 +131,7 @@ echo "Format: png" >&2
 if [[ -n "$REVISED_PROMPT" ]]; then
   echo "Revised prompt: ${REVISED_PROMPT}" >&2
 fi
+
+display_image "$OUTPUT"
 
 echo "$OUTPUT"

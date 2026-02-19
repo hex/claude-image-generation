@@ -9,6 +9,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **Parallel generation** using multiple providers simultaneously via Task tool
 - **Interactive provider selection** via AskUserQuestion at runtime
 - **Session start check** that reports which API keys are configured
+- **iTerm2 inline preview** -- generated images display directly in the terminal when running in iTerm2
 
 ## Installation
 
@@ -247,6 +248,7 @@ bash scripts/xai.sh \
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
+| Display utility | `scripts/display.sh` | iTerm2 inline image display via OSC 1337 |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 
 ## Development
@@ -281,7 +283,7 @@ scripts/                       -- Shell scripts for API calls
 tests/                         -- Automated tests (bats)
 ```
 
-The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs that handle API communication, base64 encoding/decoding, and error reporting. They are invoked by the command, agent, and skill layers.
+The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs that handle API communication, base64 encoding/decoding, and error reporting. They are invoked by the command, agent, and skill layers. All three source `display.sh` to show generated images inline when running in iTerm2.
 
 ## Requirements
 

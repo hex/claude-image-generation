@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/display.sh"
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [options]
@@ -150,5 +153,7 @@ echo "Format: ${MIME_TYPE}" >&2
 if [[ -n "$TEXT_RESPONSE" && "$TEXT_RESPONSE" != "null" ]]; then
   echo "Description: ${TEXT_RESPONSE}" >&2
 fi
+
+display_image "$OUTPUT"
 
 echo "$OUTPUT"
