@@ -316,7 +316,7 @@ display_image_in_pane() {
   safe_path=$(printf '%q' "$file_path")
 
   tmux split-window -v -l '40%' ${target_pane:+-t "$target_pane"} \
-    "bash -c 'echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; read -n1 -s -r -p \"Press o to open in viewer, any key to close\" _key; if [ \"\$_key\" = \"o\" ] || [ \"\$_key\" = \"O\" ]; then if command -v open >/dev/null 2>&1; then open ${safe_path}; elif command -v xdg-open >/dev/null 2>&1; then xdg-open ${safe_path}; fi; fi'"
+    "bash -c 'echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; read -n1 -s -r -p \"[f]inder [p]review or any key to close\" _key; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; fi'"
 }
 
 # ── Main Entry Point ───────────────────────────────────────────────────
@@ -441,7 +441,8 @@ display_images_in_pane() {
   terminal=$(get_outer_terminal) || true
 
   local display_cmd=""
-  local open_cmd=""
+  local finder_cmd=""
+  local preview_cmd=""
   for file_path in "${files[@]}"; do
     # Resolve to absolute path
     if [[ "$file_path" != /* ]]; then
@@ -455,7 +456,8 @@ display_images_in_pane() {
 
     local safe_path
     safe_path=$(printf '%q' "$file_path")
-    open_cmd+="if command -v open >/dev/null 2>&1; then open ${safe_path}; elif command -v xdg-open >/dev/null 2>&1; then xdg-open ${safe_path}; fi; "
+    finder_cmd+="open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
+    preview_cmd+="open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
   done
 
   if [[ -z "$display_cmd" ]]; then
@@ -465,7 +467,7 @@ display_images_in_pane() {
   local target_pane="${TMUX_PANE:-}"
 
   tmux split-window -v -l "$pane_height" ${target_pane:+-t "$target_pane"} \
-    "bash -c '${display_cmd}read -n1 -s -r -p \"Press o to open in viewer, any key to close\" _key; if [ \"\$_key\" = \"o\" ] || [ \"\$_key\" = \"O\" ]; then ${open_cmd}fi'"
+    "bash -c '${display_cmd}read -n1 -s -r -p \"[f]inder [p]review or any key to close\" _key; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi'"
 }
 
 # Displays multiple images using the best available method.

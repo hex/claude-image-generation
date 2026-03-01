@@ -548,7 +548,7 @@ teardown() {
   assert_output_contains "No system viewer available"
 }
 
-@test "display: display_image_in_pane prompt includes viewer instruction" {
+@test "display: display_image_in_pane prompt includes Finder and Preview keys" {
   source "$DISPLAY_SH"
   export TMUX="/tmp/tmux-501/default,12345,0"
   export TMUX_PANE="%0"
@@ -570,8 +570,13 @@ teardown() {
   [[ -f "$args_file" ]]
   local captured
   captured=$(cat "$args_file")
-  [[ "$captured" == *"open in viewer"* ]] || {
-    echo "Expected prompt to mention 'open in viewer'"
+  [[ "$captured" == *"[f]inder"* ]] || {
+    echo "Expected prompt to mention '[f]inder'"
+    echo "Actual args: $captured"
+    return 1
+  }
+  [[ "$captured" == *"[p]review"* ]] || {
+    echo "Expected prompt to mention '[p]review'"
     echo "Actual args: $captured"
     return 1
   }
