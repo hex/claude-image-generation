@@ -11,6 +11,8 @@ setup() {
   unset TMUX 2>/dev/null || true
   unset KITTY_WINDOW_ID 2>/dev/null || true
   unset WEZTERM_EXECUTABLE 2>/dev/null || true
+  unset SKIP_DISPLAY 2>/dev/null || true
+  unset TMUX_PANE 2>/dev/null || true
   # Save and override TERM to prevent false Kitty detection
   ORIG_TERM="${TERM:-}"
   export TERM="xterm-256color"
@@ -360,6 +362,22 @@ teardown() {
     echo "Actual args: $captured"
     return 1
   }
+}
+
+# --- SKIP_DISPLAY ---
+
+@test "display: display_image skips when SKIP_DISPLAY=1" {
+  source "$DISPLAY_SH"
+  export TERM_PROGRAM="iTerm.app"
+  export SKIP_DISPLAY="1"
+
+  local test_img="${BATS_TMPDIR}/test_skip_$$.png"
+  printf 'test-data' > "$test_img"
+
+  display_image "$test_img"
+
+  # Nothing should be written
+  [[ ! -f "$DISPLAY_OUTPUT" ]]
 }
 
 @test "display: display_image_in_pane works without TMUX_PANE" {

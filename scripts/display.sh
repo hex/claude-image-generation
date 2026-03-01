@@ -309,6 +309,10 @@ display_image_in_pane() {
 display_image() {
   local file_path="$1"
 
+  if [[ "${SKIP_DISPLAY:-}" == "1" ]]; then
+    return 0
+  fi
+
   if [[ ! -f "$file_path" ]]; then
     return 0
   fi
