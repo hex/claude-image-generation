@@ -46,18 +46,23 @@ Generate or edit an image based on the user's request.
       - "Generate image with OpenAI" (activeForm: "Generating image with OpenAI...")
       - "Generate image with xAI" (activeForm: "Generating image with xAI...")
    b. Mark all in_progress with TaskUpdate
-   c. Launch Task subagents in parallel (subagent_type: Bash), each running one script.
-      Use different output filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`).
-      Set `SKIP_DISPLAY=1` to suppress per-script display panes:
+   c. Open a streaming display pane (single Bash call, capture the watch directory path):
       ```bash
-      SKIP_DISPLAY=1 bash "${CLAUDE_PLUGIN_ROOT}/scripts/<provider>.sh" \
+      source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_open
+      ```
+      This outputs a path like `/tmp/display_pane.XXXXXX` — capture it as `DISPLAY_PANE_DIR`.
+   d. Launch Task subagents in parallel (subagent_type: Bash), each running one script.
+      Use different output filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`).
+      Pass `DISPLAY_PANE_DIR` so images appear progressively in the shared pane:
+      ```bash
+      DISPLAY_PANE_DIR=<captured-path> bash "${CLAUDE_PLUGIN_ROOT}/scripts/<provider>.sh" \
         --mode <generate|edit> --prompt "<prompt>" --output "<output-path>"
       ```
-   d. As each subagent returns, mark its corresponding task completed (or note the error)
-   e. After all providers complete, show all results in a grid view:
+   e. As each subagent returns, mark its corresponding task completed (or note the error)
+   f. After all providers complete, close the streaming pane to show interactive controls:
       ```bash
-      source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh"
-      display_images "image-gemini.png" "image-openai.png" "image-xai.png"
+      DISPLAY_PANE_DIR=<captured-path> bash -c \
+        'source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_close'
       ```
 
 5. After generation completes, confirm the output path(s) to the user.

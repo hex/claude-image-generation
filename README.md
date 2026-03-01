@@ -11,6 +11,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **Session start check** that reports which API keys are configured
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
 - **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code)
+- **Streaming display** -- images appear progressively in a shared pane during parallel generation
 - **Grid view** -- compare multiple provider results stacked in a vertical side pane
 - **Open in Finder/Preview** -- press 'f' for Finder or 'p' for Preview in the display pane
 
@@ -261,7 +262,7 @@ bash scripts/xai.sh \
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
-| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane) |
+| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, streaming pane) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 
 ## Development
@@ -310,7 +311,7 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 
 When running inside **tmux** (including Claude Code sessions), single images open in a bottom pane (`-v` split) and multiple images open in a vertical side pane (`-h` split, 30% width) targeting the originating pane (via `$TMUX_PANE`). The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
 
-For parallel generation, use `SKIP_DISPLAY=1` per provider script, then call `display_images` to show all results stacked in a vertical side pane.
+For parallel generation, the streaming display pane shows images progressively as each provider finishes. Call `display_pane_open` to create a shared pane, pass `DISPLAY_PANE_DIR` to each provider script, and call `display_pane_close` when all are done. Provider scripts require zero changes — `display_image()` transparently routes to the shared pane when `DISPLAY_PANE_DIR` is set.
 
 ## Requirements
 

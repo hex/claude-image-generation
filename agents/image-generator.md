@@ -67,13 +67,24 @@ You are an image generation agent that creates and edits images using Google Gem
    Run the script directly via Bash, then mark the task completed.
 
    **Multiple providers (parallel):**
+   First, open a streaming display pane (single Bash call, capture the watch directory path):
+   ```bash
+   source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_open
+   ```
+   This outputs a path like `/tmp/display_pane.XXXXXX` — capture it as `DISPLAY_PANE_DIR`.
+
    Launch Task subagents (subagent_type: Bash) in the same message, each running one script.
    Use suffixed output filenames (e.g., `hero-gemini.png`, `hero-openai.png`, `hero-xai.png`).
-   Set `SKIP_DISPLAY=1` to suppress per-script display panes:
+   Pass `DISPLAY_PANE_DIR` so images appear progressively in the shared pane:
    ```bash
-   SKIP_DISPLAY=1 bash "${CLAUDE_PLUGIN_ROOT}/scripts/gemini.sh" --mode generate --prompt "<prompt>" --output "<path>"
+   DISPLAY_PANE_DIR=<captured-path> bash "${CLAUDE_PLUGIN_ROOT}/scripts/gemini.sh" --mode generate --prompt "<prompt>" --output "<path>"
    ```
    As each subagent returns, mark its task completed or note the error.
+
+   After all providers complete, close the streaming pane:
+   ```bash
+   DISPLAY_PANE_DIR=<captured-path> bash -c 'source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_close'
+   ```
 
    Scripts are located at `${CLAUDE_PLUGIN_ROOT}/scripts/`.
 
@@ -89,13 +100,7 @@ You are an image generation agent that creates and edits images using Google Gem
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" --mode edit --prompt "<prompt>" --input-image "<input>" --output "<path>"
    ```
 
-6. If multiple providers were used, show all results in a grid view:
-   ```bash
-   source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh"
-   display_images "hero-gemini.png" "hero-openai.png" "hero-xai.png"
-   ```
-
-7. Report the output file path(s) back. If both providers were used, mention both files so the user can compare.
+6. Report the output file path(s) back. If multiple providers were used, mention all files so the user can compare.
 
 **Quality Standards:**
 - Always confirm the prompt with the user before generating

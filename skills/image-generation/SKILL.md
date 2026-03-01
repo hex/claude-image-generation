@@ -83,16 +83,31 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" \
 
 ### Parallel Generation
 
-To generate with multiple providers simultaneously:
+To generate with multiple providers simultaneously using the streaming display pane:
 
 1. Create a task per provider with TaskCreate, using `activeForm` for spinner text:
    - "Generate image with Gemini" (activeForm: "Generating image with Gemini...")
    - "Generate image with OpenAI" (activeForm: "Generating image with OpenAI...")
    - "Generate image with xAI" (activeForm: "Generating image with xAI...")
 2. Mark all tasks in_progress with TaskUpdate
-3. Launch Task subagents (subagent_type: Bash) in the **same message** so they run concurrently
-4. As each subagent returns, mark its task completed via TaskUpdate
-5. Present all output file paths to the user
+3. Open a streaming display pane (single Bash call, capture the output path):
+   ```bash
+   source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_open
+   # outputs: /tmp/display_pane.XXXXXX
+   ```
+4. Launch Task subagents (subagent_type: Bash) in the **same message** so they run concurrently.
+   Pass `DISPLAY_PANE_DIR` so images appear in the shared pane as each provider finishes:
+   ```bash
+   DISPLAY_PANE_DIR=/tmp/display_pane.XXXXXX bash "${CLAUDE_PLUGIN_ROOT}/scripts/gemini.sh" \
+     --mode generate --prompt "<prompt>" --output hero-gemini.png
+   ```
+5. As each subagent returns, mark its task completed via TaskUpdate
+6. After all providers complete, close the streaming pane to show controls:
+   ```bash
+   DISPLAY_PANE_DIR=/tmp/display_pane.XXXXXX bash -c \
+     'source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_close'
+   ```
+7. Present all output file paths to the user
 
 ## Prompting Tips
 
