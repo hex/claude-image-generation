@@ -74,7 +74,7 @@ Control the terminal image display dimensions (in pixels):
 | `DISPLAY_IMAGE_WIDTH` | `256` | Max image width in pixels for terminal display |
 | `DISPLAY_IMAGE_HEIGHT` | `256` | Max image height in pixels for iTerm2 display |
 
-These apply to inline display (iTerm2, Sixel) and tmux pane display. Grid view scales down proportionally based on image count.
+These apply to inline display (iTerm2, Sixel), tmux pane display, and grid view. Each image in the grid uses the full width.
 
 ### Available Gemini Models
 

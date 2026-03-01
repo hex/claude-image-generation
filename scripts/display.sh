@@ -369,12 +369,11 @@ display_image() {
 
 # ── Multi-Image Grid Display ──────────────────────────────────────────
 
-# Builds the display command for a single image at a given width percentage.
+# Builds the display command for a single image.
 # Prints the command fragment to stdout.
 _build_image_cmd() {
   local file_path="$1"
-  local width_pct="$2"
-  local terminal="$3"
+  local terminal="$2"
 
   local filename safe_filename safe_path
   filename=$(basename "$file_path")
@@ -382,27 +381,24 @@ _build_image_cmd() {
   safe_path=$(printf '%q' "$file_path")
 
   local cmd="echo '--- ${safe_filename} ---'; "
+  local width="${DISPLAY_IMAGE_WIDTH:-256}"
 
   case "$terminal" in
     iterm2)
       local imgcat_path
       imgcat_path=$(find_imgcat) || return 1
-      local base_width="${DISPLAY_IMAGE_WIDTH:-256}"
-      local pixel_width=$((base_width * width_pct / 100))
-      cmd+="$(printf '%q' "$imgcat_path") -W ${pixel_width}px ${safe_path}; "
+      cmd+="$(printf '%q' "$imgcat_path") -W ${width}px ${safe_path}; "
       ;;
     kitty)
       cmd+="kitten icat --align left ${safe_path}; "
       ;;
     *)
       local sixel_tool
-      local base_width_sixel="${DISPLAY_IMAGE_WIDTH:-256}"
       if sixel_tool=$(_sixel_find_tool 2>/dev/null); then
-        local pixel_width=$((base_width_sixel * width_pct / 100))
         case "$sixel_tool" in
-          img2sixel) cmd+="img2sixel --width=${pixel_width} ${safe_path}; " ;;
-          chafa)     cmd+="chafa --format=sixels --size=${pixel_width}x ${safe_path}; " ;;
-          magick)    cmd+="magick ${safe_path} -geometry ${pixel_width}x\\> sixel:-; " ;;
+          img2sixel) cmd+="img2sixel --width=${width} ${safe_path}; " ;;
+          chafa)     cmd+="chafa --format=sixels --size=${width}x ${safe_path}; " ;;
+          magick)    cmd+="magick ${safe_path} -geometry ${width}x\\> sixel:-; " ;;
         esac
       else
         cmd+="echo 'Image: ${safe_path}'; "
@@ -429,18 +425,6 @@ display_images_in_pane() {
     return 1
   fi
 
-  # Scale width by image count so thumbnails fit
-  local width_pct
-  if [[ $count -eq 1 ]]; then
-    width_pct=80
-  elif [[ $count -eq 2 ]]; then
-    width_pct=45
-  elif [[ $count -eq 3 ]]; then
-    width_pct=30
-  else
-    width_pct=25
-  fi
-
   # Scale pane height for more images
   local pane_height="40%"
   if [[ $count -ge 3 ]]; then
@@ -464,7 +448,7 @@ display_images_in_pane() {
       continue
     fi
 
-    display_cmd+=$(_build_image_cmd "$file_path" "$width_pct" "$terminal")
+    display_cmd+=$(_build_image_cmd "$file_path" "$terminal")
 
     local safe_path
     safe_path=$(printf '%q' "$file_path")

@@ -497,6 +497,44 @@ teardown() {
   assert_output_contains "Not inside tmux"
 }
 
+@test "display: display_images_in_pane uses full DISPLAY_IMAGE_WIDTH per image" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+  export DISPLAY_IMAGE_WIDTH=256
+
+  local mock_dir="${BATS_TMPDIR}/mock_grid_full_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local img1="${BATS_TMPDIR}/full_a_$$.png"
+  local img2="${BATS_TMPDIR}/full_b_$$.png"
+  printf 'a' > "$img1"
+  printf 'b' > "$img2"
+
+  display_images_in_pane "$img1" "$img2"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  # Both images should use full 256px, not scaled down (e.g., 115px)
+  [[ "$captured" == *"256px"* ]] || {
+    echo "Expected grid images to use full 256px width"
+    echo "Actual args: $captured"
+    return 1
+  }
+  [[ "$captured" != *"115px"* ]] || {
+    echo "Grid should not scale down to 115px (45% of 256)"
+    echo "Actual args: $captured"
+    return 1
+  }
+}
+
 @test "display: display_images_in_pane includes all filenames in command" {
   source "$DISPLAY_SH"
   export TMUX="/tmp/tmux-501/default,12345,0"
