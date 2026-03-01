@@ -49,10 +49,12 @@ bats tests/openai.bats
 
 | Test file | Script under test | What it covers |
 |-----------|-------------------|----------------|
-| `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, edit mode requires `--input-image` |
-| `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, edit mode requires `--input-image` |
+| `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image` |
+| `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image` |
+| `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode |
+| `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
 
-Tests do not make real API calls. They validate argument parsing, error messages, and exit codes.
+Tests do not make real API calls. They validate argument parsing, error messages, exit codes, and terminal protocol output.
 
 ## 2. Script-Level Tests
 
@@ -80,7 +82,7 @@ bash scripts/gemini.sh --nonexistent value
 # Expected: exits 1, "Unknown option: --nonexistent"
 ```
 
-Repeat the same checks for `scripts/openai.sh`.
+Repeat the same checks for `scripts/openai.sh` and `scripts/xai.sh`.
 
 ### Environment Variable Checks
 
