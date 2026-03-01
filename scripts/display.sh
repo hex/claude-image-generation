@@ -452,11 +452,7 @@ display_images_in_pane() {
     return 0
   fi
 
-  # Pane width: 40% for 1 image, 50% for 2+
-  local pane_width="40%"
-  if [[ $count -ge 2 ]]; then
-    pane_width="50%"
-  fi
+  local pane_width="30%"
 
   local -a target_args=()
   if [[ -n "${TMUX_PANE:-}" ]]; then

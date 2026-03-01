@@ -497,7 +497,7 @@ teardown() {
   assert_output_contains "Not inside tmux"
 }
 
-@test "display: display_images_in_pane uses 50% pane width for 2+ images" {
+@test "display: display_images_in_pane uses 30% pane width" {
   source "$DISPLAY_SH"
   export TMUX="/tmp/tmux-501/default,12345,0"
   export TMUX_PANE="%5"
@@ -512,18 +512,15 @@ teardown() {
   export PATH="$mock_dir:$PATH"
 
   local img1="${BATS_TMPDIR}/full_a_$$.png"
-  local img2="${BATS_TMPDIR}/full_b_$$.png"
   printf 'a' > "$img1"
-  printf 'b' > "$img2"
 
-  display_images_in_pane "$img1" "$img2"
+  display_images_in_pane "$img1"
 
   [[ -f "$args_file" ]]
   local captured
   captured=$(cat "$args_file")
-  # 2+ images should get a 50% wide side pane
-  [[ "$captured" == *"-l 50%"* ]] || {
-    echo "Expected -l 50% pane width for 2 images"
+  [[ "$captured" == *"-l 30%"* ]] || {
+    echo "Expected -l 30% pane width"
     echo "Actual args: $captured"
     return 1
   }
