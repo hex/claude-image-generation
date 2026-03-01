@@ -380,7 +380,7 @@ _build_image_cmd() {
   safe_filename=$(printf '%q' "$filename")
   safe_path=$(printf '%q' "$file_path")
 
-  local cmd="echo '--- ${safe_filename} ---'; "
+  local cmd="echo --- ${safe_filename} ---; "
   local width="${DISPLAY_IMAGE_WIDTH:-256}"
 
   case "$terminal" in
@@ -425,12 +425,13 @@ display_images_in_pane() {
     return 1
   fi
 
-  # Scale pane height for more images
-  local pane_height="40%"
+  # Scale pane height for more images.
+  # A 256px image takes ~16 terminal lines, so panes need to be large.
+  local pane_height="50%"
   if [[ $count -ge 3 ]]; then
-    pane_height="60%"
+    pane_height="85%"
   elif [[ $count -eq 2 ]]; then
-    pane_height="50%"
+    pane_height="75%"
   fi
 
   local terminal
