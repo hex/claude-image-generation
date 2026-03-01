@@ -6,7 +6,7 @@ setup() {
   GEMINI_SH="${PLUGIN_ROOT}/scripts/gemini.sh"
   # Clear API key by default; tests that need it set it explicitly
   unset GEMINI_API_KEY 2>/dev/null || true
-  unset GEMINI_MODEL 2>/dev/null || true
+  unset GEMINI_IMAGE_MODEL 2>/dev/null || true
 }
 
 @test "gemini: no arguments prints error and usage" {
@@ -55,26 +55,26 @@ setup() {
   assert_output_contains "Usage:"
 }
 
-@test "gemini: default model is gemini-3-pro-image-preview" {
+@test "gemini: default model is gemini-2.5-flash-image" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
   # The script will fail at the curl call, but we can check stderr for the model name
   run "$GEMINI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-gemini-out.png"
   # The script either prints the model in its API call message or fails at curl.
   # Since we have a dummy key, curl will fail, but the "Calling Gemini API" message
   # is printed before the curl call.
-  assert_output_contains "model: gemini-3-pro-image-preview"
+  assert_output_contains "model: gemini-2.5-flash-image"
 }
 
-@test "gemini: GEMINI_MODEL env var overrides default model" {
+@test "gemini: GEMINI_IMAGE_MODEL env var overrides default model" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
-  export GEMINI_MODEL="gemini-custom-model"
+  export GEMINI_IMAGE_MODEL="gemini-custom-model"
   run "$GEMINI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-gemini-out.png"
   assert_output_contains "model: gemini-custom-model"
 }
 
 @test "gemini: --model flag overrides default and env var" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
-  export GEMINI_MODEL="gemini-custom-model"
+  export GEMINI_IMAGE_MODEL="gemini-custom-model"
   run "$GEMINI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-gemini-out.png" --model "gemini-flag-model"
   assert_output_contains "model: gemini-flag-model"
 }
@@ -89,4 +89,5 @@ setup() {
   assert_output_contains "--aspect-ratio"
   assert_output_contains "--model"
   assert_output_contains "GEMINI_API_KEY"
+  assert_output_contains "GEMINI_IMAGE_MODEL"
 }

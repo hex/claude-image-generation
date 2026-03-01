@@ -11,8 +11,8 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 1.5, and xAI Grok
 ## Available Providers
 
 ### Google Gemini
-- **Model**: `gemini-3-pro-image-preview` (default), `gemini-2.5-flash-image` (faster)
-- **Strengths**: Multi-turn editing, aspect ratio control, Google Search grounding for factual imagery, up to 4K resolution
+- **Model**: `gemini-2.5-flash-image` (default)
+- **Strengths**: Fast generation, multi-turn editing, aspect ratio control
 - **Aspect ratios**: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
 - **Env var**: `GEMINI_API_KEY`
 
@@ -131,7 +131,7 @@ To generate with multiple providers simultaneously:
 | `--output` | file path | (required) |
 | `--input-image` | file path | (edit only) |
 | `--aspect-ratio` | 1:1, 16:9, etc. | 1:1 |
-| `--model` | gemini model name | gemini-3-pro-image-preview |
+| `--model` | gemini model name | gemini-2.5-flash-image |
 
 ### openai.sh
 | Flag | Values | Default |

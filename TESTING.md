@@ -102,7 +102,7 @@ bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
 
 ```bash
 # Gemini model override
-export GEMINI_MODEL="gemini-2.5-flash-image"
+export GEMINI_IMAGE_MODEL="gemini-2.5-flash-image"
 bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/test.png
 # Expected: stderr includes "model: gemini-2.5-flash-image" (will fail at API call without valid key, but model name is visible in the log)
 

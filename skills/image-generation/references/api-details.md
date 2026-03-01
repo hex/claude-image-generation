@@ -61,8 +61,7 @@ The Gemini API uses a unified `generateContent` endpoint. Images are passed as `
 ```
 
 ### Models
-- `gemini-3-pro-image-preview`: Pro quality, 4K support, Google Search grounding, up to 14 reference images
-- `gemini-2.5-flash-image`: Fast generation, good for iteration
+- `gemini-2.5-flash-image`: Fast generation, good for iteration (default)
 
 ### Constraints
 - Max input image: 7 MB per image

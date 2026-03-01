@@ -17,10 +17,11 @@ Options:
   --output        Output file path (required)
   --input-image   Input image path for edit mode (required for edit)
   --aspect-ratio  Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4 (default: 1:1)
-  --model         Gemini model (default: gemini-3-pro-image-preview)
+  --model         Gemini model (default: gemini-2.5-flash-image)
 
 Environment:
-  GEMINI_API_KEY  Google AI API key (required)
+  GEMINI_API_KEY          Google AI API key (required)
+  GEMINI_IMAGE_MODEL      Override default model
 EOF
   exit 1
 }
@@ -30,7 +31,7 @@ PROMPT=""
 OUTPUT=""
 INPUT_IMAGE=""
 ASPECT_RATIO="1:1"
-MODEL="${GEMINI_MODEL:-gemini-3-pro-image-preview}"
+MODEL="${GEMINI_IMAGE_MODEL:-gemini-2.5-flash-image}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

@@ -57,7 +57,7 @@ Override the default model per provider via environment variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GEMINI_MODEL` | `gemini-3-pro-image-preview` | Gemini model used for generation and editing |
+| `GEMINI_IMAGE_MODEL` | `gemini-2.5-flash-image` | Gemini model used for generation and editing |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-1.5` | OpenAI model used for generation and editing |
 | `XAI_IMAGE_MODEL` | `grok-imagine-image` | xAI model used for generation and editing |
 
@@ -67,8 +67,7 @@ Command-line `--model` flag on the scripts takes precedence over environment var
 
 | Model | Characteristics |
 |-------|-----------------|
-| `gemini-3-pro-image-preview` | Pro quality, 4K support, Google Search grounding, up to 14 reference images |
-| `gemini-2.5-flash-image` | Faster generation, good for iteration |
+| `gemini-2.5-flash-image` | Fast generation, good for iteration (default) |
 
 ### Available OpenAI Models
 
@@ -125,12 +124,12 @@ bash scripts/gemini.sh \
   --input-image ./mountain.png \
   --output ./snowy.png
 
-# Use a different model
+# Use a specific model
 bash scripts/gemini.sh \
   --mode generate \
   --prompt "quick sketch" \
   --output ./sketch.png \
-  --model gemini-2.5-flash-image
+  --model gemini-2.5-flash-preview-image-generation
 ```
 
 **Flags:**
@@ -142,7 +141,7 @@ bash scripts/gemini.sh \
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path | -- | Edit mode only |
 | `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9` | `1:1` | No |
-| `--model` | Gemini model name | `gemini-3-pro-image-preview` | No |
+| `--model` | Gemini model name | `gemini-2.5-flash-image` | No |
 
 #### openai.sh
 
@@ -229,7 +228,7 @@ bash scripts/xai.sh \
 
 | Feature | Gemini | OpenAI | xAI |
 |---------|--------|--------|-----|
-| Default model | gemini-3-pro-image-preview | gpt-image-1.5 | grok-imagine-image |
+| Default model | gemini-2.5-flash-image | gpt-image-1.5 | grok-imagine-image |
 | Text rendering | Good | Excellent | Good |
 | Transparent BG | No | Yes | No |
 | Aspect ratios | 10 options (1:1 to 21:9) | 3 fixed sizes | 14 options (1:1 to 20:9) |
