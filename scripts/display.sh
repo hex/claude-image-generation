@@ -1,30 +1,113 @@
-# ABOUTME: iTerm2 inline image display utility.
-# ABOUTME: Detects iTerm2 and renders images directly in the terminal via OSC 1337.
+# ABOUTME: Multi-protocol terminal image display utility.
+# ABOUTME: Supports iTerm2, Kitty, Sixel protocols and tmux pane display.
+
+# ── Terminal Detection ─────────────────────────────────────────────────
 
 # Returns 0 if running in iTerm2, 1 otherwise.
 is_iterm2() {
   [[ "${TERM_PROGRAM:-}" == "iTerm.app" || "${LC_TERMINAL:-}" == "iTerm2" ]]
 }
 
-# Displays an image inline in iTerm2. No-op in other terminals.
-# Usage: display_image <file_path>
-display_image() {
+# Returns 0 if the terminal supports the Kitty graphics protocol.
+# Covers Kitty, Ghostty, and WezTerm.
+is_kitty() {
+  case "${TERM:-}" in
+    xterm-kitty) return 0 ;;
+  esac
+  case "${TERM_PROGRAM:-}" in
+    kitty|ghostty|WezTerm) return 0 ;;
+  esac
+  return 1
+}
+
+# Returns 0 if running inside a tmux session.
+is_tmux() {
+  [[ -n "${TMUX:-}" ]]
+}
+
+# Prints the outer terminal type when inside tmux.
+# Returns: "iterm2", "kitty", or "unknown"
+get_outer_terminal() {
+  case "${LC_TERMINAL:-}" in
+    iTerm2) echo "iterm2"; return 0 ;;
+  esac
+
+  if [[ -n "${ITERM_SESSION_ID:-}" ]]; then
+    echo "iterm2"; return 0
+  fi
+
+  if [[ -n "${KITTY_WINDOW_ID:-}" ]]; then
+    echo "kitty"; return 0
+  fi
+
+  echo "unknown"
+  return 1
+}
+
+# ── Sixel Detection ────────────────────────────────────────────────────
+
+# Find the best available sixel conversion tool.
+# Prints the tool name and returns 0, or returns 1 if none found.
+_sixel_find_tool() {
+  if command -v img2sixel &>/dev/null; then
+    echo "img2sixel"
+  elif command -v chafa &>/dev/null; then
+    echo "chafa"
+  elif command -v magick &>/dev/null; then
+    if magick identify -list format 2>/dev/null | grep -qi sixel; then
+      echo "magick"
+    else
+      return 1
+    fi
+  else
+    return 1
+  fi
+}
+
+# Check if the current terminal likely supports sixel graphics.
+_sixel_check_terminal() {
+  case "${LC_TERMINAL:-}" in
+    iTerm2) return 0 ;;
+  esac
+
+  case "${TERM_PROGRAM:-}" in
+    iTerm.app|WezTerm|mintty) return 0 ;;
+  esac
+
+  case "${TERM:-}" in
+    mlterm*|foot*|xterm-direct*) return 0 ;;
+  esac
+
+  [[ -n "${WEZTERM_EXECUTABLE:-}" ]] && return 0
+
+  # In tmux, check outer terminal
+  if [[ -n "${TMUX:-}" ]]; then
+    local outer_term
+    outer_term=$(tmux show-environment LC_TERMINAL 2>/dev/null | sed 's/^LC_TERMINAL=//')
+    case "$outer_term" in
+      iTerm2|WezTerm) return 0 ;;
+    esac
+    outer_term=$(tmux show-environment TERM_PROGRAM 2>/dev/null | sed 's/^TERM_PROGRAM=//')
+    case "$outer_term" in
+      iTerm.app|WezTerm|mintty) return 0 ;;
+    esac
+  fi
+
+  return 1
+}
+
+# Returns 0 if both a sixel conversion tool and a capable terminal are available.
+is_sixel_capable() {
+  _sixel_find_tool &>/dev/null && _sixel_check_terminal
+}
+
+# ── iTerm2 Display (OSC 1337) ─────────────────────────────────────────
+
+# Displays an image using the iTerm2 inline image protocol.
+# Usage: display_image_iterm2 <file_path>
+display_image_iterm2() {
   local file_path="$1"
-
-  if ! is_iterm2; then
-    return 0
-  fi
-
-  if [[ ! -f "$file_path" ]]; then
-    return 0
-  fi
-
-  # Allow overriding the output target for testing (default: /dev/tty)
   local target="${DISPLAY_IMAGE_TARGET:-/dev/tty}"
-
-  if [[ "$target" == "/dev/tty" && ! -w /dev/tty ]]; then
-    return 0
-  fi
 
   local filename name_b64 size image_b64
   filename=$(basename "$file_path")
@@ -32,9 +115,220 @@ display_image() {
   size=$(wc -c < "$file_path" | tr -d ' ')
   image_b64=$(base64 < "$file_path" | tr -d '\n')
 
-  # OSC 1337 inline image protocol:
-  # \033] opens OSC, 1337 is iTerm2's code, \a (BEL) terminates.
-  # width=80% scales to 80% of terminal width, preserving aspect ratio.
   printf '\033]1337;File=name=%s;size=%s;inline=1;width=80%%:%s\a' \
     "$name_b64" "$size" "$image_b64" > "$target"
+}
+
+# ── Kitty Display (APC graphics protocol) ──────────────────────────────
+
+# Read base64 lines from stdin and emit Kitty APC escape sequences.
+# First line gets metadata (a=T,f=100); all but last sent with m=1; final m=0.
+_kitty_emit_chunks() {
+  local first=1
+  local metadata
+
+  while IFS= read -r chunk; do
+    [[ -z "$chunk" ]] && continue
+    if [[ "$first" -eq 1 ]]; then
+      metadata="a=T,f=100,"
+      first=0
+    else
+      metadata=""
+    fi
+    printf '\033_G%sm=1;%s\033\\' "$metadata" "$chunk"
+  done
+
+  # Final m=0 signals end of transmission
+  if [[ "$first" -eq 0 ]]; then
+    printf '\033_Gm=0;\033\\'
+  fi
+}
+
+# Send base64-encoded image data as chunked Kitty graphics sequences.
+# Encodes the file, strips line breaks, then re-chunks to 4096 bytes.
+_kitty_send_chunked() {
+  local filepath="$1"
+  local encoded
+  encoded=$(base64 < "$filepath" | tr -d '\n')
+  printf '%s\n' "$encoded" | fold -b -w 4096 | _kitty_emit_chunks
+}
+
+# Displays an image using the Kitty graphics protocol.
+# Usage: display_image_kitty <file_path>
+display_image_kitty() {
+  local filepath="$1"
+
+  if [[ -z "$filepath" ]]; then
+    echo "display_image_kitty: missing filepath argument" >&2
+    return 1
+  fi
+
+  if [[ ! -f "$filepath" ]]; then
+    echo "display_image_kitty: file not found: $filepath" >&2
+    return 1
+  fi
+
+  local target="${DISPLAY_IMAGE_TARGET:-/dev/tty}"
+  _kitty_send_chunked "$filepath" > "$target"
+}
+
+# ── Sixel Display ──────────────────────────────────────────────────────
+
+# Displays an image using the Sixel protocol.
+# Requires img2sixel, chafa, or ImageMagick (magick).
+# Usage: display_image_sixel <file_path> [max_width]
+display_image_sixel() {
+  local filepath="$1"
+  local max_width="${2:-800}"
+  local target="${DISPLAY_IMAGE_TARGET:-/dev/tty}"
+
+  if [[ -z "$filepath" ]]; then
+    echo "Usage: display_image_sixel <filepath> [max_width]" >&2
+    return 1
+  fi
+
+  if [[ ! -f "$filepath" ]]; then
+    echo "Error: File not found: $filepath" >&2
+    return 1
+  fi
+
+  local tool
+  tool=$(_sixel_find_tool) || {
+    echo "Error: No sixel conversion tool found." >&2
+    echo "Install one of: libsixel (img2sixel), chafa, or ImageMagick 7 (magick)" >&2
+    return 1
+  }
+
+  local exit_code=0
+  case "$tool" in
+    img2sixel)
+      img2sixel --width="$max_width" "$filepath" > "$target" || exit_code=$?
+      ;;
+    chafa)
+      chafa --format=sixels --size="${max_width}x" "$filepath" > "$target" || exit_code=$?
+      ;;
+    magick)
+      magick "$filepath" -geometry "${max_width}x>" sixel:- > "$target" || exit_code=$?
+      ;;
+  esac
+
+  if [[ $exit_code -ne 0 ]]; then
+    echo "Error: $tool failed to convert '$filepath' to sixel (exit code: $exit_code)" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# ── Tmux Pane Display ──────────────────────────────────────────────────
+
+# Locates the imgcat binary for iTerm2 inline image display.
+find_imgcat() {
+  local paths=(
+    "${HOME}/.iterm2/imgcat"
+    "/usr/local/bin/imgcat"
+    "/opt/homebrew/bin/imgcat"
+  )
+  for p in "${paths[@]}"; do
+    [[ -x "$p" ]] && echo "$p" && return 0
+  done
+  command -v imgcat 2>/dev/null && return 0
+  return 1
+}
+
+# Opens a tmux split pane that displays an image and closes on keypress.
+# Usage: display_image_in_pane <file_path>
+display_image_in_pane() {
+  local file_path="$1"
+
+  if ! is_tmux; then
+    echo "Not inside tmux, cannot open display pane" >&2
+    return 1
+  fi
+
+  # Resolve to absolute path
+  if [[ "$file_path" != /* ]]; then
+    file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
+  fi
+
+  if [[ ! -f "$file_path" ]]; then
+    echo "File not found: $file_path" >&2
+    return 1
+  fi
+
+  local terminal
+  terminal=$(get_outer_terminal) || true
+
+  local display_cmd
+  case "$terminal" in
+    iterm2)
+      local imgcat_path
+      imgcat_path=$(find_imgcat) || {
+        echo "imgcat not found, cannot display image" >&2
+        return 1
+      }
+      display_cmd="$(printf '%q' "$imgcat_path") -W 80% $(printf '%q' "$file_path")"
+      ;;
+    kitty)
+      display_cmd="kitten icat --align left $(printf '%q' "$file_path")"
+      ;;
+    *)
+      # Fallback: try sixel if a conversion tool is available
+      local sixel_tool
+      if sixel_tool=$(_sixel_find_tool 2>/dev/null); then
+        case "$sixel_tool" in
+          img2sixel) display_cmd="img2sixel --width=800 $(printf '%q' "$file_path")" ;;
+          chafa)     display_cmd="chafa --format=sixels --size=800x $(printf '%q' "$file_path")" ;;
+          magick)    display_cmd="magick $(printf '%q' "$file_path") -geometry 800x\\> sixel:-" ;;
+        esac
+      else
+        display_cmd="echo 'No inline image protocol detected'; echo 'Image saved to: $(printf '%q' "$file_path")'"
+      fi
+      ;;
+  esac
+
+  local filename
+  filename=$(basename "$file_path")
+  local safe_filename
+  safe_filename=$(printf '%q' "$filename")
+
+  # tmux split-window runs the command in the user's default shell.
+  # The pane shows the image and waits for a keypress before closing.
+  tmux split-window -v -l '40%' \
+    "echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; read -n1 -s -r -p 'Press any key to close'"
+}
+
+# ── Main Entry Point ───────────────────────────────────────────────────
+
+# Displays an image using the best available method.
+# In tmux: opens a split pane with the image (works inside Claude Code).
+# Otherwise: writes escape sequences directly (iTerm2 > Kitty > Sixel).
+# Usage: display_image <file_path>
+display_image() {
+  local file_path="$1"
+
+  if [[ ! -f "$file_path" ]]; then
+    return 0
+  fi
+
+  # In tmux: use pane display (works even when stdout/stderr is captured)
+  if is_tmux; then
+    display_image_in_pane "$file_path"
+    return $?
+  fi
+
+  # Direct terminal display: try protocols in priority order
+  local target="${DISPLAY_IMAGE_TARGET:-/dev/tty}"
+
+  if [[ "$target" == "/dev/tty" && ! -w /dev/tty ]]; then
+    return 0
+  fi
+
+  if is_iterm2; then
+    display_image_iterm2 "$file_path"
+  elif is_kitty; then
+    display_image_kitty "$file_path"
+  elif is_sixel_capable; then
+    display_image_sixel "$file_path"
+  fi
 }

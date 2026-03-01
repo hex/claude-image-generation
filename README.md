@@ -9,7 +9,8 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **Parallel generation** using multiple providers simultaneously via Task tool
 - **Interactive provider selection** via AskUserQuestion at runtime
 - **Session start check** that reports which API keys are configured
-- **iTerm2 inline preview** -- generated images display directly in the terminal when running in iTerm2
+- **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
+- **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code)
 
 ## Installation
 
@@ -248,7 +249,7 @@ bash scripts/xai.sh \
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
-| Display utility | `scripts/display.sh` | iTerm2 inline image display via OSC 1337 |
+| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 
 ## Development
@@ -283,7 +284,19 @@ scripts/                       -- Shell scripts for API calls
 tests/                         -- Automated tests (bats)
 ```
 
-The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs that handle API communication, base64 encoding/decoding, and error reporting. They are invoked by the command, agent, and skill layers. All three source `display.sh` to show generated images inline when running in iTerm2.
+The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs that handle API communication, base64 encoding/decoding, and error reporting. They are invoked by the command, agent, and skill layers. All three source `display.sh` which auto-detects the terminal and displays generated images using the best available method.
+
+### Terminal Image Display
+
+| Terminal | Protocol | Detection |
+|----------|----------|-----------|
+| iTerm2 | OSC 1337 | `TERM_PROGRAM`, `LC_TERMINAL` |
+| Kitty | Kitty graphics | `TERM=xterm-kitty` |
+| Ghostty | Kitty graphics | `TERM_PROGRAM=ghostty` |
+| WezTerm | Kitty graphics | `TERM_PROGRAM=WezTerm` |
+| Sixel terminals | Sixel (via img2sixel/chafa/magick) | Tool + terminal detection |
+
+When running inside **tmux** (including Claude Code sessions), images are displayed in a split pane that closes on keypress. The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal.
 
 ## Requirements
 
@@ -291,6 +304,10 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 - `jq` -- JSON construction and parsing
 - `base64` -- Image data encoding/decoding (included in macOS and most Linux distributions)
 - At least one API key: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, or `GROK_API_KEY`
+
+**Optional (for Sixel image display):**
+- `img2sixel` (from libsixel), `chafa`, or `magick` (ImageMagick 7) -- any one of these enables Sixel terminal display
+- Install via: `brew install libsixel`, `brew install chafa`, or `brew install imagemagick`
 
 ## License
 

@@ -1,13 +1,19 @@
-# ABOUTME: Bats tests for display.sh iTerm2 inline image display utility.
-# ABOUTME: Tests terminal detection and escape sequence generation.
+# ABOUTME: Bats tests for display.sh multi-protocol terminal image display.
+# ABOUTME: Tests iTerm2, Kitty, Sixel detection and tmux pane integration.
 
 setup() {
   load test_helper
   DISPLAY_SH="${PLUGIN_ROOT}/scripts/display.sh"
-  # Clear iTerm2 env vars by default
+  # Clear all terminal detection env vars to start clean
   unset TERM_PROGRAM 2>/dev/null || true
   unset LC_TERMINAL 2>/dev/null || true
   unset ITERM_SESSION_ID 2>/dev/null || true
+  unset TMUX 2>/dev/null || true
+  unset KITTY_WINDOW_ID 2>/dev/null || true
+  unset WEZTERM_EXECUTABLE 2>/dev/null || true
+  # Save and override TERM to prevent false Kitty detection
+  ORIG_TERM="${TERM:-}"
+  export TERM="xterm-256color"
   # Redirect display output to a temp file for inspection
   DISPLAY_OUTPUT="${BATS_TMPDIR}/display_output_$$"
   export DISPLAY_IMAGE_TARGET="$DISPLAY_OUTPUT"
@@ -15,6 +21,9 @@ setup() {
 
 teardown() {
   rm -f "$DISPLAY_OUTPUT" 2>/dev/null || true
+  if [[ -n "${ORIG_TERM:-}" ]]; then
+    export TERM="$ORIG_TERM"
+  fi
 }
 
 # --- is_iterm2 detection ---
@@ -48,23 +57,90 @@ teardown() {
   assert_status 1
 }
 
-# --- display_image function ---
+# --- is_kitty detection ---
 
-@test "display: display_image is a no-op when not in iTerm2" {
+@test "display: is_kitty returns true when TERM=xterm-kitty" {
   source "$DISPLAY_SH"
-  unset TERM_PROGRAM 2>/dev/null || true
-  unset LC_TERMINAL 2>/dev/null || true
-
-  local test_img="${BATS_TMPDIR}/test_img_$$.png"
-  printf 'fake-png-data' > "$test_img"
-
-  display_image "$test_img"
-
-  # Output target file should not exist (nothing written)
-  [[ ! -f "$DISPLAY_OUTPUT" ]]
+  export TERM="xterm-kitty"
+  run is_kitty
+  assert_status 0
 }
 
-@test "display: display_image writes escape sequence in iTerm2" {
+@test "display: is_kitty returns true when TERM_PROGRAM=ghostty" {
+  source "$DISPLAY_SH"
+  export TERM_PROGRAM="ghostty"
+  run is_kitty
+  assert_status 0
+}
+
+@test "display: is_kitty returns true when TERM_PROGRAM=WezTerm" {
+  source "$DISPLAY_SH"
+  export TERM_PROGRAM="WezTerm"
+  run is_kitty
+  assert_status 0
+}
+
+@test "display: is_kitty returns false for non-kitty terminals" {
+  source "$DISPLAY_SH"
+  export TERM="xterm-256color"
+  export TERM_PROGRAM="iTerm.app"
+  run is_kitty
+  assert_status 1
+}
+
+# --- is_tmux detection ---
+
+@test "display: is_tmux returns true when TMUX is set" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  run is_tmux
+  assert_status 0
+}
+
+@test "display: is_tmux returns false when TMUX is unset" {
+  source "$DISPLAY_SH"
+  unset TMUX 2>/dev/null || true
+  run is_tmux
+  assert_status 1
+}
+
+# --- get_outer_terminal ---
+
+@test "display: get_outer_terminal returns iterm2 for LC_TERMINAL=iTerm2" {
+  source "$DISPLAY_SH"
+  export LC_TERMINAL="iTerm2"
+  run get_outer_terminal
+  assert_status 0
+  assert_output_contains "iterm2"
+}
+
+@test "display: get_outer_terminal returns iterm2 for ITERM_SESSION_ID" {
+  source "$DISPLAY_SH"
+  export ITERM_SESSION_ID="w0t0p0:SOME-UUID"
+  run get_outer_terminal
+  assert_status 0
+  assert_output_contains "iterm2"
+}
+
+@test "display: get_outer_terminal returns kitty for KITTY_WINDOW_ID" {
+  source "$DISPLAY_SH"
+  export KITTY_WINDOW_ID="1"
+  run get_outer_terminal
+  assert_status 0
+  assert_output_contains "kitty"
+}
+
+@test "display: get_outer_terminal returns unknown when nothing detected" {
+  source "$DISPLAY_SH"
+  unset LC_TERMINAL ITERM_SESSION_ID KITTY_WINDOW_ID 2>/dev/null || true
+  run get_outer_terminal
+  assert_status 1
+  assert_output_contains "unknown"
+}
+
+# --- display_image iTerm2 path (non-tmux) ---
+
+@test "display: display_image writes iTerm2 escape sequence" {
   source "$DISPLAY_SH"
   export TERM_PROGRAM="iTerm.app"
 
@@ -73,11 +149,7 @@ teardown() {
 
   display_image "$test_img"
 
-  # Verify escape sequence was written
   [[ -f "$DISPLAY_OUTPUT" ]]
-  local content
-  content=$(cat "$DISPLAY_OUTPUT")
-  # Should contain the iTerm2 protocol marker
   assert_output_contains_file "$DISPLAY_OUTPUT" "1337;File="
 }
 
@@ -102,7 +174,6 @@ teardown() {
 
   display_image "$test_img"
 
-  # "myimage.png" in base64 is "bXlpbWFnZS5wbmc="
   local expected_name
   expected_name=$(printf 'myimage.png' | base64 | tr -d '\n')
   assert_output_contains_file "$DISPLAY_OUTPUT" "name=${expected_name}"
@@ -140,4 +211,121 @@ teardown() {
 
   [[ -f "$DISPLAY_OUTPUT" ]]
   assert_output_contains_file "$DISPLAY_OUTPUT" "1337;File="
+}
+
+# --- display_image Kitty path (non-tmux) ---
+
+@test "display: display_image writes Kitty escape sequence for xterm-kitty" {
+  source "$DISPLAY_SH"
+  export TERM="xterm-kitty"
+
+  local test_img="${BATS_TMPDIR}/test_kitty_$$.png"
+  printf 'kitty-test-data' > "$test_img"
+
+  display_image "$test_img"
+
+  [[ -f "$DISPLAY_OUTPUT" ]]
+  # Kitty protocol uses APC escape with a=T,f=100 metadata
+  assert_output_contains_file "$DISPLAY_OUTPUT" "a=T,f=100,"
+}
+
+@test "display: display_image writes Kitty escape for Ghostty" {
+  source "$DISPLAY_SH"
+  export TERM_PROGRAM="ghostty"
+
+  local test_img="${BATS_TMPDIR}/test_ghostty_$$.png"
+  printf 'ghostty-data' > "$test_img"
+
+  display_image "$test_img"
+
+  [[ -f "$DISPLAY_OUTPUT" ]]
+  assert_output_contains_file "$DISPLAY_OUTPUT" "a=T,f=100,"
+}
+
+# --- display_image no-op when no protocol available ---
+
+@test "display: display_image is a no-op when no terminal detected" {
+  source "$DISPLAY_SH"
+  unset TERM_PROGRAM 2>/dev/null || true
+  unset LC_TERMINAL 2>/dev/null || true
+  unset TMUX 2>/dev/null || true
+  export TERM="xterm-256color"
+
+  local test_img="${BATS_TMPDIR}/test_noop_$$.png"
+  printf 'fake-png-data' > "$test_img"
+
+  display_image "$test_img"
+
+  # Output target file should not exist (nothing written)
+  [[ ! -f "$DISPLAY_OUTPUT" ]]
+}
+
+# --- Protocol priority ---
+
+@test "display: iTerm2 takes priority over Kitty when both detected" {
+  source "$DISPLAY_SH"
+  # Set both iTerm2 and Kitty indicators
+  export TERM_PROGRAM="iTerm.app"
+  export TERM="xterm-kitty"
+
+  local test_img="${BATS_TMPDIR}/test_priority_$$.png"
+  printf 'priority-test' > "$test_img"
+
+  display_image "$test_img"
+
+  [[ -f "$DISPLAY_OUTPUT" ]]
+  # Should use iTerm2 protocol (OSC 1337), not Kitty (APC)
+  assert_output_contains_file "$DISPLAY_OUTPUT" "1337;File="
+}
+
+# --- display_image_kitty directly ---
+
+@test "display: display_image_kitty sends chunked data with m=0 terminator" {
+  source "$DISPLAY_SH"
+
+  local test_img="${BATS_TMPDIR}/test_kitty_chunks_$$.png"
+  printf 'small-data' > "$test_img"
+
+  display_image_kitty "$test_img"
+
+  [[ -f "$DISPLAY_OUTPUT" ]]
+  # Final chunk should have m=0 to signal end of transmission
+  assert_output_contains_file "$DISPLAY_OUTPUT" "m=0;"
+}
+
+@test "display: display_image_kitty skips nonexistent file" {
+  source "$DISPLAY_SH"
+
+  run display_image_kitty "/tmp/no_such_file_$$.png"
+  assert_status 1
+}
+
+# --- display_image_sixel directly ---
+
+@test "display: display_image_sixel fails gracefully with nonexistent file" {
+  source "$DISPLAY_SH"
+
+  run display_image_sixel "/tmp/no_such_file_$$.png"
+  assert_status 1
+  assert_output_contains "File not found"
+}
+
+# --- display_image_in_pane ---
+
+@test "display: display_image_in_pane fails when not in tmux" {
+  source "$DISPLAY_SH"
+  unset TMUX 2>/dev/null || true
+
+  run display_image_in_pane "/tmp/some_image.png"
+  assert_status 1
+  assert_output_contains "Not inside tmux"
+}
+
+@test "display: display_image_in_pane fails for nonexistent file" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+
+  run display_image_in_pane "/tmp/no_such_file_$$.png"
+  assert_status 1
+  assert_output_contains "File not found"
 }
