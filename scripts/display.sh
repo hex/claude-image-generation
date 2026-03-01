@@ -455,25 +455,26 @@ display_images_in_pane() {
 
     if [[ -n "$imgcat_path" ]]; then
       local width_pct=$(( 100 / ${#resolved[@]} ))
-      local col_cells  # will be computed at runtime in the pane
+      local last_idx=$(( ${#resolved[@]} - 1 ))
+      local idx=0
 
-      for i in "${!resolved[@]}"; do
-        local fp="${resolved[$i]}"
+      for fp in "${resolved[@]}"; do
         local fname safe_fname safe_fp
         fname=$(basename "$fp")
         safe_fname=$(printf '%q' "$fname")
         safe_fp=$(printf '%q' "$fp")
 
-        if [[ $i -eq 0 ]]; then
+        if [[ $idx -eq 0 ]]; then
           # First image: save cursor, display, restore cursor, move right
           display_cmd+="echo --- ${safe_fname} ---; tput sc; $(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_fp}; tput rc; tput cuf \$(( \$(tput cols) * ${width_pct} / 100 )); "
-        elif [[ $i -eq $(( ${#resolved[@]} - 1 )) ]]; then
+        elif [[ $idx -eq $last_idx ]]; then
           # Last image: display without cursor tricks (let cursor flow down)
           display_cmd+="tput sc; echo --- ${safe_fname} ---; $(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_fp}; tput rc; tput cud \$(tput lines); echo; "
         else
           # Middle image: save, display, restore, move right
           display_cmd+="echo --- ${safe_fname} ---; tput sc; $(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_fp}; tput rc; tput cuf \$(( \$(tput cols) * ${width_pct} / 100 )); "
         fi
+        idx=$(( idx + 1 ))
       done
     else
       # No imgcat: fall back to vertical stacking
