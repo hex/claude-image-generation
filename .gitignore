@@ -1,25 +1,14 @@
-# Session metadata
+# Local plugin overrides
+.claude/*.local.md
+
+# Session data (cs tooling)
 .cs/
-AGENTS.md
-
-# Transient files
-*.lock
-*.tmp
-*.bak
-
-# Archives (large, regenerated from artifacts)
-.cs/archives/
-
-# Session cooldown markers
-.cs/.discoveries-reminder-cooldown
+CLAUDE.md
 
 # OS files
 .DS_Store
-Thumbs.db
 
 # Editor files
-.vscode/
-.idea/
 *.swp
 *.swo
 *~
