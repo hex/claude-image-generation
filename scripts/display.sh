@@ -410,7 +410,11 @@ _build_image_cmd() {
   printf '%s' "$cmd"
 }
 
-# Opens a tmux pane displaying multiple images with labels.
+# Opens a tmux pane displaying multiple images side-by-side.
+# For a single image, delegates to display_image_in_pane.
+# For multiple images, creates horizontal splits so images appear
+# side-by-side. The first pane handles keyboard input and cleans
+# up sibling panes on exit.
 # Usage: display_images_in_pane <file1> <file2> [...]
 display_images_in_pane() {
   local files=("$@")
@@ -425,49 +429,72 @@ display_images_in_pane() {
     return 1
   fi
 
-  # Scale pane height for more images.
-  # A 256px image takes ~16 terminal lines, so panes need to be large.
-  local pane_height="50%"
-  if [[ $count -ge 3 ]]; then
-    pane_height="85%"
-  elif [[ $count -eq 2 ]]; then
-    pane_height="75%"
+  # Resolve paths and filter out nonexistent files
+  local resolved=()
+  for file_path in "${files[@]}"; do
+    if [[ "$file_path" != /* ]]; then
+      file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
+    fi
+    if [[ -f "$file_path" ]]; then
+      resolved+=("$file_path")
+    fi
+  done
+  count=${#resolved[@]}
+
+  if [[ $count -eq 0 ]]; then
+    return 0
+  fi
+
+  # Single image: use the standard single-pane display
+  if [[ $count -eq 1 ]]; then
+    display_image_in_pane "${resolved[0]}"
+    return $?
   fi
 
   local terminal
   terminal=$(get_outer_terminal) || true
 
-  local display_cmd=""
-  local finder_cmd=""
-  local preview_cmd=""
-  for file_path in "${files[@]}"; do
-    # Resolve to absolute path
-    if [[ "$file_path" != /* ]]; then
-      file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
-    fi
-    if [[ ! -f "$file_path" ]]; then
-      continue
-    fi
-
-    display_cmd+=$(_build_image_cmd "$file_path" "$terminal")
-
+  # Build finder/preview commands for all images
+  local finder_cmd="" preview_cmd=""
+  for file_path in "${resolved[@]}"; do
     local safe_path
     safe_path=$(printf '%q' "$file_path")
     finder_cmd+="open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
     preview_cmd+="open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
   done
 
-  if [[ -z "$display_cmd" ]]; then
-    return 0
-  fi
-
   local -a target_args=()
   if [[ -n "${TMUX_PANE:-}" ]]; then
     target_args=(-t "$TMUX_PANE")
   fi
 
-  tmux split-window -v -l "$pane_height" "${target_args[@]}" \
-    "bash -c '_esc=\$(printf \"\\033\"); ${display_cmd}printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi; done'"
+  # Temp file for sibling pane IDs (first pane reads this for cleanup)
+  local pane_ids_file
+  pane_ids_file=$(mktemp "${TMPDIR:-/tmp}/display_panes.XXXXXX")
+
+  # Build display command for image 1 (includes keyboard handler + cleanup)
+  local img1_cmd
+  img1_cmd=$(_build_image_cmd "${resolved[0]}" "$terminal")
+
+  # First pane: vertical split from originating pane, displays image 1,
+  # waits for siblings to register, then runs the keyboard loop.
+  # On exit, kills all sibling panes listed in the temp file.
+  local first_pane
+  first_pane=$(tmux split-window -v -l '80%' "${target_args[@]}" \
+    -P -F '#{pane_id}' \
+    "bash -c '_esc=\$(printf \"\\033\"); ${img1_cmd}sleep 0.5; _panes=\$(cat ${pane_ids_file} 2>/dev/null); printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi; done; for _p in \$_panes; do tmux kill-pane -t \$_p 2>/dev/null; done; rm -f ${pane_ids_file}'")
+
+  # Sibling panes: horizontal splits from the first pane, each displaying
+  # one image and blocking until killed.
+  for ((i = 1; i < count; i++)); do
+    local imgN_cmd
+    imgN_cmd=$(_build_image_cmd "${resolved[$i]}" "$terminal")
+    local sibling_id
+    sibling_id=$(tmux split-window -h -t "$first_pane" \
+      -P -F '#{pane_id}' \
+      "bash -c '${imgN_cmd}sleep infinity'")
+    echo "$sibling_id" >> "$pane_ids_file"
+  done
 }
 
 # Displays multiple images using the best available method.

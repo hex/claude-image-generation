@@ -506,8 +506,8 @@ teardown() {
 
   local mock_dir="${BATS_TMPDIR}/mock_grid_full_$$"
   mkdir -p "$mock_dir"
-  local args_file="${mock_dir}/tmux_args"
-  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  local calls_file="${mock_dir}/tmux_calls"
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s"\necho "%%%%$((RANDOM %% 100))"\n' "$calls_file" > "$mock_dir/tmux"
   printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
   chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
   export PATH="$mock_dir:$PATH"
@@ -519,23 +519,23 @@ teardown() {
 
   display_images_in_pane "$img1" "$img2"
 
-  [[ -f "$args_file" ]]
+  [[ -f "$calls_file" ]]
   local captured
-  captured=$(cat "$args_file")
+  captured=$(cat "$calls_file")
   # Both images should use full 256px, not scaled down (e.g., 115px)
   [[ "$captured" == *"256px"* ]] || {
     echo "Expected grid images to use full 256px width"
-    echo "Actual args: $captured"
+    echo "Actual calls: $captured"
     return 1
   }
   [[ "$captured" != *"115px"* ]] || {
     echo "Grid should not scale down to 115px (45% of 256)"
-    echo "Actual args: $captured"
+    echo "Actual calls: $captured"
     return 1
   }
 }
 
-@test "display: display_images_in_pane includes all filenames in command" {
+@test "display: display_images_in_pane includes all filenames across panes" {
   source "$DISPLAY_SH"
   export TMUX="/tmp/tmux-501/default,12345,0"
   export TMUX_PANE="%5"
@@ -543,8 +543,8 @@ teardown() {
 
   local mock_dir="${BATS_TMPDIR}/mock_grid_$$"
   mkdir -p "$mock_dir"
-  local args_file="${mock_dir}/tmux_args"
-  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  local calls_file="${mock_dir}/tmux_calls"
+  printf '#!/bin/bash\necho "$@" >> "%s"\necho "%%%%$((RANDOM %% 100))"\n' "$calls_file" > "$mock_dir/tmux"
   printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
   chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
   export PATH="$mock_dir:$PATH"
@@ -558,9 +558,9 @@ teardown() {
 
   display_images_in_pane "$img1" "$img2" "$img3"
 
-  [[ -f "$args_file" ]]
+  [[ -f "$calls_file" ]]
   local captured
-  captured=$(cat "$args_file")
+  captured=$(cat "$calls_file")
   [[ "$captured" == *"fox_"* ]] || { echo "Missing fox in: $captured"; return 1; }
   [[ "$captured" == *"cat_"* ]] || { echo "Missing cat in: $captured"; return 1; }
   [[ "$captured" == *"dog_"* ]] || { echo "Missing dog in: $captured"; return 1; }
@@ -724,6 +724,111 @@ teardown() {
   [[ "$captured" != *"any key to close"* ]] || {
     echo "Grid prompt should not say 'any key to close'"
     echo "Actual args: $captured"
+    return 1
+  }
+}
+
+@test "display: display_images_in_pane creates horizontal splits for multiple images" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_hsplit_$$"
+  mkdir -p "$mock_dir"
+  local calls_file="${mock_dir}/tmux_calls"
+  # Mock tmux: log all calls and return a fake pane ID
+  printf '#!/bin/bash\necho "$@" >> "%s"\necho "%%%%$((RANDOM %% 100))"\n' "$calls_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local img1="${BATS_TMPDIR}/hsplit_a_$$.png"
+  local img2="${BATS_TMPDIR}/hsplit_b_$$.png"
+  local img3="${BATS_TMPDIR}/hsplit_c_$$.png"
+  printf 'a' > "$img1"
+  printf 'b' > "$img2"
+  printf 'c' > "$img3"
+
+  display_images_in_pane "$img1" "$img2" "$img3"
+
+  [[ -f "$calls_file" ]]
+  local captured
+  captured=$(cat "$calls_file")
+  # First call should be vertical split (-v) for image 1
+  local first_line
+  first_line=$(head -1 "$calls_file")
+  [[ "$first_line" == *"-v"* ]] || {
+    echo "First split should be vertical (-v)"
+    echo "Actual: $first_line"
+    return 1
+  }
+  # Subsequent calls should include horizontal splits (-h) for images 2+
+  [[ "$captured" == *"-h"* ]] || {
+    echo "Expected horizontal splits (-h) for side-by-side layout"
+    echo "Actual calls: $captured"
+    return 1
+  }
+}
+
+@test "display: display_images_in_pane delegates to display_image_in_pane for single image" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_single_$$"
+  mkdir -p "$mock_dir"
+  local calls_file="${mock_dir}/tmux_calls"
+  printf '#!/bin/bash\necho "$@" >> "%s"\n' "$calls_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local img1="${BATS_TMPDIR}/single_$$.png"
+  printf 'a' > "$img1"
+
+  display_images_in_pane "$img1"
+
+  [[ -f "$calls_file" ]]
+  local captured
+  captured=$(cat "$calls_file")
+  # Single image should NOT create horizontal splits
+  [[ "$captured" != *"-h"* ]] || {
+    echo "Single image should not use horizontal splits"
+    echo "Actual: $captured"
+    return 1
+  }
+}
+
+@test "display: display_images_in_pane horizontal panes have kill-pane cleanup" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_cleanup_$$"
+  mkdir -p "$mock_dir"
+  local calls_file="${mock_dir}/tmux_calls"
+  printf '#!/bin/bash\necho "$@" >> "%s"\necho "%%%%42"\n' "$calls_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local img1="${BATS_TMPDIR}/clean_a_$$.png"
+  local img2="${BATS_TMPDIR}/clean_b_$$.png"
+  printf 'a' > "$img1"
+  printf 'b' > "$img2"
+
+  display_images_in_pane "$img1" "$img2"
+
+  [[ -f "$calls_file" ]]
+  local captured
+  captured=$(cat "$calls_file")
+  # The first pane's command should include kill-pane for cleanup
+  [[ "$captured" == *"kill-pane"* ]] || {
+    echo "Expected kill-pane cleanup in primary pane command"
+    echo "Actual calls: $captured"
     return 1
   }
 }
