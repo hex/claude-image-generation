@@ -308,7 +308,7 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 | WezTerm | Kitty graphics | `TERM_PROGRAM=WezTerm` |
 | Sixel terminals | Sixel (via img2sixel/chafa/magick) | Tool + terminal detection |
 
-When running inside **tmux** (including Claude Code sessions), images are displayed in a split pane targeting the originating pane (via `$TMUX_PANE`). The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
+When running inside **tmux** (including Claude Code sessions), single images open in a bottom pane (`-v` split) and multiple images open in a vertical side pane (`-h` split, 30% width) targeting the originating pane (via `$TMUX_PANE`). The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
 
 For parallel generation, use `SKIP_DISPLAY=1` per provider script, then call `display_images` to show all results stacked in a vertical side pane.
 
