@@ -490,6 +490,93 @@ teardown() {
   [[ "$captured" != *"nonexistent_"* ]] || { echo "Should not contain nonexistent file"; return 1; }
 }
 
+# --- open_in_viewer ---
+
+@test "display: open_in_viewer uses open on macOS" {
+  source "$DISPLAY_SH"
+
+  local mock_dir="${BATS_TMPDIR}/mock_open_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/open_args"
+  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/open"
+  chmod +x "$mock_dir/open"
+  export PATH="$mock_dir:$PATH"
+
+  open_in_viewer "/tmp/test.png"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"/tmp/test.png"* ]] || {
+    echo "Expected open to receive /tmp/test.png, got: $captured"
+    return 1
+  }
+}
+
+@test "display: open_in_viewer uses xdg-open as fallback" {
+  source "$DISPLAY_SH"
+
+  local mock_dir="${BATS_TMPDIR}/mock_xdg_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/xdg_args"
+  # xdg-open available, but NOT open (exclude /usr/bin where macOS open lives)
+  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/xdg-open"
+  chmod +x "$mock_dir/xdg-open"
+  export PATH="$mock_dir:/bin"
+
+  open_in_viewer "/tmp/test.png"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"/tmp/test.png"* ]] || {
+    echo "Expected xdg-open to receive /tmp/test.png, got: $captured"
+    return 1
+  }
+}
+
+@test "display: open_in_viewer fails when no viewer available" {
+  source "$DISPLAY_SH"
+
+  # Neither open nor xdg-open available (exclude /usr/bin)
+  local mock_dir="${BATS_TMPDIR}/mock_empty_$$"
+  mkdir -p "$mock_dir"
+  export PATH="$mock_dir:/bin"
+
+  run open_in_viewer "/tmp/test.png"
+  assert_status 1
+  assert_output_contains "No system viewer available"
+}
+
+@test "display: display_image_in_pane prompt includes viewer instruction" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%0"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_viewer_prompt_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local test_img="${BATS_TMPDIR}/test_viewer_prompt_$$.png"
+  printf 'test-data' > "$test_img"
+
+  display_image_in_pane "$test_img"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"open in viewer"* ]] || {
+    echo "Expected prompt to mention 'open in viewer'"
+    echo "Actual args: $captured"
+    return 1
+  }
+}
+
 @test "display: display_image_in_pane works without TMUX_PANE" {
   source "$DISPLAY_SH"
   export TMUX="/tmp/tmux-501/default,12345,0"

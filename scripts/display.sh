@@ -101,6 +101,22 @@ is_sixel_capable() {
   _sixel_find_tool &>/dev/null && _sixel_check_terminal
 }
 
+# ── System Viewer ─────────────────────────────────────────────────────
+
+# Opens a file in the system's default viewer.
+# Uses `open` on macOS, `xdg-open` on Linux.
+open_in_viewer() {
+  local file_path="$1"
+  if command -v open &>/dev/null; then
+    open "$file_path"
+  elif command -v xdg-open &>/dev/null; then
+    xdg-open "$file_path"
+  else
+    echo "No system viewer available (tried: open, xdg-open)" >&2
+    return 1
+  fi
+}
+
 # ── iTerm2 Display (OSC 1337) ─────────────────────────────────────────
 
 # Displays an image using the iTerm2 inline image protocol.
@@ -296,8 +312,11 @@ display_image_in_pane() {
   # has switched to a different tmux window/tab.
   local target_pane="${TMUX_PANE:-}"
 
+  local safe_path
+  safe_path=$(printf '%q' "$file_path")
+
   tmux split-window -v -l '40%' ${target_pane:+-t "$target_pane"} \
-    "bash -c 'echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; read -n1 -s -r -p \"Press any key to close\"'"
+    "bash -c 'echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; read -n1 -s -r -p \"Press o to open in viewer, any key to close\" _key; if [ \"\$_key\" = \"o\" ] || [ \"\$_key\" = \"O\" ]; then if command -v open >/dev/null 2>&1; then open ${safe_path}; elif command -v xdg-open >/dev/null 2>&1; then xdg-open ${safe_path}; fi; fi'"
 }
 
 # ── Main Entry Point ───────────────────────────────────────────────────
@@ -422,6 +441,7 @@ display_images_in_pane() {
   terminal=$(get_outer_terminal) || true
 
   local display_cmd=""
+  local open_cmd=""
   for file_path in "${files[@]}"; do
     # Resolve to absolute path
     if [[ "$file_path" != /* ]]; then
@@ -432,6 +452,10 @@ display_images_in_pane() {
     fi
 
     display_cmd+=$(_build_image_cmd "$file_path" "$width_pct" "$terminal")
+
+    local safe_path
+    safe_path=$(printf '%q' "$file_path")
+    open_cmd+="if command -v open >/dev/null 2>&1; then open ${safe_path}; elif command -v xdg-open >/dev/null 2>&1; then xdg-open ${safe_path}; fi; "
   done
 
   if [[ -z "$display_cmd" ]]; then
@@ -441,7 +465,7 @@ display_images_in_pane() {
   local target_pane="${TMUX_PANE:-}"
 
   tmux split-window -v -l "$pane_height" ${target_pane:+-t "$target_pane"} \
-    "bash -c '${display_cmd}read -n1 -s -r -p \"Press any key to close\"'"
+    "bash -c '${display_cmd}read -n1 -s -r -p \"Press o to open in viewer, any key to close\" _key; if [ \"\$_key\" = \"o\" ] || [ \"\$_key\" = \"O\" ]; then ${open_cmd}fi'"
 }
 
 # Displays multiple images using the best available method.
