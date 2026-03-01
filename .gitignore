@@ -1,5 +1,5 @@
-# Local plugin overrides
-.claude/*.local.md
+# Local Claude Code configuration
+.claude/
 
 # Session data (cs tooling)
 .cs/
