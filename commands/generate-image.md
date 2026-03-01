@@ -48,7 +48,17 @@ Generate or edit an image based on the user's request.
    b. Mark all in_progress with TaskUpdate
    c. Launch Task subagents in parallel (subagent_type: Bash), each running one script.
       Use different output filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`).
+      Set `SKIP_DISPLAY=1` to suppress per-script display panes:
+      ```bash
+      SKIP_DISPLAY=1 bash "${CLAUDE_PLUGIN_ROOT}/scripts/<provider>.sh" \
+        --mode <generate|edit> --prompt "<prompt>" --output "<output-path>"
+      ```
    d. As each subagent returns, mark its corresponding task completed (or note the error)
+   e. After all providers complete, show all results in a grid view:
+      ```bash
+      source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh"
+      display_images "image-gemini.png" "image-openai.png" "image-xai.png"
+      ```
 
 5. After generation completes, confirm the output path(s) to the user.
    If multiple were generated, let the user know all files are available so they can compare.

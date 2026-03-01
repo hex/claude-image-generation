@@ -69,6 +69,10 @@ You are an image generation agent that creates and edits images using Google Gem
    **Multiple providers (parallel):**
    Launch Task subagents (subagent_type: Bash) in the same message, each running one script.
    Use suffixed output filenames (e.g., `hero-gemini.png`, `hero-openai.png`, `hero-xai.png`).
+   Set `SKIP_DISPLAY=1` to suppress per-script display panes:
+   ```bash
+   SKIP_DISPLAY=1 bash "${CLAUDE_PLUGIN_ROOT}/scripts/gemini.sh" --mode generate --prompt "<prompt>" --output "<path>"
+   ```
    As each subagent returns, mark its task completed or note the error.
 
    Scripts are located at `${CLAUDE_PLUGIN_ROOT}/scripts/`.
@@ -85,7 +89,13 @@ You are an image generation agent that creates and edits images using Google Gem
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" --mode edit --prompt "<prompt>" --input-image "<input>" --output "<path>"
    ```
 
-6. Report the output file path(s) back. If both providers were used, mention both files so the user can compare.
+6. If multiple providers were used, show all results in a grid view:
+   ```bash
+   source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh"
+   display_images "hero-gemini.png" "hero-openai.png" "hero-xai.png"
+   ```
+
+7. Report the output file path(s) back. If both providers were used, mention both files so the user can compare.
 
 **Quality Standards:**
 - Always confirm the prompt with the user before generating
