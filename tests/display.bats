@@ -329,3 +329,65 @@ teardown() {
   assert_status 1
   assert_output_contains "File not found"
 }
+
+# --- Pane targeting ---
+
+@test "display: display_image_in_pane targets TMUX_PANE when set" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%42"
+  export LC_TERMINAL="iTerm2"
+
+  # Create mock tmux and imgcat in isolated PATH
+  local mock_dir="${BATS_TMPDIR}/mock_pane_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local test_img="${BATS_TMPDIR}/test_pane_target_$$.png"
+  printf 'test-data' > "$test_img"
+
+  display_image_in_pane "$test_img"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"-t %42"* ]] || {
+    echo "Expected tmux args to contain '-t %42'"
+    echo "Actual args: $captured"
+    return 1
+  }
+}
+
+@test "display: display_image_in_pane works without TMUX_PANE" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  unset TMUX_PANE 2>/dev/null || true
+  export LC_TERMINAL="iTerm2"
+
+  # Create mock tmux and imgcat
+  local mock_dir="${BATS_TMPDIR}/mock_no_pane_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local test_img="${BATS_TMPDIR}/test_no_pane_$$.png"
+  printf 'test-data' > "$test_img"
+
+  display_image_in_pane "$test_img"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" != *"-t "* ]] || {
+    echo "Expected tmux args to NOT contain '-t' flag"
+    echo "Actual args: $captured"
+    return 1
+  }
+}
