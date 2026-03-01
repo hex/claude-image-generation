@@ -292,10 +292,10 @@ display_image_in_pane() {
   local safe_filename
   safe_filename=$(printf '%q' "$filename")
 
-  # tmux split-window runs the command in the user's default shell.
-  # The pane shows the image and waits for a keypress before closing.
+  # tmux split-window runs commands in sh (not bash).
+  # read -n1 is a bash extension, so we wrap with bash -c.
   tmux split-window -v -l '40%' \
-    "echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; read -n1 -s -r -p 'Press any key to close'"
+    "bash -c 'echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; read -n1 -s -r -p \"Press any key to close\"'"
 }
 
 # ── Main Entry Point ───────────────────────────────────────────────────
