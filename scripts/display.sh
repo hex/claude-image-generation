@@ -116,7 +116,7 @@ display_image_iterm2() {
   image_b64=$(base64 < "$file_path" | tr -d '\n')
 
   printf '\033]1337;File=name=%s;size=%s;inline=1;width=80%%:%s\a' \
-    "$name_b64" "$size" "$image_b64" > "$target"
+    "$name_b64" "$size" "$image_b64" >> "$target"
 }
 
 # ── Kitty Display (APC graphics protocol) ──────────────────────────────
@@ -169,7 +169,7 @@ display_image_kitty() {
   fi
 
   local target="${DISPLAY_IMAGE_TARGET:-/dev/tty}"
-  _kitty_send_chunked "$filepath" > "$target"
+  _kitty_send_chunked "$filepath" >> "$target"
 }
 
 # ── Sixel Display ──────────────────────────────────────────────────────
@@ -337,4 +337,135 @@ display_image() {
   elif is_sixel_capable; then
     display_image_sixel "$file_path"
   fi
+}
+
+# ── Multi-Image Grid Display ──────────────────────────────────────────
+
+# Builds the display command for a single image at a given width percentage.
+# Prints the command fragment to stdout.
+_build_image_cmd() {
+  local file_path="$1"
+  local width_pct="$2"
+  local terminal="$3"
+
+  local filename safe_filename safe_path
+  filename=$(basename "$file_path")
+  safe_filename=$(printf '%q' "$filename")
+  safe_path=$(printf '%q' "$file_path")
+
+  local cmd="echo '--- ${safe_filename} ---'; "
+
+  case "$terminal" in
+    iterm2)
+      local imgcat_path
+      imgcat_path=$(find_imgcat) || return 1
+      cmd+="$(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_path}; "
+      ;;
+    kitty)
+      cmd+="kitten icat --align left ${safe_path}; "
+      ;;
+    *)
+      local sixel_tool
+      if sixel_tool=$(_sixel_find_tool 2>/dev/null); then
+        local pixel_width=$((800 * width_pct / 100))
+        case "$sixel_tool" in
+          img2sixel) cmd+="img2sixel --width=${pixel_width} ${safe_path}; " ;;
+          chafa)     cmd+="chafa --format=sixels --size=${pixel_width}x ${safe_path}; " ;;
+          magick)    cmd+="magick ${safe_path} -geometry ${pixel_width}x\\> sixel:-; " ;;
+        esac
+      else
+        cmd+="echo 'Image: ${safe_path}'; "
+      fi
+      ;;
+  esac
+
+  cmd+="echo; "
+  printf '%s' "$cmd"
+}
+
+# Opens a tmux pane displaying multiple images with labels.
+# Usage: display_images_in_pane <file1> <file2> [...]
+display_images_in_pane() {
+  local files=("$@")
+  local count=${#files[@]}
+
+  if [[ $count -eq 0 ]]; then
+    return 0
+  fi
+
+  if ! is_tmux; then
+    echo "Not inside tmux, cannot open display pane" >&2
+    return 1
+  fi
+
+  # Scale width by image count so thumbnails fit
+  local width_pct
+  if [[ $count -eq 1 ]]; then
+    width_pct=80
+  elif [[ $count -eq 2 ]]; then
+    width_pct=45
+  elif [[ $count -eq 3 ]]; then
+    width_pct=30
+  else
+    width_pct=25
+  fi
+
+  # Scale pane height for more images
+  local pane_height="40%"
+  if [[ $count -ge 3 ]]; then
+    pane_height="60%"
+  elif [[ $count -eq 2 ]]; then
+    pane_height="50%"
+  fi
+
+  local terminal
+  terminal=$(get_outer_terminal) || true
+
+  local display_cmd=""
+  for file_path in "${files[@]}"; do
+    # Resolve to absolute path
+    if [[ "$file_path" != /* ]]; then
+      file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
+    fi
+    if [[ ! -f "$file_path" ]]; then
+      continue
+    fi
+
+    display_cmd+=$(_build_image_cmd "$file_path" "$width_pct" "$terminal")
+  done
+
+  if [[ -z "$display_cmd" ]]; then
+    return 0
+  fi
+
+  local target_pane="${TMUX_PANE:-}"
+
+  tmux split-window -v -l "$pane_height" ${target_pane:+-t "$target_pane"} \
+    "bash -c '${display_cmd}read -n1 -s -r -p \"Press any key to close\"'"
+}
+
+# Displays multiple images using the best available method.
+# In tmux: opens a single pane showing all images as a grid.
+# Otherwise: displays each image sequentially via escape sequences.
+# Usage: display_images <file1> <file2> [...]
+display_images() {
+  local files=("$@")
+
+  if [[ ${#files[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  if [[ "${SKIP_DISPLAY:-}" == "1" ]]; then
+    return 0
+  fi
+
+  if is_tmux; then
+    display_images_in_pane "${files[@]}"
+    return $?
+  fi
+
+  # Outside tmux: display each image sequentially
+  for file in "${files[@]}"; do
+    display_image "$file"
+  done
 }

@@ -380,6 +380,116 @@ teardown() {
   [[ ! -f "$DISPLAY_OUTPUT" ]]
 }
 
+# --- display_images (grid) ---
+
+@test "display: display_images returns 0 for empty args" {
+  source "$DISPLAY_SH"
+  run display_images
+  assert_status 0
+}
+
+@test "display: display_images delegates to display_image outside tmux" {
+  source "$DISPLAY_SH"
+  export TERM_PROGRAM="iTerm.app"
+  unset TMUX 2>/dev/null || true
+
+  local img1="${BATS_TMPDIR}/grid_a_$$.png"
+  local img2="${BATS_TMPDIR}/grid_b_$$.png"
+  printf 'data-a' > "$img1"
+  printf 'data-b' > "$img2"
+
+  display_images "$img1" "$img2"
+
+  [[ -f "$DISPLAY_OUTPUT" ]]
+  # Both images should produce iTerm2 escape sequences
+  local content
+  content=$(cat "$DISPLAY_OUTPUT")
+  local count
+  count=$(echo "$content" | grep -o "1337;File=" | wc -l | tr -d ' ')
+  [[ "$count" -eq 2 ]] || {
+    echo "Expected 2 iTerm2 sequences, got $count"
+    return 1
+  }
+}
+
+@test "display: display_images skips when SKIP_DISPLAY=1" {
+  source "$DISPLAY_SH"
+  export TERM_PROGRAM="iTerm.app"
+  export SKIP_DISPLAY="1"
+
+  local test_img="${BATS_TMPDIR}/test_skip_grid_$$.png"
+  printf 'test-data' > "$test_img"
+
+  display_images "$test_img"
+  [[ ! -f "$DISPLAY_OUTPUT" ]]
+}
+
+@test "display: display_images_in_pane fails when not in tmux" {
+  source "$DISPLAY_SH"
+  unset TMUX 2>/dev/null || true
+
+  run display_images_in_pane "/tmp/some_image.png"
+  assert_status 1
+  assert_output_contains "Not inside tmux"
+}
+
+@test "display: display_images_in_pane includes all filenames in command" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_grid_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local img1="${BATS_TMPDIR}/fox_$$.png"
+  local img2="${BATS_TMPDIR}/cat_$$.png"
+  local img3="${BATS_TMPDIR}/dog_$$.png"
+  printf 'a' > "$img1"
+  printf 'b' > "$img2"
+  printf 'c' > "$img3"
+
+  display_images_in_pane "$img1" "$img2" "$img3"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"fox_"* ]] || { echo "Missing fox in: $captured"; return 1; }
+  [[ "$captured" == *"cat_"* ]] || { echo "Missing cat in: $captured"; return 1; }
+  [[ "$captured" == *"dog_"* ]] || { echo "Missing dog in: $captured"; return 1; }
+}
+
+@test "display: display_images_in_pane skips nonexistent files" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_grid_skip_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local real_img="${BATS_TMPDIR}/real_img_$$.png"
+  printf 'data' > "$real_img"
+
+  display_images_in_pane "/tmp/nonexistent_$$.png" "$real_img"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"real_img_"* ]] || { echo "Missing real_img in: $captured"; return 1; }
+  [[ "$captured" != *"nonexistent_"* ]] || { echo "Should not contain nonexistent file"; return 1; }
+}
+
 @test "display: display_image_in_pane works without TMUX_PANE" {
   source "$DISPLAY_SH"
   export TMUX="/tmp/tmux-501/default,12345,0"
