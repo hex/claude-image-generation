@@ -131,8 +131,8 @@ display_image_iterm2() {
   size=$(wc -c < "$file_path" | tr -d ' ')
   image_b64=$(base64 < "$file_path" | tr -d '\n')
 
-  local max_w="${DISPLAY_IMAGE_WIDTH:-256}"
-  local max_h="${DISPLAY_IMAGE_HEIGHT:-256}"
+  local max_w="${DISPLAY_IMAGE_WIDTH:-512}"
+  local max_h="${DISPLAY_IMAGE_HEIGHT:-512}"
 
   printf '\033]1337;File=name=%s;size=%s;inline=1;width=%spx;height=%spx:%s\a' \
     "$name_b64" "$size" "$max_w" "$max_h" "$image_b64" >> "$target"
@@ -198,7 +198,7 @@ display_image_kitty() {
 # Usage: display_image_sixel <file_path> [max_width]
 display_image_sixel() {
   local filepath="$1"
-  local max_width="${2:-${DISPLAY_IMAGE_WIDTH:-256}}"
+  local max_width="${2:-${DISPLAY_IMAGE_WIDTH:-512}}"
   local target="${DISPLAY_IMAGE_TARGET:-/dev/tty}"
 
   if [[ -z "$filepath" ]]; then
@@ -286,7 +286,7 @@ display_image_in_pane() {
         echo "imgcat not found, cannot display image" >&2
         return 1
       }
-      local pane_width="${DISPLAY_IMAGE_WIDTH:-256}"
+      local pane_width="${DISPLAY_IMAGE_WIDTH:-512}"
       display_cmd="$(printf '%q' "$imgcat_path") -W ${pane_width}px $(printf '%q' "$file_path")"
       ;;
     kitty)
@@ -295,7 +295,7 @@ display_image_in_pane() {
     *)
       # Fallback: try sixel if a conversion tool is available
       local sixel_tool
-      local sixel_width="${DISPLAY_IMAGE_WIDTH:-256}"
+      local sixel_width="${DISPLAY_IMAGE_WIDTH:-512}"
       if sixel_tool=$(_sixel_find_tool 2>/dev/null); then
         case "$sixel_tool" in
           img2sixel) display_cmd="img2sixel --width=${sixel_width} $(printf '%q' "$file_path")" ;;
@@ -381,7 +381,7 @@ _build_image_cmd() {
   safe_path=$(printf '%q' "$file_path")
 
   local cmd="echo --- ${safe_filename} ---; "
-  local width="${DISPLAY_IMAGE_WIDTH:-256}"
+  local width="${DISPLAY_IMAGE_WIDTH:-512}"
 
   case "$terminal" in
     iterm2)
@@ -426,7 +426,6 @@ display_images_in_pane() {
   fi
 
   # Scale pane height for more images.
-  # A 256px image takes ~16 terminal lines, so panes need to be large.
   local pane_height="50%"
   if [[ $count -ge 3 ]]; then
     pane_height="85%"

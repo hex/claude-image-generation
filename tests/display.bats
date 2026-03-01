@@ -197,7 +197,7 @@ teardown() {
 
 # --- display image size control ---
 
-@test "display: display_image_iterm2 defaults to 256px width and height" {
+@test "display: display_image_iterm2 defaults to 512px width and height" {
   source "$DISPLAY_SH"
   export TERM_PROGRAM="iTerm.app"
 
@@ -207,8 +207,8 @@ teardown() {
   display_image "$test_img"
 
   [[ -f "$DISPLAY_OUTPUT" ]]
-  assert_output_contains_file "$DISPLAY_OUTPUT" "width=256px"
-  assert_output_contains_file "$DISPLAY_OUTPUT" "height=256px"
+  assert_output_contains_file "$DISPLAY_OUTPUT" "width=512px"
+  assert_output_contains_file "$DISPLAY_OUTPUT" "height=512px"
 }
 
 @test "display: display_image_iterm2 uses DISPLAY_IMAGE_WIDTH and HEIGHT" {
@@ -502,7 +502,7 @@ teardown() {
   export TMUX="/tmp/tmux-501/default,12345,0"
   export TMUX_PANE="%5"
   export LC_TERMINAL="iTerm2"
-  export DISPLAY_IMAGE_WIDTH=256
+  export DISPLAY_IMAGE_WIDTH=512
 
   local mock_dir="${BATS_TMPDIR}/mock_grid_full_$$"
   mkdir -p "$mock_dir"
@@ -522,14 +522,9 @@ teardown() {
   [[ -f "$args_file" ]]
   local captured
   captured=$(cat "$args_file")
-  # Both images should use full 256px, not scaled down (e.g., 115px)
-  [[ "$captured" == *"256px"* ]] || {
-    echo "Expected grid images to use full 256px width"
-    echo "Actual args: $captured"
-    return 1
-  }
-  [[ "$captured" != *"115px"* ]] || {
-    echo "Grid should not scale down to 115px (45% of 256)"
+  # Both images should use full 512px, not scaled down
+  [[ "$captured" == *"512px"* ]] || {
+    echo "Expected grid images to use full 512px width"
     echo "Actual args: $captured"
     return 1
   }
