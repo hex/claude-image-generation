@@ -430,8 +430,7 @@ display_images_in_pane() {
   terminal=$(get_outer_terminal) || true
 
   local display_cmd=""
-  local finder_cmd=""
-  local preview_cmd=""
+  local all_safe_paths=""
   for file_path in "${files[@]}"; do
     if [[ "$file_path" != /* ]]; then
       file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
@@ -444,9 +443,12 @@ display_images_in_pane() {
 
     local safe_path
     safe_path=$(printf '%q' "$file_path")
-    finder_cmd+="open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
-    preview_cmd+="open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
+    all_safe_paths+="${safe_path} "
   done
+
+  # Single open call with all paths (macOS), fallback to per-file xdg-open (Linux)
+  local finder_cmd="open -R ${all_safe_paths}2>/dev/null || for _f in ${all_safe_paths}; do xdg-open \"\$_f\" 2>/dev/null; done; "
+  local preview_cmd="open -a Preview ${all_safe_paths}2>/dev/null || for _f in ${all_safe_paths}; do xdg-open \"\$_f\" 2>/dev/null; done; "
 
   if [[ -z "$display_cmd" ]]; then
     return 0

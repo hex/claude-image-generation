@@ -616,6 +616,50 @@ teardown() {
   [[ "$captured" == *"beta_"* ]] || { echo "Missing beta in: $captured"; return 1; }
 }
 
+@test "display: display_images_in_pane opens all files in single preview call" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_preview_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local img1="${BATS_TMPDIR}/prev_a_$$.png"
+  local img2="${BATS_TMPDIR}/prev_b_$$.png"
+  local img3="${BATS_TMPDIR}/prev_c_$$.png"
+  printf 'a' > "$img1"
+  printf 'b' > "$img2"
+  printf 'c' > "$img3"
+
+  display_images_in_pane "$img1" "$img2" "$img3"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  # Preview should be a single 'open -a Preview' with all 3 paths, not 3 separate calls
+  local preview_count
+  preview_count=$(echo "$captured" | grep -o 'open -a Preview' | wc -l | tr -d ' ')
+  [[ "$preview_count" -eq 1 ]] || {
+    echo "Expected 1 'open -a Preview' call, got $preview_count"
+    echo "Args: $captured"
+    return 1
+  }
+  # Same for Finder: single 'open -R' call
+  local finder_count
+  finder_count=$(echo "$captured" | grep -o 'open -R' | wc -l | tr -d ' ')
+  [[ "$finder_count" -eq 1 ]] || {
+    echo "Expected 1 'open -R' call, got $finder_count"
+    echo "Args: $captured"
+    return 1
+  }
+}
+
 # --- open_in_viewer ---
 
 @test "display: open_in_viewer uses open on macOS" {
