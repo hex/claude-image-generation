@@ -310,13 +310,17 @@ display_image_in_pane() {
 
   # Target the originating pane so the split opens here even if the user
   # has switched to a different tmux window/tab.
-  local target_pane="${TMUX_PANE:-}"
+  # Uses an array to avoid zsh word-splitting issues with ${var:+...}.
+  local -a target_args=()
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    target_args=(-t "$TMUX_PANE")
+  fi
 
   local safe_path
   safe_path=$(printf '%q' "$file_path")
 
-  tmux split-window -v -l '40%' ${target_pane:+-t "$target_pane"} \
-    "bash -c 'echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; read -n1 -s -r -p \"[f]inder [p]review or any key to close\" _key; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; fi'"
+  tmux split-window -v -l '40%' "${target_args[@]}" \
+    "bash -c '_esc=\$(printf \"\\033\"); echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; fi; done'"
 }
 
 # ── Main Entry Point ───────────────────────────────────────────────────
@@ -464,10 +468,13 @@ display_images_in_pane() {
     return 0
   fi
 
-  local target_pane="${TMUX_PANE:-}"
+  local -a target_args=()
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    target_args=(-t "$TMUX_PANE")
+  fi
 
-  tmux split-window -v -l "$pane_height" ${target_pane:+-t "$target_pane"} \
-    "bash -c '${display_cmd}read -n1 -s -r -p \"[f]inder [p]review or any key to close\" _key; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi'"
+  tmux split-window -v -l "$pane_height" "${target_args[@]}" \
+    "bash -c '_esc=\$(printf \"\\033\"); ${display_cmd}printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi; done'"
 }
 
 # Displays multiple images using the best available method.

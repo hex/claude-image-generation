@@ -548,7 +548,7 @@ teardown() {
   assert_output_contains "No system viewer available"
 }
 
-@test "display: display_image_in_pane prompt includes Finder and Preview keys" {
+@test "display: display_image_in_pane prompt includes Finder, Preview, and esc close" {
   source "$DISPLAY_SH"
   export TMUX="/tmp/tmux-501/default,12345,0"
   export TMUX_PANE="%0"
@@ -577,6 +577,50 @@ teardown() {
   }
   [[ "$captured" == *"[p]review"* ]] || {
     echo "Expected prompt to mention '[p]review'"
+    echo "Actual args: $captured"
+    return 1
+  }
+  [[ "$captured" == *"esc"* ]] || {
+    echo "Expected prompt to mention 'esc'"
+    echo "Actual args: $captured"
+    return 1
+  }
+  [[ "$captured" != *"any key to close"* ]] || {
+    echo "Prompt should not say 'any key to close'"
+    echo "Actual args: $captured"
+    return 1
+  }
+}
+
+@test "display: display_images_in_pane prompt includes esc close option" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_grid_prompt_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local test_img="${BATS_TMPDIR}/test_grid_prompt_$$.png"
+  printf 'test-data' > "$test_img"
+
+  display_images_in_pane "$test_img"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"esc"* ]] || {
+    echo "Expected grid prompt to mention 'esc'"
+    echo "Actual args: $captured"
+    return 1
+  }
+  [[ "$captured" != *"any key to close"* ]] || {
+    echo "Grid prompt should not say 'any key to close'"
     echo "Actual args: $captured"
     return 1
   }
