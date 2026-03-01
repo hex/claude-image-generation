@@ -11,7 +11,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **Session start check** that reports which API keys are configured
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
 - **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code)
-- **Grid view** -- compare multiple provider results side-by-side in a single tmux pane (iTerm2) or stacked vertically (other terminals)
+- **Grid view** -- compare multiple provider results stacked in a vertical side pane
 - **Open in Finder/Preview** -- press 'f' for Finder or 'p' for Preview in the display pane
 
 ## Installation
@@ -74,7 +74,7 @@ Control the terminal image display dimensions (in pixels):
 | `DISPLAY_IMAGE_WIDTH` | `512` | Max image width in pixels for terminal display |
 | `DISPLAY_IMAGE_HEIGHT` | `512` | Max image height in pixels for iTerm2 display |
 
-These apply to inline display (iTerm2, Sixel) and single-image tmux pane display. Grid view uses percentage widths on iTerm2 for side-by-side layout.
+These apply to inline display (iTerm2, Sixel) and tmux pane display.
 
 ### Available Gemini Models
 
@@ -310,7 +310,7 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 
 When running inside **tmux** (including Claude Code sessions), images are displayed in a split pane targeting the originating pane (via `$TMUX_PANE`). The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
 
-For parallel generation, use `SKIP_DISPLAY=1` per provider script, then call `display_images` to show all results in a single pane. On iTerm2, images are displayed side-by-side using percentage widths; on other terminals, images stack vertically.
+For parallel generation, use `SKIP_DISPLAY=1` per provider script, then call `display_images` to show all results stacked in a vertical side pane.
 
 ## Requirements
 
