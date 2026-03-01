@@ -484,16 +484,21 @@ display_images_in_pane() {
     -P -F '#{pane_id}' \
     "bash -c '_esc=\$(printf \"\\033\"); ${img1_cmd}sleep 0.5; _panes=\$(cat ${pane_ids_file} 2>/dev/null); printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi; done; for _p in \$_panes; do tmux kill-pane -t \$_p 2>/dev/null; done; rm -f ${pane_ids_file}'")
 
-  # Sibling panes: horizontal splits from the first pane, each displaying
-  # one image and blocking until killed.
+  # Sibling panes: horizontal splits, each displaying one image and
+  # blocking until killed. Each split targets the previously created
+  # pane and uses a calculated percentage so all panes end up equal width.
+  local split_target="$first_pane"
   for ((i = 1; i < count; i++)); do
     local imgN_cmd
     imgN_cmd=$(_build_image_cmd "${resolved[$i]}" "$terminal")
+    local remaining=$((count - i))
+    local split_pct=$(( (remaining) * 100 / (remaining + 1) ))
     local sibling_id
-    sibling_id=$(tmux split-window -h -t "$first_pane" \
+    sibling_id=$(tmux split-window -h -t "$split_target" -l "${split_pct}%" \
       -P -F '#{pane_id}' \
-      "bash -c '${imgN_cmd}sleep infinity'")
+      "bash -c '${imgN_cmd}read _'")
     echo "$sibling_id" >> "$pane_ids_file"
+    split_target="$sibling_id"
   done
 }
 
