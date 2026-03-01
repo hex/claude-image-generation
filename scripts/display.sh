@@ -410,10 +410,8 @@ _build_image_cmd() {
   printf '%s' "$cmd"
 }
 
-# Opens a single tmux pane displaying multiple images.
-# For iTerm2 with 2+ images: uses percentage widths and cursor positioning
-# to lay images out side-by-side (horizontal table).
-# For other terminals or single images: stacks vertically.
+# Opens a vertical side pane displaying multiple images stacked top-to-bottom.
+# Uses -h (horizontal split) to create a tall pane on the right side.
 # Usage: display_images_in_pane <file1> <file2> [...]
 display_images_in_pane() {
   local files=("$@")
@@ -428,85 +426,36 @@ display_images_in_pane() {
     return 1
   fi
 
-  # Resolve all paths to absolute and filter nonexistent files
-  local -a resolved=()
-  for file_path in "${files[@]}"; do
-    if [[ "$file_path" != /* ]]; then
-      file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
-    fi
-    [[ -f "$file_path" ]] && resolved+=("$file_path")
-  done
-
-  if [[ ${#resolved[@]} -eq 0 ]]; then
-    return 0
-  fi
-
   local terminal
   terminal=$(get_outer_terminal) || true
 
   local display_cmd=""
-
-  if [[ "$terminal" == "iterm2" && ${#resolved[@]} -ge 2 ]]; then
-    # Horizontal layout using iTerm2 percentage widths + cursor positioning.
-    # Each image gets width=N%, and we use tput sc/rc/cuf to place them
-    # side by side in a single row.
-    local imgcat_path
-    imgcat_path=$(find_imgcat) || imgcat_path=""
-
-    if [[ -n "$imgcat_path" ]]; then
-      local width_pct=$(( 100 / ${#resolved[@]} ))
-      local last_idx=$(( ${#resolved[@]} - 1 ))
-      local idx=0
-
-      for fp in "${resolved[@]}"; do
-        local fname safe_fname safe_fp
-        fname=$(basename "$fp")
-        safe_fname=$(printf '%q' "$fname")
-        safe_fp=$(printf '%q' "$fp")
-
-        if [[ $idx -eq 0 ]]; then
-          # First image: save cursor, display, restore cursor, move right
-          display_cmd+="echo --- ${safe_fname} ---; tput sc; $(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_fp}; tput rc; tput cuf \$(( \$(tput cols) * ${width_pct} / 100 )); "
-        elif [[ $idx -eq $last_idx ]]; then
-          # Last image: display without cursor tricks (let cursor flow down)
-          display_cmd+="tput sc; echo --- ${safe_fname} ---; $(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_fp}; tput rc; tput cud \$(tput lines); echo; "
-        else
-          # Middle image: save, display, restore, move right
-          display_cmd+="echo --- ${safe_fname} ---; tput sc; $(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_fp}; tput rc; tput cuf \$(( \$(tput cols) * ${width_pct} / 100 )); "
-        fi
-        idx=$(( idx + 1 ))
-      done
-    else
-      # No imgcat: fall back to vertical stacking
-      for file_path in "${resolved[@]}"; do
-        display_cmd+=$(_build_image_cmd "$file_path" "$terminal")
-      done
+  local finder_cmd=""
+  local preview_cmd=""
+  for file_path in "${files[@]}"; do
+    if [[ "$file_path" != /* ]]; then
+      file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
     fi
-  else
-    # Non-iTerm2 or single image: vertical stacking
-    for file_path in "${resolved[@]}"; do
-      display_cmd+=$(_build_image_cmd "$file_path" "$terminal")
-    done
-  fi
+    if [[ ! -f "$file_path" ]]; then
+      continue
+    fi
 
-  # Build Finder/Preview commands for original files
-  local finder_cmd="" preview_cmd=""
-  for file_path in "${resolved[@]}"; do
+    display_cmd+=$(_build_image_cmd "$file_path" "$terminal")
+
     local safe_path
     safe_path=$(printf '%q' "$file_path")
     finder_cmd+="open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
     preview_cmd+="open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
   done
 
-  # Scale pane height for more images when stacking vertically.
-  # Horizontal layout uses a single row so 50% is enough.
-  local pane_height="50%"
-  if [[ "$terminal" != "iterm2" || ${#resolved[@]} -lt 2 ]]; then
-    if [[ ${#resolved[@]} -ge 3 ]]; then
-      pane_height="85%"
-    elif [[ ${#resolved[@]} -eq 2 ]]; then
-      pane_height="75%"
-    fi
+  if [[ -z "$display_cmd" ]]; then
+    return 0
+  fi
+
+  # Pane width: 40% for 1 image, 50% for 2+
+  local pane_width="40%"
+  if [[ $count -ge 2 ]]; then
+    pane_width="50%"
   fi
 
   local -a target_args=()
@@ -514,7 +463,7 @@ display_images_in_pane() {
     target_args=(-t "$TMUX_PANE")
   fi
 
-  tmux split-window -v -l "$pane_height" "${target_args[@]}" \
+  tmux split-window -h -l "$pane_width" "${target_args[@]}" \
     "bash -c '_esc=\$(printf \"\\033\"); ${display_cmd}printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi; done'"
 }
 
