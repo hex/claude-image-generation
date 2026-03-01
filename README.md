@@ -11,7 +11,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **Session start check** that reports which API keys are configured
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
 - **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code)
-- **Side-by-side comparison** -- compare multiple provider results in horizontal tmux splits
+- **Grid view** -- compare multiple provider results stacked in a single tmux pane
 - **Open in Finder/Preview** -- press 'f' for Finder or 'p' for Preview in the display pane
 
 ## Installation
@@ -310,7 +310,7 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 
 When running inside **tmux** (including Claude Code sessions), images are displayed in a split pane targeting the originating pane (via `$TMUX_PANE`). The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
 
-For parallel generation, use `SKIP_DISPLAY=1` per provider script, then call `display_images` to show all results side-by-side. Multiple images open as horizontal tmux splits so you can compare providers at a glance. The first pane handles keyboard input and cleans up sibling panes on exit.
+For parallel generation, use `SKIP_DISPLAY=1` per provider script, then call `display_images` to show all results in a single grid pane.
 
 ## Requirements
 
