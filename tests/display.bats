@@ -13,6 +13,8 @@ setup() {
   unset WEZTERM_EXECUTABLE 2>/dev/null || true
   unset SKIP_DISPLAY 2>/dev/null || true
   unset TMUX_PANE 2>/dev/null || true
+  unset DISPLAY_IMAGE_WIDTH 2>/dev/null || true
+  unset DISPLAY_IMAGE_HEIGHT 2>/dev/null || true
   # Save and override TERM to prevent false Kitty detection
   ORIG_TERM="${TERM:-}"
   export TERM="xterm-256color"
@@ -191,6 +193,68 @@ teardown() {
   display_image "$test_img"
 
   assert_output_contains_file "$DISPLAY_OUTPUT" "size=10"
+}
+
+# --- display image size control ---
+
+@test "display: display_image_iterm2 defaults to 256px width and height" {
+  source "$DISPLAY_SH"
+  export TERM_PROGRAM="iTerm.app"
+
+  local test_img="${BATS_TMPDIR}/test_size_default_$$.png"
+  printf 'fake-png-data' > "$test_img"
+
+  display_image "$test_img"
+
+  [[ -f "$DISPLAY_OUTPUT" ]]
+  assert_output_contains_file "$DISPLAY_OUTPUT" "width=256px"
+  assert_output_contains_file "$DISPLAY_OUTPUT" "height=256px"
+}
+
+@test "display: display_image_iterm2 uses DISPLAY_IMAGE_WIDTH and HEIGHT" {
+  source "$DISPLAY_SH"
+  export TERM_PROGRAM="iTerm.app"
+  export DISPLAY_IMAGE_WIDTH=400
+  export DISPLAY_IMAGE_HEIGHT=300
+
+  local test_img="${BATS_TMPDIR}/test_size_custom_$$.png"
+  printf 'fake-png-data' > "$test_img"
+
+  display_image "$test_img"
+
+  [[ -f "$DISPLAY_OUTPUT" ]]
+  assert_output_contains_file "$DISPLAY_OUTPUT" "width=400px"
+  assert_output_contains_file "$DISPLAY_OUTPUT" "height=300px"
+}
+
+@test "display: display_image_in_pane uses DISPLAY_IMAGE_WIDTH for iTerm2" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%0"
+  export LC_TERMINAL="iTerm2"
+  export DISPLAY_IMAGE_WIDTH=512
+
+  local mock_dir="${BATS_TMPDIR}/mock_size_pane_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\necho "$@" > "%s"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local test_img="${BATS_TMPDIR}/test_size_pane_$$.png"
+  printf 'test-data' > "$test_img"
+
+  display_image_in_pane "$test_img"
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"512px"* ]] || {
+    echo "Expected pane command to contain '512px'"
+    echo "Actual args: $captured"
+    return 1
+  }
 }
 
 @test "display: display_image silently skips nonexistent file" {

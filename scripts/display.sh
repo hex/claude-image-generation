@@ -131,8 +131,11 @@ display_image_iterm2() {
   size=$(wc -c < "$file_path" | tr -d ' ')
   image_b64=$(base64 < "$file_path" | tr -d '\n')
 
-  printf '\033]1337;File=name=%s;size=%s;inline=1;width=80%%:%s\a' \
-    "$name_b64" "$size" "$image_b64" >> "$target"
+  local max_w="${DISPLAY_IMAGE_WIDTH:-256}"
+  local max_h="${DISPLAY_IMAGE_HEIGHT:-256}"
+
+  printf '\033]1337;File=name=%s;size=%s;inline=1;width=%spx;height=%spx:%s\a' \
+    "$name_b64" "$size" "$max_w" "$max_h" "$image_b64" >> "$target"
 }
 
 # ── Kitty Display (APC graphics protocol) ──────────────────────────────
@@ -195,7 +198,7 @@ display_image_kitty() {
 # Usage: display_image_sixel <file_path> [max_width]
 display_image_sixel() {
   local filepath="$1"
-  local max_width="${2:-800}"
+  local max_width="${2:-${DISPLAY_IMAGE_WIDTH:-256}}"
   local target="${DISPLAY_IMAGE_TARGET:-/dev/tty}"
 
   if [[ -z "$filepath" ]]; then
@@ -283,7 +286,8 @@ display_image_in_pane() {
         echo "imgcat not found, cannot display image" >&2
         return 1
       }
-      display_cmd="$(printf '%q' "$imgcat_path") -W 80% $(printf '%q' "$file_path")"
+      local pane_width="${DISPLAY_IMAGE_WIDTH:-256}"
+      display_cmd="$(printf '%q' "$imgcat_path") -W ${pane_width}px $(printf '%q' "$file_path")"
       ;;
     kitty)
       display_cmd="kitten icat --align left $(printf '%q' "$file_path")"
@@ -291,11 +295,12 @@ display_image_in_pane() {
     *)
       # Fallback: try sixel if a conversion tool is available
       local sixel_tool
+      local sixel_width="${DISPLAY_IMAGE_WIDTH:-256}"
       if sixel_tool=$(_sixel_find_tool 2>/dev/null); then
         case "$sixel_tool" in
-          img2sixel) display_cmd="img2sixel --width=800 $(printf '%q' "$file_path")" ;;
-          chafa)     display_cmd="chafa --format=sixels --size=800x $(printf '%q' "$file_path")" ;;
-          magick)    display_cmd="magick $(printf '%q' "$file_path") -geometry 800x\\> sixel:-" ;;
+          img2sixel) display_cmd="img2sixel --width=${sixel_width} $(printf '%q' "$file_path")" ;;
+          chafa)     display_cmd="chafa --format=sixels --size=${sixel_width}x $(printf '%q' "$file_path")" ;;
+          magick)    display_cmd="magick $(printf '%q' "$file_path") -geometry ${sixel_width}x\\> sixel:-" ;;
         esac
       else
         display_cmd="echo 'No inline image protocol detected'; echo 'Image saved to: $(printf '%q' "$file_path")'"
@@ -382,15 +387,18 @@ _build_image_cmd() {
     iterm2)
       local imgcat_path
       imgcat_path=$(find_imgcat) || return 1
-      cmd+="$(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_path}; "
+      local base_width="${DISPLAY_IMAGE_WIDTH:-256}"
+      local pixel_width=$((base_width * width_pct / 100))
+      cmd+="$(printf '%q' "$imgcat_path") -W ${pixel_width}px ${safe_path}; "
       ;;
     kitty)
       cmd+="kitten icat --align left ${safe_path}; "
       ;;
     *)
       local sixel_tool
+      local base_width_sixel="${DISPLAY_IMAGE_WIDTH:-256}"
       if sixel_tool=$(_sixel_find_tool 2>/dev/null); then
-        local pixel_width=$((800 * width_pct / 100))
+        local pixel_width=$((base_width_sixel * width_pct / 100))
         case "$sixel_tool" in
           img2sixel) cmd+="img2sixel --width=${pixel_width} ${safe_path}; " ;;
           chafa)     cmd+="chafa --format=sixels --size=${pixel_width}x ${safe_path}; " ;;

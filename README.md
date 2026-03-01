@@ -65,6 +65,17 @@ Override the default model per provider via environment variables:
 
 Command-line `--model` flag on the scripts takes precedence over environment variables.
 
+### Display Size
+
+Control the terminal image display dimensions (in pixels):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DISPLAY_IMAGE_WIDTH` | `256` | Max image width in pixels for terminal display |
+| `DISPLAY_IMAGE_HEIGHT` | `256` | Max image height in pixels for iTerm2 display |
+
+These apply to inline display (iTerm2, Sixel) and tmux pane display. Grid view scales down proportionally based on image count.
+
 ### Available Gemini Models
 
 | Model | Characteristics |
