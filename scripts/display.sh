@@ -410,7 +410,10 @@ _build_image_cmd() {
   printf '%s' "$cmd"
 }
 
-# Opens a single tmux pane displaying multiple images stacked vertically.
+# Opens a single tmux pane displaying multiple images.
+# For iTerm2 with 2+ images: uses percentage widths and cursor positioning
+# to lay images out side-by-side (horizontal table).
+# For other terminals or single images: stacks vertically.
 # Usage: display_images_in_pane <file1> <file2> [...]
 display_images_in_pane() {
   local files=("$@")
@@ -425,39 +428,84 @@ display_images_in_pane() {
     return 1
   fi
 
-  # Scale pane height for more images.
-  local pane_height="50%"
-  if [[ $count -ge 3 ]]; then
-    pane_height="85%"
-  elif [[ $count -eq 2 ]]; then
-    pane_height="75%"
+  # Resolve all paths to absolute and filter nonexistent files
+  local -a resolved=()
+  for file_path in "${files[@]}"; do
+    if [[ "$file_path" != /* ]]; then
+      file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
+    fi
+    [[ -f "$file_path" ]] && resolved+=("$file_path")
+  done
+
+  if [[ ${#resolved[@]} -eq 0 ]]; then
+    return 0
   fi
 
   local terminal
   terminal=$(get_outer_terminal) || true
 
   local display_cmd=""
-  local finder_cmd=""
-  local preview_cmd=""
-  for file_path in "${files[@]}"; do
-    # Resolve to absolute path
-    if [[ "$file_path" != /* ]]; then
-      file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
-    fi
-    if [[ ! -f "$file_path" ]]; then
-      continue
-    fi
 
-    display_cmd+=$(_build_image_cmd "$file_path" "$terminal")
+  if [[ "$terminal" == "iterm2" && ${#resolved[@]} -ge 2 ]]; then
+    # Horizontal layout using iTerm2 percentage widths + cursor positioning.
+    # Each image gets width=N%, and we use tput sc/rc/cuf to place them
+    # side by side in a single row.
+    local imgcat_path
+    imgcat_path=$(find_imgcat) || imgcat_path=""
 
+    if [[ -n "$imgcat_path" ]]; then
+      local width_pct=$(( 100 / ${#resolved[@]} ))
+      local col_cells  # will be computed at runtime in the pane
+
+      for i in "${!resolved[@]}"; do
+        local fp="${resolved[$i]}"
+        local fname safe_fname safe_fp
+        fname=$(basename "$fp")
+        safe_fname=$(printf '%q' "$fname")
+        safe_fp=$(printf '%q' "$fp")
+
+        if [[ $i -eq 0 ]]; then
+          # First image: save cursor, display, restore cursor, move right
+          display_cmd+="echo --- ${safe_fname} ---; tput sc; $(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_fp}; tput rc; tput cuf \$(( \$(tput cols) * ${width_pct} / 100 )); "
+        elif [[ $i -eq $(( ${#resolved[@]} - 1 )) ]]; then
+          # Last image: display without cursor tricks (let cursor flow down)
+          display_cmd+="tput sc; echo --- ${safe_fname} ---; $(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_fp}; tput rc; tput cud \$(tput lines); echo; "
+        else
+          # Middle image: save, display, restore, move right
+          display_cmd+="echo --- ${safe_fname} ---; tput sc; $(printf '%q' "$imgcat_path") -W ${width_pct}% ${safe_fp}; tput rc; tput cuf \$(( \$(tput cols) * ${width_pct} / 100 )); "
+        fi
+      done
+    else
+      # No imgcat: fall back to vertical stacking
+      for file_path in "${resolved[@]}"; do
+        display_cmd+=$(_build_image_cmd "$file_path" "$terminal")
+      done
+    fi
+  else
+    # Non-iTerm2 or single image: vertical stacking
+    for file_path in "${resolved[@]}"; do
+      display_cmd+=$(_build_image_cmd "$file_path" "$terminal")
+    done
+  fi
+
+  # Build Finder/Preview commands for original files
+  local finder_cmd="" preview_cmd=""
+  for file_path in "${resolved[@]}"; do
     local safe_path
     safe_path=$(printf '%q' "$file_path")
     finder_cmd+="open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
     preview_cmd+="open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; "
   done
 
-  if [[ -z "$display_cmd" ]]; then
-    return 0
+  # Scale pane height for more images when stacking vertically.
+  # Horizontal layout uses a single row so 50% is enough.
+  local pane_height="50%"
+  if [[ "$terminal" != "iterm2" || ${#resolved[@]} -lt 2 ]]; then
+    if [[ ${#resolved[@]} -ge 3 ]]; then
+      pane_height="85%"
+    elif [[ ${#resolved[@]} -eq 2 ]]; then
+      pane_height="75%"
+    fi
   fi
 
   local -a target_args=()

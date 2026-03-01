@@ -497,12 +497,11 @@ teardown() {
   assert_output_contains "Not inside tmux"
 }
 
-@test "display: display_images_in_pane uses full DISPLAY_IMAGE_WIDTH per image" {
+@test "display: display_images_in_pane uses percentage width for iTerm2 grid" {
   source "$DISPLAY_SH"
   export TMUX="/tmp/tmux-501/default,12345,0"
   export TMUX_PANE="%5"
   export LC_TERMINAL="iTerm2"
-  export DISPLAY_IMAGE_WIDTH=512
 
   local mock_dir="${BATS_TMPDIR}/mock_grid_full_$$"
   mkdir -p "$mock_dir"
@@ -522,9 +521,9 @@ teardown() {
   [[ -f "$args_file" ]]
   local captured
   captured=$(cat "$args_file")
-  # Both images should use full 512px, not scaled down
-  [[ "$captured" == *"512px"* ]] || {
-    echo "Expected grid images to use full 512px width"
+  # 2 images should each get 50% width
+  [[ "$captured" == *"-W 50%"* ]] || {
+    echo "Expected -W 50% for 2 images"
     echo "Actual args: $captured"
     return 1
   }
@@ -585,6 +584,95 @@ teardown() {
   captured=$(cat "$args_file")
   [[ "$captured" == *"real_img_"* ]] || { echo "Missing real_img in: $captured"; return 1; }
   [[ "$captured" != *"nonexistent_"* ]] || { echo "Should not contain nonexistent file"; return 1; }
+}
+
+# --- horizontal layout (iTerm2 cursor positioning) ---
+
+@test "display: display_images_in_pane uses percentage widths for iTerm2 horizontal layout" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_horiz_$$"
+  mkdir -p "$mock_dir"
+  local tmux_args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\n' "$tmux_args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local img1="${BATS_TMPDIR}/alpha_$$.png"
+  local img2="${BATS_TMPDIR}/beta_$$.png"
+  printf 'a' > "$img1"
+  printf 'b' > "$img2"
+
+  display_images_in_pane "$img1" "$img2"
+
+  [[ -f "$tmux_args_file" ]]
+  local captured
+  captured=$(cat "$tmux_args_file")
+  # imgcat should use percentage width (50% for 2 images)
+  [[ "$captured" == *"-W 50%"* ]] || { echo "Expected -W 50% for 2 images: $captured"; return 1; }
+  # Should include cursor save/restore for positioning
+  [[ "$captured" == *"tput sc"* ]] || { echo "Expected tput sc (save cursor): $captured"; return 1; }
+  [[ "$captured" == *"tput rc"* ]] || { echo "Expected tput rc (restore cursor): $captured"; return 1; }
+}
+
+@test "display: display_images_in_pane stacks vertically for non-iTerm2" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export KITTY_WINDOW_ID="1"
+
+  local mock_dir="${BATS_TMPDIR}/mock_kitty_vert_$$"
+  mkdir -p "$mock_dir"
+  local tmux_args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\n' "$tmux_args_file" > "$mock_dir/tmux"
+  chmod +x "$mock_dir/tmux"
+  export PATH="$mock_dir:$PATH"
+
+  local img1="${BATS_TMPDIR}/vert_a_$$.png"
+  local img2="${BATS_TMPDIR}/vert_b_$$.png"
+  printf 'a' > "$img1"
+  printf 'b' > "$img2"
+
+  display_images_in_pane "$img1" "$img2"
+
+  [[ -f "$tmux_args_file" ]]
+  local captured
+  captured=$(cat "$tmux_args_file")
+  # Both filenames should appear (vertical stacking, no cursor tricks)
+  [[ "$captured" == *"vert_a_"* ]] || { echo "Missing vert_a in: $captured"; return 1; }
+  [[ "$captured" == *"vert_b_"* ]] || { echo "Missing vert_b in: $captured"; return 1; }
+  # Should NOT have cursor save/restore
+  [[ "$captured" != *"tput sc"* ]] || { echo "Should not use cursor positioning for Kitty: $captured"; return 1; }
+}
+
+@test "display: display_images_in_pane uses full width for single image on iTerm2" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%5"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_single_$$"
+  mkdir -p "$mock_dir"
+  local tmux_args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\n' "$tmux_args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local img1="${BATS_TMPDIR}/solo_$$.png"
+  printf 'a' > "$img1"
+
+  display_images_in_pane "$img1"
+
+  [[ -f "$tmux_args_file" ]]
+  local captured
+  captured=$(cat "$tmux_args_file")
+  # Single image should NOT use cursor positioning
+  [[ "$captured" != *"tput sc"* ]] || { echo "Should not use cursor positioning for single image: $captured"; return 1; }
 }
 
 # --- open_in_viewer ---
