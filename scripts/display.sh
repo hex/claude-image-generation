@@ -328,6 +328,101 @@ display_image_in_pane() {
     "bash -c '_esc=\$(printf \"\\033\"); echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; fi; done'"
 }
 
+# ── Streaming Display Pane ────────────────────────────────────────────
+
+# Appends a file path to the streaming pane manifest.
+# The watcher in the tmux pane picks up new entries and renders them.
+# Usage: display_pane_add <file_path>
+display_pane_add() {
+  if [[ -z "${DISPLAY_PANE_DIR:-}" || ! -d "${DISPLAY_PANE_DIR:-}" ]]; then
+    echo "display_pane_add: DISPLAY_PANE_DIR is not set or not a directory" >&2
+    return 1
+  fi
+  local file_path="$1"
+  if [[ "$file_path" != /* ]]; then
+    file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
+  fi
+  printf '%s\n' "$file_path" >> "$DISPLAY_PANE_DIR/manifest"
+}
+
+# Signals the streaming pane watcher that all images have been added.
+# The watcher stops polling and shows interactive controls.
+# Usage: display_pane_close
+display_pane_close() {
+  if [[ -z "${DISPLAY_PANE_DIR:-}" || ! -d "${DISPLAY_PANE_DIR:-}" ]]; then
+    echo "display_pane_close: DISPLAY_PANE_DIR is not set or not a directory" >&2
+    return 1
+  fi
+  touch "$DISPLAY_PANE_DIR/.done"
+}
+
+# Opens a tmux pane that watches for images and displays them as they arrive.
+# Creates a temp directory with a manifest file and render script.
+# Prints the watch directory path to stdout (caller sets DISPLAY_PANE_DIR).
+# Usage: display_pane_open
+display_pane_open() {
+  if ! is_tmux; then
+    echo "Not inside tmux, cannot open display pane" >&2
+    return 1
+  fi
+
+  local watch_dir
+  watch_dir=$(mktemp -d "${TMPDIR:-/tmp}/display_pane.XXXXXX")
+
+  local terminal
+  terminal=$(get_outer_terminal) || true
+
+  # Write terminal-specific render script
+  local render_cmd
+  local width="${DISPLAY_IMAGE_WIDTH:-512}"
+  case "$terminal" in
+    iterm2)
+      local imgcat_path
+      imgcat_path=$(find_imgcat) || {
+        echo "imgcat not found, cannot display image" >&2
+        rm -rf "$watch_dir"
+        return 1
+      }
+      render_cmd="$(printf '%q' "$imgcat_path") -W ${width}px \"\$1\""
+      ;;
+    kitty)
+      render_cmd="kitten icat --align left \"\$1\""
+      ;;
+    *)
+      local sixel_tool
+      if sixel_tool=$(_sixel_find_tool 2>/dev/null); then
+        case "$sixel_tool" in
+          img2sixel) render_cmd="img2sixel --width=${width} \"\$1\"" ;;
+          chafa)     render_cmd="chafa --format=sixels --size=${width}x \"\$1\"" ;;
+          magick)    render_cmd="magick \"\$1\" -geometry ${width}x\\> sixel:-" ;;
+        esac
+      else
+        render_cmd="echo \"Image: \$1\""
+      fi
+      ;;
+  esac
+
+  cat > "$watch_dir/render.sh" <<RENDEREOF
+#!/bin/bash
+$render_cmd
+RENDEREOF
+  chmod +x "$watch_dir/render.sh"
+
+  local safe_watch_dir
+  safe_watch_dir=$(printf '%q' "$watch_dir")
+
+  local -a target_args=()
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    target_args=(-t "$TMUX_PANE")
+  fi
+
+  tmux split-window -h -l '30%' "${target_args[@]}" \
+    "bash -c 'trap \"rm -rf ${safe_watch_dir}\" EXIT; _shown=0; while true; do if [ -f ${safe_watch_dir}/manifest ]; then _total=\$(wc -l < ${safe_watch_dir}/manifest | tr -d \" \"); while [ \$_shown -lt \$_total ]; do _shown=\$((_shown + 1)); _path=\$(sed -n \"\${_shown}p\" ${safe_watch_dir}/manifest); _name=\$(basename \"\$_path\"); echo \"--- \$_name ---\"; ${safe_watch_dir}/render.sh \"\$_path\"; echo; done; fi; if [ -f ${safe_watch_dir}/.done ]; then break; fi; sleep 0.3; done; _esc=\$(printf \"\\033\"); printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then xargs open -R < ${safe_watch_dir}/manifest 2>/dev/null; elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then xargs open -a Preview < ${safe_watch_dir}/manifest 2>/dev/null; fi; done'" \
+    >/dev/null
+
+  printf '%s' "$watch_dir"
+}
+
 # ── Main Entry Point ───────────────────────────────────────────────────
 
 # Displays an image using the best available method.
@@ -343,6 +438,12 @@ display_image() {
 
   if [[ ! -f "$file_path" ]]; then
     return 0
+  fi
+
+  # Streaming pane: append to shared manifest instead of opening a new pane
+  if [[ -n "${DISPLAY_PANE_DIR:-}" && -d "${DISPLAY_PANE_DIR:-}" ]]; then
+    display_pane_add "$file_path"
+    return $?
   fi
 
   # In tmux: use pane display (works even when stdout/stderr is captured)

@@ -13,6 +13,7 @@ setup() {
   unset WEZTERM_EXECUTABLE 2>/dev/null || true
   unset SKIP_DISPLAY 2>/dev/null || true
   unset TMUX_PANE 2>/dev/null || true
+  unset DISPLAY_PANE_DIR 2>/dev/null || true
   unset DISPLAY_IMAGE_WIDTH 2>/dev/null || true
   unset DISPLAY_IMAGE_HEIGHT 2>/dev/null || true
   # Save and override TERM to prevent false Kitty detection
@@ -824,4 +825,394 @@ teardown() {
     echo "Actual args: $captured"
     return 1
   }
+}
+
+# --- display_pane_add (streaming pane) ---
+
+@test "display: display_pane_add writes path to manifest" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_add_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+
+  local test_img="${BATS_TMPDIR}/add_test_$$.png"
+  printf 'data' > "$test_img"
+
+  display_pane_add "$test_img"
+
+  [[ -f "$pane_dir/manifest" ]]
+  local content
+  content=$(cat "$pane_dir/manifest")
+  [[ "$content" == *"add_test_"* ]] || {
+    echo "Expected manifest to contain file path"
+    echo "Actual: $content"
+    return 1
+  }
+}
+
+@test "display: display_pane_add appends multiple paths in order" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_multi_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+
+  local img1="${BATS_TMPDIR}/first_$$.png"
+  local img2="${BATS_TMPDIR}/second_$$.png"
+  local img3="${BATS_TMPDIR}/third_$$.png"
+  printf 'a' > "$img1"
+  printf 'b' > "$img2"
+  printf 'c' > "$img3"
+
+  display_pane_add "$img1"
+  display_pane_add "$img2"
+  display_pane_add "$img3"
+
+  [[ -f "$pane_dir/manifest" ]]
+  local line1 line2 line3
+  line1=$(sed -n '1p' "$pane_dir/manifest")
+  line2=$(sed -n '2p' "$pane_dir/manifest")
+  line3=$(sed -n '3p' "$pane_dir/manifest")
+  [[ "$line1" == *"first_"* ]] || { echo "Line 1 wrong: $line1"; return 1; }
+  [[ "$line2" == *"second_"* ]] || { echo "Line 2 wrong: $line2"; return 1; }
+  [[ "$line3" == *"third_"* ]] || { echo "Line 3 wrong: $line3"; return 1; }
+}
+
+@test "display: display_pane_add resolves relative path to absolute" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_rel_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+
+  # Create a file in BATS_TMPDIR with a relative reference
+  local test_img="${BATS_TMPDIR}/rel_test_$$.png"
+  printf 'data' > "$test_img"
+
+  # Call with relative path from BATS_TMPDIR
+  (cd "$BATS_TMPDIR" && display_pane_add "rel_test_$$.png")
+
+  [[ -f "$pane_dir/manifest" ]]
+  local content
+  content=$(cat "$pane_dir/manifest")
+  # Should start with / (absolute path)
+  [[ "$content" == /* ]] || {
+    echo "Expected absolute path, got: $content"
+    return 1
+  }
+}
+
+@test "display: display_pane_add fails when DISPLAY_PANE_DIR unset" {
+  source "$DISPLAY_SH"
+  unset DISPLAY_PANE_DIR 2>/dev/null || true
+
+  run display_pane_add "/tmp/some_file.png"
+  assert_status 1
+  assert_output_contains "DISPLAY_PANE_DIR"
+}
+
+# --- display_pane_close (streaming pane) ---
+
+@test "display: display_pane_close creates .done sentinel" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_close_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+
+  display_pane_close
+
+  [[ -f "$pane_dir/.done" ]] || {
+    echo "Expected .done sentinel to exist"
+    return 1
+  }
+}
+
+@test "display: display_pane_close fails when DISPLAY_PANE_DIR unset" {
+  source "$DISPLAY_SH"
+  unset DISPLAY_PANE_DIR 2>/dev/null || true
+
+  run display_pane_close
+  assert_status 1
+  assert_output_contains "DISPLAY_PANE_DIR"
+}
+
+# --- display_image routing to streaming pane ---
+
+@test "display: display_image routes to shared pane when DISPLAY_PANE_DIR set" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_route_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+
+  local test_img="${BATS_TMPDIR}/route_test_$$.png"
+  printf 'data' > "$test_img"
+
+  display_image "$test_img"
+
+  # Should have written to manifest instead of opening a pane or writing escape sequences
+  [[ -f "$pane_dir/manifest" ]] || {
+    echo "Expected manifest file to exist"
+    return 1
+  }
+  local content
+  content=$(cat "$pane_dir/manifest")
+  [[ "$content" == *"route_test_"* ]] || {
+    echo "Expected manifest to contain file path"
+    echo "Actual: $content"
+    return 1
+  }
+  # Should NOT have written any escape sequences
+  [[ ! -f "$DISPLAY_OUTPUT" ]] || {
+    echo "Should not have written escape sequences when routing to pane"
+    return 1
+  }
+}
+
+@test "display: SKIP_DISPLAY takes priority over DISPLAY_PANE_DIR" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_skip_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+  export SKIP_DISPLAY="1"
+
+  local test_img="${BATS_TMPDIR}/skip_pane_$$.png"
+  printf 'data' > "$test_img"
+
+  display_image "$test_img"
+
+  # SKIP_DISPLAY should prevent even the pane routing
+  [[ ! -f "$pane_dir/manifest" ]] || {
+    echo "SKIP_DISPLAY should prevent manifest write"
+    return 1
+  }
+}
+
+# --- display_pane_open (streaming pane) ---
+
+@test "display: display_pane_open fails when not in tmux" {
+  source "$DISPLAY_SH"
+  unset TMUX 2>/dev/null || true
+
+  run display_pane_open
+  assert_status 1
+  assert_output_contains "Not inside tmux"
+}
+
+@test "display: display_pane_open creates watch directory with render.sh" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%0"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_pane_open_$$"
+  mkdir -p "$mock_dir"
+  # Mock tmux to capture args and print a fake pane id
+  printf '#!/bin/bash\necho "%%%%99"\n' > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local watch_dir
+  watch_dir=$(display_pane_open)
+
+  [[ -d "$watch_dir" ]] || {
+    echo "Expected watch directory to exist: $watch_dir"
+    return 1
+  }
+  [[ -f "$watch_dir/render.sh" ]] || {
+    echo "Expected render.sh to exist in watch dir"
+    return 1
+  }
+  [[ -x "$watch_dir/render.sh" ]] || {
+    echo "Expected render.sh to be executable"
+    return 1
+  }
+  # Clean up
+  rm -rf "$watch_dir"
+}
+
+@test "display: display_pane_open calls tmux with -h -l 30%" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%0"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_pane_tmux_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\necho "%%%%99"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local watch_dir
+  watch_dir=$(display_pane_open)
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"split-window -h"* ]] || {
+    echo "Expected -h split"
+    echo "Actual: $captured"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  [[ "$captured" == *"-l 30%"* ]] || {
+    echo "Expected -l 30%"
+    echo "Actual: $captured"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  rm -rf "$watch_dir"
+}
+
+@test "display: display_pane_open targets TMUX_PANE" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%42"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_pane_target_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\necho "%%%%99"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local watch_dir
+  watch_dir=$(display_pane_open)
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"-t %42"* ]] || {
+    echo "Expected -t %42 targeting"
+    echo "Actual: $captured"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  rm -rf "$watch_dir"
+}
+
+@test "display: display_pane_open render.sh contains imgcat for iterm2" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%0"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_pane_iterm_$$"
+  mkdir -p "$mock_dir"
+  printf '#!/bin/bash\necho "%%%%99"\n' > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local watch_dir
+  watch_dir=$(display_pane_open)
+
+  local render_content
+  render_content=$(cat "$watch_dir/render.sh")
+  [[ "$render_content" == *"imgcat"* ]] || {
+    echo "Expected render.sh to use imgcat for iTerm2"
+    echo "Actual: $render_content"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  rm -rf "$watch_dir"
+}
+
+@test "display: display_pane_open render.sh contains kitten for kitty" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%0"
+  export KITTY_WINDOW_ID="1"
+  unset LC_TERMINAL ITERM_SESSION_ID 2>/dev/null || true
+
+  local mock_dir="${BATS_TMPDIR}/mock_pane_kitty_$$"
+  mkdir -p "$mock_dir"
+  printf '#!/bin/bash\necho "%%%%99"\n' > "$mock_dir/tmux"
+  chmod +x "$mock_dir/tmux"
+  export PATH="$mock_dir:$PATH"
+
+  local watch_dir
+  watch_dir=$(display_pane_open)
+
+  local render_content
+  render_content=$(cat "$watch_dir/render.sh")
+  [[ "$render_content" == *"kitten icat"* ]] || {
+    echo "Expected render.sh to use kitten icat for Kitty"
+    echo "Actual: $render_content"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  rm -rf "$watch_dir"
+}
+
+@test "display: display_pane_open watcher checks for .done sentinel" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%0"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_pane_done_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\necho "%%%%99"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local watch_dir
+  watch_dir=$(display_pane_open)
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *".done"* ]] || {
+    echo "Expected watcher to check for .done sentinel"
+    echo "Actual: $captured"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  rm -rf "$watch_dir"
+}
+
+@test "display: display_pane_open watcher includes interactive controls" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%0"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_pane_ctrl_$$"
+  mkdir -p "$mock_dir"
+  local args_file="${mock_dir}/tmux_args"
+  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\necho "%%%%99"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local watch_dir
+  watch_dir=$(display_pane_open)
+
+  [[ -f "$args_file" ]]
+  local captured
+  captured=$(cat "$args_file")
+  [[ "$captured" == *"[f]inder"* ]] || {
+    echo "Expected controls to include [f]inder"
+    echo "Actual: $captured"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  [[ "$captured" == *"[p]review"* ]] || {
+    echo "Expected controls to include [p]review"
+    echo "Actual: $captured"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  [[ "$captured" == *"esc"* ]] || {
+    echo "Expected controls to include esc"
+    echo "Actual: $captured"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  rm -rf "$watch_dir"
 }
