@@ -8,7 +8,6 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **Image editing** with text instructions (all providers)
 - **Parallel generation** using multiple providers simultaneously via Task tool
 - **Interactive provider selection** via AskUserQuestion at runtime
-- **Session start check** that reports which API keys are configured
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
 - **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code)
 - **Streaming display** -- images appear progressively in a shared pane during parallel generation
@@ -105,7 +104,7 @@ These apply to inline display (iTerm2, Sixel) and tmux pane display.
 /generate-image --edit ./photo.png remove the background and make it transparent
 ```
 
-The command prompts you to select a provider (Gemini, OpenAI, or both in parallel) and an output path.
+The command prompts you to select a provider (Gemini, OpenAI, xAI, or all in parallel) and an output path.
 
 ### Agent (Automatic)
 
@@ -143,7 +142,7 @@ bash scripts/gemini.sh \
   --mode generate \
   --prompt "quick sketch" \
   --output ./sketch.png \
-  --model gemini-2.5-flash-preview-image-generation
+  --model gemini-2.5-flash-image
 ```
 
 **Flags:**
@@ -246,7 +245,7 @@ bash scripts/xai.sh \
 | Text rendering | Good | Excellent | Good |
 | Transparent BG | No | Yes | No |
 | Aspect ratios | 10 options (1:1 to 21:9) | 3 fixed sizes | 14 options (1:1 to 20:9) |
-| Image editing | Multi-turn refinement | Up to 16 input images | Same endpoint, via image_url |
+| Image editing | Multi-turn refinement | Single image (API supports up to 16) | Same endpoint, via image_url |
 | Quality tiers | N/A | low / medium / high | N/A |
 | Pricing | Token-based | Token-based | Flat per-image |
 | Prompt revision | No | No | Yes (by chat model) |
@@ -264,6 +263,7 @@ bash scripts/xai.sh \
 | xAI script | `scripts/xai.sh` | xAI API call execution |
 | Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, streaming pane) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
+| Automated tests | `tests/` | bats test suite for all scripts |
 
 ## Development
 
@@ -292,7 +292,6 @@ The plugin is organized into Claude Code extension points:
 commands/                      -- Slash command definitions
 agents/                        -- Autonomous agent definitions
 skills/                        -- Skill knowledge and references
-hooks/                         -- Lifecycle hooks (SessionStart)
 scripts/                       -- Shell scripts for API calls
 tests/                         -- Automated tests (bats)
 ```

@@ -110,6 +110,11 @@ bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/test.png
 export OPENAI_IMAGE_MODEL="gpt-image-1.5"
 bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
 # Expected: stderr includes "model: gpt-image-1.5"
+
+# xAI model override
+export XAI_IMAGE_MODEL="grok-2-image"
+bash scripts/xai.sh --mode generate --prompt "test" --output /tmp/test.png
+# Expected: stderr includes "model: grok-2-image"
 ```
 
 ## 3. Feature Tests (Via Slash Command)
@@ -159,10 +164,10 @@ These tests require a running Claude Code session with the plugin loaded. They v
 2. Select "Gemini" only
 3. Verify one image is generated
 
-**Both providers in parallel:**
+**All providers in parallel:**
 
 1. Run `/generate-image a simple blue circle`
-2. Select "Both in parallel"
+2. Select "All in parallel"
 3. Verify two tasks are created (one per provider)
 4. Verify two output files are generated with provider-suffixed filenames (e.g., `image-gemini.png`, `image-openai.png`)
 
@@ -175,7 +180,7 @@ These tests require a running Claude Code session with the plugin loaded. They v
 
 ### 3.5 Parallel Generation with Task Tracking
 
-1. Run `/generate-image a sunset over the ocean` and select "Both in parallel"
+1. Run `/generate-image a sunset over the ocean` and select "All in parallel"
 2. Observe that two tasks appear (TaskCreate)
 3. Both are marked in_progress (TaskUpdate)
 4. As each completes, it is marked completed
@@ -240,7 +245,7 @@ These tests require a running Claude Code session with the plugin loaded. They v
 | `--model` flag override | Manual | Flag takes precedence over env var |
 | Single-provider generation | Feature | Image file created, valid PNG |
 | Single-provider editing | Feature | Edited image created, original untouched |
-| Both-providers parallel | Feature | Two tasks, two output files, both completed |
+| All-providers parallel | Feature | Three tasks, three output files, all completed |
 | Output directory creation | Feature | Nonexistent directory is created |
 | Invalid API key | Edge case | HTTP error reported, script exits 1 |
 | Nonexistent input image | Edge case | Script exits with error |

@@ -32,7 +32,7 @@ The Gemini API uses a unified `generateContent` endpoint. Images are passed as `
   ],
   "generationConfig": {
     "responseModalities": ["TEXT", "IMAGE"],
-    "imageGenerationConfig": {
+    "imageConfig": {
       "aspectRatio": "16:9"
     }
   }
@@ -149,7 +149,7 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 ### Generation Request
 ```json
 {
-  "model": "grok-2-image",
+  "model": "grok-imagine-image",
   "prompt": "description",
   "n": 1,
   "response_format": "b64_json"
@@ -159,7 +159,7 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 ### Edit Request (same endpoint, JSON body)
 ```json
 {
-  "model": "grok-2-image",
+  "model": "grok-imagine-image",
   "prompt": "edit instruction",
   "n": 1,
   "response_format": "b64_json",
