@@ -59,9 +59,9 @@ Override the default model per provider via environment variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GEMINI_IMAGE_MODEL` | `gemini-2.5-flash-image` | Gemini model used for generation and editing |
+| `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` | Gemini model used for generation and editing |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-1.5` | OpenAI model used for generation and editing |
-| `XAI_IMAGE_MODEL` | `grok-imagine-image` | xAI model used for generation and editing |
+| `XAI_IMAGE_MODEL` | `grok-imagine-image-pro` | xAI model used for generation and editing |
 
 Command-line `--model` flag on the scripts takes precedence over environment variables.
 
@@ -80,20 +80,24 @@ These apply to inline display (iTerm2, Sixel) and tmux pane display.
 
 | Model | Characteristics |
 |-------|-----------------|
-| `gemini-2.5-flash-image` | Fast generation, good for iteration (default) |
+| `gemini-3-pro-image-preview` | Pro tier, premium quality, 10 aspect ratios, up to 14 reference images (default, "Nano Banana Pro") |
+| `gemini-3.1-flash-image-preview` | 14 aspect ratios (incl. extreme 1:4, 8:1), 512-4K resolution, thinking, Google Search grounding ("Nano Banana 2") |
+| `gemini-2.5-flash-image` | Previous generation, 1K only (scheduled shutdown 2026-10-02) |
 
 ### Available OpenAI Models
 
 | Model | Characteristics |
 |-------|-----------------|
-| `gpt-image-1.5` | Superior text rendering, transparent backgrounds, quality tiers |
+| `gpt-image-1.5` | Superior text rendering, transparent backgrounds, quality tiers (default) |
+| `gpt-image-1-mini` | 3-4x cheaper, cost-efficient for drafts and previews |
+| `gpt-image-1` | Previous generation |
 
 ### Available xAI Models
 
 | Model | Characteristics |
 |-------|-----------------|
-| `grok-imagine-image` | Editing via `image_url`, aspect ratio support (default) |
-| `grok-2-image` | Basic generation, no editing or aspect ratio support |
+| `grok-imagine-image-pro` | Premium tier, higher quality, 30 RPM (default) |
+| `grok-imagine-image` | Standard tier, 1K/2K resolution, 300 RPM, same endpoint and parameters |
 
 ## Usage
 
@@ -137,12 +141,27 @@ bash scripts/gemini.sh \
   --input-image ./mountain.png \
   --output ./snowy.png
 
+# Generate at 4K with thinking mode
+bash scripts/gemini.sh \
+  --mode generate \
+  --prompt "a detailed sci-fi cityscape" \
+  --output ./city.png \
+  --image-size 4K \
+  --thinking-level High
+
+# Generate with Google Search grounding
+bash scripts/gemini.sh \
+  --mode generate \
+  --prompt "Search for the latest SpaceX Starship and draw it at sunset on the launch pad" \
+  --output ./starship.png \
+  --search-grounding
+
 # Use a specific model
 bash scripts/gemini.sh \
   --mode generate \
   --prompt "quick sketch" \
   --output ./sketch.png \
-  --model gemini-2.5-flash-image
+  --model gemini-3-pro-image-preview
 ```
 
 **Flags:**
@@ -153,8 +172,12 @@ bash scripts/gemini.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path | -- | Edit mode only |
-| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9` | `1:1` | No |
-| `--model` | Gemini model name | `gemini-2.5-flash-image` | No |
+| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9` on Pro (default); add `1:4`, `4:1`, `1:8`, `8:1` on `gemini-3.1-flash-image-preview` | `1:1` | No |
+| `--image-size` | `512`, `1K`, `2K`, `4K` (UPPERCASE); `512` requires `gemini-3.1-flash-image-preview` | (API default `1K`) | No |
+| `--thinking-level` | `minimal`, `High` | `minimal` | No |
+| `--image-only` | (flag, no value) | off | No |
+| `--search-grounding` | (flag, no value) | off | No |
+| `--model` | Gemini model name | `gemini-3-pro-image-preview` | No |
 
 #### openai.sh
 
@@ -190,9 +213,13 @@ bash scripts/openai.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path | -- | Edit mode only |
-| `--size` | `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` | No |
-| `--quality` | `low`, `medium`, `high` | `high` | No |
-| `--background` | `transparent`, `opaque`, `auto` | `auto` | No |
+| `--size` | `auto`, `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` | No |
+| `--quality` | `auto`, `low`, `medium`, `high` | `high` | No |
+| `--background` | `auto`, `transparent`, `opaque` | `auto` | No |
+| `--output-format` | `png`, `jpeg`, `webp` | `png` | No |
+| `--output-compression` | integer 0-100 (jpeg/webp only) | -- | No |
+| `--moderation` | `auto`, `low` | `auto` | No |
+| `--input-fidelity` | `low`, `high` (edit only) | `low` | No |
 | `--model` | OpenAI model name | `gpt-image-1.5` | No |
 
 #### xai.sh
@@ -218,12 +245,19 @@ bash scripts/xai.sh \
   --input-image ./mountain.png \
   --output ./snowy.png
 
-# Use a different model
+# Generate at 2K resolution
 bash scripts/xai.sh \
   --mode generate \
   --prompt "a cat in a tree" \
   --output ./cat.png \
-  --model grok-imagine-image
+  --resolution 2k
+
+# Use the pro model
+bash scripts/xai.sh \
+  --mode generate \
+  --prompt "a cat in a tree" \
+  --output ./cat.png \
+  --model grok-imagine-image-pro
 ```
 
 **Flags:**
@@ -234,19 +268,25 @@ bash scripts/xai.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path | -- | Edit mode only |
-| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, etc. | (none) | No |
-| `--model` | xAI model name | `grok-imagine-image` | No |
+| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `auto` | (none) | No |
+| `--resolution` | `1k`, `2k` (LOWERCASE) | (API default) | No |
+| `--model` | xAI model name | `grok-imagine-image-pro` | No |
+
+**Note**: For single-image edits, xAI ignores `--aspect-ratio` and uses the input image's ratio. Multi-image edits (5 images max) allow aspect ratio override.
 
 ## Provider Comparison
 
 | Feature | Gemini | OpenAI | xAI |
 |---------|--------|--------|-----|
-| Default model | gemini-2.5-flash-image | gpt-image-1.5 | grok-imagine-image |
-| Text rendering | Good | Excellent | Good |
+| Default model | gemini-3-pro-image-preview | gpt-image-1.5 | grok-imagine-image-pro |
+| Max resolution | 4K (via `--image-size`) | 1536x1024 | 2K (via `--resolution`) |
+| Text rendering | Very good (under 25 chars) | Excellent | Good |
 | Transparent BG | No | Yes | No |
-| Aspect ratios | 10 options (1:1 to 21:9) | 3 fixed sizes | 14 options (1:1 to 20:9) |
-| Image editing | Multi-turn refinement | Single image (API supports up to 16) | Same endpoint, via image_url |
-| Quality tiers | N/A | low / medium / high | N/A |
+| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | 3 fixed sizes | 14 options (incl. 20:9, auto) |
+| Image editing | Multi-turn, up to 14 refs | Single image (API supports up to 16) | Same endpoint, via `image_url` |
+| Quality tiers | N/A | auto / low / medium / high | N/A |
+| Thinking mode | Yes (`--thinking-level`) | No | No |
+| Search grounding | Yes (Google Search) | No | No |
 | Pricing | Token-based | Token-based | Flat per-image |
 | Prompt revision | No | No | Yes (by chat model) |
 

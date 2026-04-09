@@ -16,11 +16,17 @@ Options:
   --prompt        Text prompt describing the image (required)
   --output        Output file path (required)
   --input-image   Input image path for edit mode (required for edit)
-  --aspect-ratio  Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4, etc. (default: none)
-  --model         xAI model (default: grok-imagine-image)
+  --aspect-ratio  Aspect ratio (default: none — model picks)
+                  1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2,
+                  19.5:9, 9:19.5, 20:9, 9:20, auto
+                  Note: single-image edits ignore aspect_ratio (output matches input)
+  --resolution    Output resolution: 1k or 2k (LOWERCASE required)
+  --model         xAI model (default: grok-imagine-image-pro)
+                  Alternatives: grok-imagine-image (standard, 10x higher RPM)
 
 Environment:
-  XAI_API_KEY     xAI API key (or GROK_API_KEY)
+  XAI_API_KEY         xAI API key (or GROK_API_KEY)
+  XAI_IMAGE_MODEL     Override default model
 EOF
   exit 1
 }
@@ -30,7 +36,8 @@ PROMPT=""
 OUTPUT=""
 INPUT_IMAGE=""
 ASPECT_RATIO=""
-MODEL="${XAI_IMAGE_MODEL:-grok-imagine-image}"
+RESOLUTION=""
+MODEL="${XAI_IMAGE_MODEL:-grok-imagine-image-pro}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,10 +46,18 @@ while [[ $# -gt 0 ]]; do
     --output) OUTPUT="$2"; shift 2 ;;
     --input-image) INPUT_IMAGE="$2"; shift 2 ;;
     --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
+    --resolution) RESOLUTION="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
+
+if [[ -n "$RESOLUTION" ]]; then
+  case "$RESOLUTION" in
+    1k|2k) ;;
+    *) echo "Error: --resolution must be '1k' or '2k' (lowercase required)" >&2; exit 1 ;;
+  esac
+fi
 
 if [[ -z "$MODE" || -z "$PROMPT" || -z "$OUTPUT" ]]; then
   echo "Error: --mode, --prompt, and --output are required" >&2
@@ -81,6 +96,10 @@ REQUEST_BODY=$(jq -n \
 
 if [[ -n "$ASPECT_RATIO" ]]; then
   REQUEST_BODY=$(echo "$REQUEST_BODY" | jq --arg ar "$ASPECT_RATIO" '. + {"aspect_ratio": $ar}')
+fi
+
+if [[ -n "$RESOLUTION" ]]; then
+  REQUEST_BODY=$(echo "$REQUEST_BODY" | jq --arg res "$RESOLUTION" '. + {"resolution": $res}')
 fi
 
 if [[ "$MODE" == "edit" && -n "$INPUT_IMAGE" ]]; then

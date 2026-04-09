@@ -102,9 +102,9 @@ bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
 
 ```bash
 # Gemini model override
-export GEMINI_IMAGE_MODEL="gemini-2.5-flash-image"
+export GEMINI_IMAGE_MODEL="gemini-3.1-flash-image-preview"
 bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/test.png
-# Expected: stderr includes "model: gemini-2.5-flash-image" (will fail at API call without valid key, but model name is visible in the log)
+# Expected: stderr includes "model: gemini-3.1-flash-image-preview" (will fail at API call without valid key, but model name is visible in the log)
 
 # OpenAI model override
 export OPENAI_IMAGE_MODEL="gpt-image-1.5"
@@ -112,9 +112,9 @@ bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
 # Expected: stderr includes "model: gpt-image-1.5"
 
 # xAI model override
-export XAI_IMAGE_MODEL="grok-2-image"
+export XAI_IMAGE_MODEL="grok-imagine-image-pro"
 bash scripts/xai.sh --mode generate --prompt "test" --output /tmp/test.png
-# Expected: stderr includes "model: grok-2-image"
+# Expected: stderr includes "model: grok-imagine-image-pro"
 ```
 
 ## 3. Feature Tests (Via Slash Command)

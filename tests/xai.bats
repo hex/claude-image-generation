@@ -63,10 +63,10 @@ setup() {
   assert_output_contains "Usage:"
 }
 
-@test "xai: default model is grok-imagine-image" {
+@test "xai: default model is grok-imagine-image-pro" {
   export XAI_API_KEY="$DUMMY_XAI_KEY"
   run "$XAI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-xai-out.png"
-  assert_output_contains "model: grok-imagine-image"
+  assert_output_contains "model: grok-imagine-image-pro"
 }
 
 @test "xai: XAI_IMAGE_MODEL env var overrides default model" {

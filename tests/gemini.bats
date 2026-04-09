@@ -55,14 +55,14 @@ setup() {
   assert_output_contains "Usage:"
 }
 
-@test "gemini: default model is gemini-2.5-flash-image" {
+@test "gemini: default model is gemini-3-pro-image-preview" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
   # The script will fail at the curl call, but we can check stderr for the model name
   run "$GEMINI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-gemini-out.png"
   # The script either prints the model in its API call message or fails at curl.
   # Since we have a dummy key, curl will fail, but the "Calling Gemini API" message
   # is printed before the curl call.
-  assert_output_contains "model: gemini-2.5-flash-image"
+  assert_output_contains "model: gemini-3-pro-image-preview"
 }
 
 @test "gemini: GEMINI_IMAGE_MODEL env var overrides default model" {

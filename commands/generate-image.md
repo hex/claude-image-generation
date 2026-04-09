@@ -14,9 +14,9 @@ Generate or edit an image based on the user's request.
    - Determine mode: "edit" if --edit flag is present, otherwise "generate"
 
 2. Ask the user which provider to use with AskUserQuestion:
-   - **Gemini** (gemini-2.5-flash-image): Best for aspect ratio control and iterative editing
+   - **Gemini** (gemini-3-pro-image-preview): Premium quality, professional asset production, up to 14 reference images
    - **OpenAI** (gpt-image-1.5): Best for text rendering and transparent backgrounds
-   - **xAI** (grok-imagine-image): Flat per-image pricing, prompt revision, diverse styles
+   - **xAI** (grok-imagine-image-pro): Premium tier, higher quality, flat per-image pricing
    - **All in parallel**: Generate with all available providers and pick the best result
 
 3. Ask the user where to save the output with AskUserQuestion:
