@@ -49,7 +49,7 @@ The Gemini API uses a unified `generateContent` endpoint. Images are passed as `
 |-----------|--------|-------|
 | `responseModalities` | `["TEXT", "IMAGE"]` or `["IMAGE"]` | Default is both; `["IMAGE"]` suppresses text response |
 | `imageConfig.aspectRatio` | 14 ratios (see below) | Default `1:1` |
-| `imageConfig.imageSize` | `512`, `1K`, `2K`, `4K` | **UPPERCASE required** — lowercase is a hard API rejection. Default `1K`. `512`/`2K`/`4K` only on 3.1 Flash. |
+| `imageConfig.imageSize` | `512`, `1K`, `2K`, `4K` | **UPPERCASE required** — lowercase is a hard API rejection. Default `1K`. `512` exclusive to `gemini-3.1-flash-image-preview`; Pro supports `1K`/`2K`/`4K`. |
 | `thinkingConfig.thinkingLevel` | `minimal` (default) or `High` | Capital H. Higher levels improve complex compositions, increase latency. |
 | `thinkingConfig.includeThoughts` | boolean | Controls whether thought images/text appear in response |
 
@@ -273,7 +273,7 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 ### Generation Request
 ```json
 {
-  "model": "grok-imagine-image",
+  "model": "grok-imagine-image-pro",
   "prompt": "description",
   "n": 1,
   "response_format": "b64_json",
@@ -282,10 +282,12 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 }
 ```
 
+Substitute `grok-imagine-image` for the standard-tier model — parameter schema is identical.
+
 ### Edit Request — legacy `image_url` via generations endpoint
 ```json
 {
-  "model": "grok-imagine-image",
+  "model": "grok-imagine-image-pro",
   "prompt": "edit instruction",
   "n": 1,
   "response_format": "b64_json",
@@ -297,7 +299,7 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 Single image:
 ```json
 {
-  "model": "grok-imagine-image",
+  "model": "grok-imagine-image-pro",
   "prompt": "edit instruction",
   "image": {"type": "image_url", "url": "https://..."}
 }
@@ -306,7 +308,7 @@ Single image:
 Multi-image (up to 5):
 ```json
 {
-  "model": "grok-imagine-image",
+  "model": "grok-imagine-image-pro",
   "prompt": "...",
   "images": [
     {"type": "image_url", "url": "..."},

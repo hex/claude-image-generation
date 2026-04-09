@@ -1,7 +1,7 @@
 ---
 name: image-generation
 description: Generates and edits images using Google Gemini, OpenAI GPT Image, and xAI Grok Image APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "gpt image", "gemini image", or "grok image".
-version: 2026.4.1
+version: 2026.4.2
 ---
 
 # Image Generation with Gemini, OpenAI, and xAI
@@ -14,7 +14,7 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 1.5, and xAI Grok
 - **Model**: `gemini-3-pro-image-preview` (default, "Nano Banana Pro"). Alt: `gemini-3.1-flash-image-preview` (Flash, 14 ratios).
 - **Strengths**: Premium quality, up to 4K output, thinking mode, Google Search grounding, multi-turn editing with up to 14 reference images
 - **Aspect ratios**: 10 on Pro (1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9); Flash adds 4 extreme ratios (1:4, 4:1, 1:8, 8:1)
-- **Resolution**: `--image-size` takes `1K`, `2K`, `4K` on Pro; Flash also supports `512` (UPPERCASE required)
+- **Resolution**: `--image-size` takes `1K`, `2K`, `4K` on both Pro and Flash; Flash additionally supports `512` (UPPERCASE required)
 - **Env var**: `GEMINI_API_KEY`
 
 ### OpenAI GPT Image 1.5

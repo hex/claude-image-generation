@@ -168,8 +168,8 @@ These tests require a running Claude Code session with the plugin loaded. They v
 
 1. Run `/generate-image a simple blue circle`
 2. Select "All in parallel"
-3. Verify two tasks are created (one per provider)
-4. Verify two output files are generated with provider-suffixed filenames (e.g., `image-gemini.png`, `image-openai.png`)
+3. Verify three tasks are created (one per provider)
+4. Verify three output files are generated with provider-suffixed filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`)
 
 ### 3.4 Output Location
 
@@ -181,10 +181,10 @@ These tests require a running Claude Code session with the plugin loaded. They v
 ### 3.5 Parallel Generation with Task Tracking
 
 1. Run `/generate-image a sunset over the ocean` and select "All in parallel"
-2. Observe that two tasks appear (TaskCreate)
-3. Both are marked in_progress (TaskUpdate)
+2. Observe that three tasks appear (TaskCreate)
+3. All are marked in_progress (TaskUpdate)
 4. As each completes, it is marked completed
-5. Both output paths are reported
+5. All output paths are reported
 
 ## 4. Edge Cases
 

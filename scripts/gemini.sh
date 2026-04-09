@@ -20,7 +20,7 @@ Options:
                       Standard: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
                       Extreme (3.1 Flash only): 1:4, 4:1, 1:8, 8:1
   --image-size        Output resolution: 512, 1K, 2K, 4K (UPPERCASE required)
-                      512/2K/4K only on gemini-3.1-flash-image-preview
+                      512 requires gemini-3.1-flash-image-preview (Pro supports 1K/2K/4K)
   --thinking-level    Thinking level: minimal, High (default: minimal)
   --image-only        Return only image, no text description (responseModalities: IMAGE)
   --search-grounding  Enable Google Search grounding (tools: google_search)
