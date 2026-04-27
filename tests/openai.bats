@@ -55,11 +55,11 @@ setup() {
   assert_output_contains "Usage:"
 }
 
-@test "openai: default model is gpt-image-1.5" {
+@test "openai: default model is gpt-image-2" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
   # The script prints "Calling OpenAI API (model: ...)" before the curl call
   run "$OPENAI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-openai-out.png"
-  assert_output_contains "model: gpt-image-1.5"
+  assert_output_contains "model: gpt-image-2"
 }
 
 @test "openai: OPENAI_IMAGE_MODEL env var overrides default model" {

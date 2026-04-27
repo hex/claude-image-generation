@@ -133,7 +133,7 @@ Token rates: input $0.50/MTok, output text+thinking $3.00/MTok, output images $6
 
 ---
 
-## OpenAI GPT Image 1.5
+## OpenAI GPT Image 2
 
 ### Endpoints
 - Generation: `POST https://api.openai.com/v1/images/generations`
@@ -145,7 +145,7 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 ### Generation Request
 ```json
 {
-  "model": "gpt-image-1.5",
+  "model": "gpt-image-2",
   "prompt": "description",
   "n": 1,
   "size": "1024x1024",
@@ -159,7 +159,7 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 
 ### Edit Request (multipart/form-data)
 ```
-model=gpt-image-1.5
+model=gpt-image-2
 prompt=edit instruction
 image=@path/to/image.png
 size=1024x1024
@@ -174,7 +174,7 @@ POST /v1/images/edits
 Content-Type: application/json
 
 {
-  "model": "gpt-image-1.5",
+  "model": "gpt-image-2",
   "prompt": "...",
   "images": [
     {"image_url": "https://example.com/source.png"},
@@ -191,11 +191,11 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 |-----------|--------|-------|
 | `size` | `auto`, `1024x1024`, `1536x1024`, `1024x1536` | Default `1024x1024` |
 | `quality` | `auto`, `low`, `medium`, `high` | Default `high` |
-| `background` | `auto`, `transparent`, `opaque` | `transparent` is gpt-image-1.5 only |
+| `background` | `auto`, `transparent`, `opaque` | `transparent` supported on gpt-image-2 and gpt-image-1.5 |
 | `output_format` | `png`, `jpeg`, `webp` | `jpeg` is faster than `png` |
 | `output_compression` | integer 0-100 | Only applies to `jpeg`/`webp` |
 | `moderation` | `auto` (default), `low` | Less restrictive filtering; gpt-image models only |
-| `input_fidelity` | `low` (default), `high` | Edit only. `high` preserves faces/logos/textures. For 1.5: first 5 images get high fidelity. For 1/mini: first image only. |
+| `input_fidelity` | `low` (default), `high` | Edit only. `high` preserves faces/logos/textures. For 2/1.5: first 5 images get high fidelity. For 1/mini: first image only. |
 | `partial_images` | integer 0-3 | SSE streaming, +100 output tokens per partial |
 
 ### Response Format
@@ -215,12 +215,15 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 ```
 
 ### Models
-- `gpt-image-1.5` (default): Current flagship. Snapshot: `gpt-image-1.5-2025-12-16`
+- `gpt-image-2` (default): Current flagship. Snapshot: `gpt-image-2-2026-04-21`
+- `gpt-image-1.5`: Previous flagship. Snapshot: `gpt-image-1.5-2025-12-16`
 - `gpt-image-1-mini`: 3-4x cheaper, same API surface, only first image gets high fidelity on edits
-- `gpt-image-1`: Previous generation
-- `chatgpt-image-latest`: GA alias pointing to 1.5
+- `gpt-image-1`: Older generation
+- `chatgpt-image-latest`: GA alias — current target unverified post-2.0 launch; see OpenAI docs for live mapping
 
 ### Pricing
+
+**gpt-image-2**: pricing not yet enumerated on the model reference page — see https://platform.openai.com/docs/pricing for current per-image rates.
 
 **gpt-image-1.5** output per image (excludes input tokens):
 | Quality | 1024x1024 | 1024x1536 | 1536x1024 |

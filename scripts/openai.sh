@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Generates or edits images using OpenAI GPT Image 1.5 API.
+# ABOUTME: Generates or edits images using OpenAI GPT Image 2 API.
 # ABOUTME: Supports text-to-image and image editing via separate endpoints.
 
 set -euo pipefail
@@ -23,9 +23,9 @@ Options:
   --output-compression  Compression 0-100 (for jpeg/webp only)
   --moderation        Moderation: auto, low (default: auto)
   --input-fidelity    Edit mode only: low, high (default: low)
-                      'high' preserves faces/logos/textures — first 5 images for gpt-image-1.5
-  --model             OpenAI model (default: gpt-image-1.5)
-                      Alternatives: gpt-image-1-mini (3-4x cheaper), gpt-image-1
+                      'high' preserves faces/logos/textures — first 5 images for gpt-image-2/1.5
+  --model             OpenAI model (default: gpt-image-2)
+                      Alternatives: gpt-image-1.5, gpt-image-1-mini (3-4x cheaper), gpt-image-1
 
 Environment:
   OPENAI_API_KEY      OpenAI API key (required)
@@ -45,7 +45,7 @@ OUTPUT_FORMAT="png"
 OUTPUT_COMPRESSION=""
 MODERATION="auto"
 INPUT_FIDELITY=""
-MODEL="${OPENAI_IMAGE_MODEL:-gpt-image-1.5}"
+MODEL="${OPENAI_IMAGE_MODEL:-gpt-image-2}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

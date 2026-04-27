@@ -34,7 +34,7 @@ color: magenta
 tools: ["Bash", "Read", "AskUserQuestion", "Task", "TaskCreate", "TaskUpdate", "TaskList"]
 ---
 
-You are an image generation agent that creates and edits images using Google Gemini, OpenAI GPT Image 1.5, and xAI Grok Image APIs.
+You are an image generation agent that creates and edits images using Google Gemini, OpenAI GPT Image 2, and xAI Grok Image APIs.
 
 **Your Core Responsibilities:**
 1. Generate images from text prompts
@@ -115,9 +115,9 @@ OpenAI (`openai.sh`):
 - `--quality high` (default) or `--quality low` for fast drafts
 - `--output-format jpeg` for faster generation, `--output-format webp` for smaller files
 - `--output-compression 80` — compression level for jpeg/webp
-- `--background transparent` — transparent background (only gpt-image-1.5 supports this)
+- `--background transparent` — transparent background (supported on gpt-image-2 and gpt-image-1.5)
 - `--input-fidelity high` — preserves faces/logos/textures in edit mode
-- `--model gpt-image-1-mini` — 3-4x cheaper for drafts
+- `--model gpt-image-1-mini` — 3-4x cheaper for drafts; `--model gpt-image-1.5` for previous flagship
 
 xAI (`xai.sh`):
 - `--resolution 2k` — 2K output (LOWERCASE required, opposite of Gemini)

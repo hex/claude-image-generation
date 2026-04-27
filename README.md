@@ -4,7 +4,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 
 ## Features
 
-- **Text-to-image generation** with Google Gemini, OpenAI GPT Image 1.5, or xAI Grok Image
+- **Text-to-image generation** with Google Gemini, OpenAI GPT Image 2, or xAI Grok Image
 - **Image editing** with text instructions (all providers)
 - **Parallel generation** using multiple providers simultaneously via Task tool
 - **Interactive provider selection** via AskUserQuestion at runtime
@@ -60,7 +60,7 @@ Override the default model per provider via environment variables:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` | Gemini model used for generation and editing |
-| `OPENAI_IMAGE_MODEL` | `gpt-image-1.5` | OpenAI model used for generation and editing |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-2` | OpenAI model used for generation and editing |
 | `XAI_IMAGE_MODEL` | `grok-imagine-image-pro` | xAI model used for generation and editing |
 
 Command-line `--model` flag on the scripts takes precedence over environment variables.
@@ -88,9 +88,10 @@ These apply to inline display (iTerm2, Sixel) and tmux pane display.
 
 | Model | Characteristics |
 |-------|-----------------|
-| `gpt-image-1.5` | Superior text rendering, transparent backgrounds, quality tiers (default) |
+| `gpt-image-2` | Latest flagship, snapshot `gpt-image-2-2026-04-21` (default) |
+| `gpt-image-1.5` | Previous flagship, superior text rendering, transparent backgrounds, quality tiers |
 | `gpt-image-1-mini` | 3-4x cheaper, cost-efficient for drafts and previews |
-| `gpt-image-1` | Previous generation |
+| `gpt-image-1` | Older generation |
 
 ### Available xAI Models
 
@@ -220,7 +221,7 @@ bash scripts/openai.sh \
 | `--output-compression` | integer 0-100 (jpeg/webp only) | -- | No |
 | `--moderation` | `auto`, `low` | `auto` | No |
 | `--input-fidelity` | `low`, `high` (edit only) | `low` | No |
-| `--model` | OpenAI model name | `gpt-image-1.5` | No |
+| `--model` | OpenAI model name | `gpt-image-2` | No |
 
 #### xai.sh
 
@@ -278,7 +279,7 @@ bash scripts/xai.sh \
 
 | Feature | Gemini | OpenAI | xAI |
 |---------|--------|--------|-----|
-| Default model | gemini-3-pro-image-preview | gpt-image-1.5 | grok-imagine-image-pro |
+| Default model | gemini-3-pro-image-preview | gpt-image-2 | grok-imagine-image-pro |
 | Max resolution | 4K (via `--image-size`) | 1536x1024 | 2K (via `--resolution`) |
 | Text rendering | Very good (under 25 chars) | Excellent | Good |
 | Transparent BG | No | Yes | No |
@@ -309,7 +310,7 @@ bash scripts/xai.sh \
 
 ### Versioning
 
-This plugin uses calendar versioning in `YYYY.M.PATCH` format (e.g., `2026.2.0`). The version is tracked in both `.claude-plugin/plugin.json` and `skills/image-generation/SKILL.md`.
+This plugin uses calendar versioning in `YYYY.M.PATCH` format (e.g., `2026.4.3`). The version is tracked in both `.claude-plugin/plugin.json` and `skills/image-generation/SKILL.md`.
 
 ### Testing
 

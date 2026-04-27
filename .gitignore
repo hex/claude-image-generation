@@ -12,3 +12,13 @@ CLAUDE.md
 *.swp
 *.swo
 *~
+
+# Skill evals (generated benchmarks, not part of plugin)
+skills/image-generation/evals/
+
+# Eval workspace artifacts
+image-generation-workspace/
+
+# Stray generated test images at repo root
+/test-input.png
+/white-cat-*.png

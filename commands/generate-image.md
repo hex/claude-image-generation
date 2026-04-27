@@ -15,7 +15,7 @@ Generate or edit an image based on the user's request.
 
 2. Ask the user which provider to use with AskUserQuestion:
    - **Gemini** (gemini-3-pro-image-preview): Premium quality, professional asset production, up to 14 reference images
-   - **OpenAI** (gpt-image-1.5): Best for text rendering and transparent backgrounds
+   - **OpenAI** (gpt-image-2): Best for text rendering and transparent backgrounds
    - **xAI** (grok-imagine-image-pro): Premium tier, higher quality, flat per-image pricing
    - **All in parallel**: Generate with all available providers and pick the best result
 

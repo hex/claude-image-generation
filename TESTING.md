@@ -106,10 +106,10 @@ export GEMINI_IMAGE_MODEL="gemini-3.1-flash-image-preview"
 bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/test.png
 # Expected: stderr includes "model: gemini-3.1-flash-image-preview" (will fail at API call without valid key, but model name is visible in the log)
 
-# OpenAI model override
+# OpenAI model override (forcing previous flagship)
 export OPENAI_IMAGE_MODEL="gpt-image-1.5"
 bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
-# Expected: stderr includes "model: gpt-image-1.5"
+# Expected: stderr includes "model: gpt-image-1.5" (not the default gpt-image-2)
 
 # xAI model override
 export XAI_IMAGE_MODEL="grok-imagine-image-pro"

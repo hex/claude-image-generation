@@ -1,12 +1,12 @@
 ---
 name: image-generation
 description: Generates and edits images using Google Gemini, OpenAI GPT Image, and xAI Grok Image APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "gpt image", "gemini image", or "grok image".
-version: 2026.4.2
+version: 2026.4.3
 ---
 
 # Image Generation with Gemini, OpenAI, and xAI
 
-Generate and edit images using Google Gemini, OpenAI GPT Image 1.5, and xAI Grok Image APIs via shell scripts.
+Generate and edit images using Google Gemini, OpenAI GPT Image 2, and xAI Grok Image APIs via shell scripts.
 
 ## Available Providers
 
@@ -17,8 +17,8 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 1.5, and xAI Grok
 - **Resolution**: `--image-size` takes `1K`, `2K`, `4K` on both Pro and Flash; Flash additionally supports `512` (UPPERCASE required)
 - **Env var**: `GEMINI_API_KEY`
 
-### OpenAI GPT Image 1.5
-- **Model**: `gpt-image-1.5`
+### OpenAI GPT Image 2
+- **Model**: `gpt-image-2` (default, snapshot `gpt-image-2-2026-04-21`); `gpt-image-1.5` available as previous flagship via `--model`
 - **Strengths**: Superior text rendering, transparent backgrounds, up to 16 input images for editing, quality tiers
 - **Sizes**: 1024x1024, 1536x1024 (landscape), 1024x1536 (portrait)
 - **Quality**: low (fast/cheap), medium, high (best fidelity)
@@ -119,7 +119,7 @@ To generate with multiple providers simultaneously using the streaming display p
 - Include composition details: "close-up", "aerial view", "centered", "rule of thirds"
 
 ### Text in Images
-- OpenAI GPT Image 1.5 is significantly better at rendering text
+- OpenAI GPT Image 2 is significantly better at rendering text
 - Put text in quotes or ALL CAPS in the prompt: `a sign that reads "OPEN 24 HOURS"`
 - Specify typography details: font style, size, color, placement
 
@@ -168,7 +168,7 @@ To generate with multiple providers simultaneously using the streaming display p
 | `--output-compression` | 0-100 (jpeg/webp only) | -- |
 | `--moderation` | auto, low | auto |
 | `--input-fidelity` | low, high (edit only) | low |
-| `--model` | OpenAI model name | gpt-image-1.5 |
+| `--model` | OpenAI model name | gpt-image-2 |
 
 ### xai.sh
 | Flag | Values | Default |
