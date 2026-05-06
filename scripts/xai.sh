@@ -7,6 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 
+readonly PROVIDER_NAME="xai"
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [options]
@@ -81,6 +83,7 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
 fi
 
 echo "Calling xAI API (model: ${MODEL}, mode: ${MODE})..." >&2
+display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
 # Build request body -- xAI uses the same endpoint for generation and editing.
 # For editing, the source image is passed as image_url (public URL or data URI).
@@ -124,17 +127,14 @@ HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "Error: xAI API returned HTTP ${HTTP_CODE}" >&2
-  echo "$BODY" | jq -r '.error.message // .' >&2
-  exit 1
+  api_msg=$(echo "$BODY" | jq -r '.error.message // .' 2>/dev/null || echo "$BODY")
+  provider_die "xAI API returned HTTP ${HTTP_CODE}: ${api_msg}"
 fi
 
 IMAGE_DATA=$(echo "$BODY" | jq -r '.data[0].b64_json')
 
 if [[ -z "$IMAGE_DATA" || "$IMAGE_DATA" == "null" ]]; then
-  echo "Error: No image data in response" >&2
-  echo "$BODY" | jq '.' >&2
-  exit 1
+  provider_die "No image data in response: $(echo "$BODY" | jq -c '.' 2>/dev/null || echo "$BODY")"
 fi
 
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -151,6 +151,6 @@ if [[ -n "$REVISED_PROMPT" ]]; then
   echo "Revised prompt: ${REVISED_PROMPT}" >&2
 fi
 
-display_image "$OUTPUT"
+provider_finish "$OUTPUT"
 
 echo "$OUTPUT"

@@ -7,6 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 
+readonly PROVIDER_NAME="openai"
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [options]
@@ -109,6 +111,7 @@ fi
 
 if [[ "$MODE" == "generate" ]]; then
   echo "Calling OpenAI API (model: ${MODEL}, mode: generate)..." >&2
+  display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
   REQUEST_BODY=$(jq -n \
     --arg model "$MODEL" \
@@ -142,6 +145,7 @@ if [[ "$MODE" == "generate" ]]; then
 
 elif [[ "$MODE" == "edit" ]]; then
   echo "Calling OpenAI API (model: ${MODEL}, mode: edit)..." >&2
+  display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
   EDIT_ARGS=(-F "model=${MODEL}" -F "prompt=${PROMPT}" -F "image=@${INPUT_IMAGE}" \
     -F "size=${SIZE}" -F "quality=${QUALITY}" -F "background=${BACKGROUND}" \
@@ -165,17 +169,14 @@ HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "Error: OpenAI API returned HTTP ${HTTP_CODE}" >&2
-  echo "$BODY" | jq -r '.error.message // .' >&2
-  exit 1
+  api_msg=$(echo "$BODY" | jq -r '.error.message // .' 2>/dev/null || echo "$BODY")
+  provider_die "OpenAI API returned HTTP ${HTTP_CODE}: ${api_msg}"
 fi
 
 IMAGE_DATA=$(echo "$BODY" | jq -r '.data[0].b64_json')
 
 if [[ -z "$IMAGE_DATA" || "$IMAGE_DATA" == "null" ]]; then
-  echo "Error: No image data in response" >&2
-  echo "$BODY" | jq '.' >&2
-  exit 1
+  provider_die "No image data in response: $(echo "$BODY" | jq -c '.' 2>/dev/null || echo "$BODY")"
 fi
 
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -189,6 +190,6 @@ echo "Format: ${OUTPUT_FORMAT}" >&2
 echo "Size: ${SIZE}" >&2
 echo "Quality: ${QUALITY}" >&2
 
-display_image "$OUTPUT"
+provider_finish "$OUTPUT"
 
 echo "$OUTPUT"

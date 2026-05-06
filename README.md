@@ -6,7 +6,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 
 - **Text-to-image generation** with Google Gemini, OpenAI GPT Image 2, or xAI Grok Image
 - **Image editing** with text instructions (all providers)
-- **Parallel generation** using multiple providers simultaneously via Task tool
+- **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners and pending-provider spinner
 - **Interactive provider selection** via AskUserQuestion at runtime
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
 - **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code)
@@ -302,7 +302,8 @@ bash scripts/xai.sh \
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
-| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, streaming pane) |
+| Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; owns pane open/close lifecycle |
+| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, streaming pane with colored banners + pending-provider spinner) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 | Automated tests | `tests/` | bats test suite for all scripts |
 
@@ -310,7 +311,7 @@ bash scripts/xai.sh \
 
 ### Versioning
 
-This plugin uses calendar versioning in `YYYY.M.PATCH` format (e.g., `2026.4.3`). The version is tracked in both `.claude-plugin/plugin.json` and `skills/image-generation/SKILL.md`.
+This plugin uses calendar versioning in `YYYY.M.PATCH` format (e.g., `2026.5.0`). The version is tracked in both `.claude-plugin/plugin.json` and `skills/image-generation/SKILL.md`.
 
 ### Testing
 
@@ -351,7 +352,7 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 
 When running inside **tmux** (including Claude Code sessions), single images open in a bottom pane (`-v` split) and multiple images open in a vertical side pane (`-h` split, 30% width) targeting the originating pane (via `$TMUX_PANE`). The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
 
-For parallel generation, the streaming display pane shows images progressively as each provider finishes. Call `display_pane_open` to create a shared pane, pass `DISPLAY_PANE_DIR` to each provider script, and call `display_pane_close` when all are done. Provider scripts require zero changes — `display_image()` transparently routes to the shared pane when `DISPLAY_PANE_DIR` is set.
+For parallel generation, use `scripts/run-all.sh` — a single shell that opens the streaming pane, exports `DISPLAY_PANE_DIR`, forks all providers with `&`, waits, and closes the pane. The watcher renders per-provider colored banners (blue/gray/red) with model + timing, plus an animated bottom spinner of providers still working. Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
 
 ## Requirements
 

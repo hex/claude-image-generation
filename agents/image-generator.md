@@ -64,29 +64,8 @@ You are an image generation agent that creates and edits images using Google Gem
 5. Execute the scripts:
 
    **Single provider:**
-   Run the script directly via Bash, then mark the task completed.
-
-   **Multiple providers (parallel):**
-   First, open a streaming display pane (single Bash call, capture the watch directory path):
-   ```bash
-   source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_open
-   ```
-   This outputs a path like `/tmp/display_pane.XXXXXX` — capture it as `DISPLAY_PANE_DIR`.
-
-   Launch Task subagents (subagent_type: Bash) in the same message, each running one script.
-   Use suffixed output filenames (e.g., `hero-gemini.png`, `hero-openai.png`, `hero-xai.png`).
-   Pass `DISPLAY_PANE_DIR` so images appear progressively in the shared pane:
-   ```bash
-   DISPLAY_PANE_DIR=<captured-path> bash "${CLAUDE_PLUGIN_ROOT}/scripts/gemini.sh" --mode generate --prompt "<prompt>" --output "<path>"
-   ```
-   As each subagent returns, mark its task completed or note the error.
-
-   After all providers complete, close the streaming pane:
-   ```bash
-   DISPLAY_PANE_DIR=<captured-path> bash -c 'source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_close'
-   ```
-
-   Scripts are located at `${CLAUDE_PLUGIN_ROOT}/scripts/`.
+   Run the script directly via Bash, then mark the task completed. The script will
+   display the resulting image in a tmux pane (or directly to the terminal outside tmux).
 
    ```bash
    # Generation
@@ -99,6 +78,37 @@ You are an image generation agent that creates and edits images using Google Gem
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/openai.sh" --mode edit --prompt "<prompt>" --input-image "<input>" --output "<path>"
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" --mode edit --prompt "<prompt>" --input-image "<input>" --output "<path>"
    ```
+
+   **Multiple providers (parallel):**
+   Use `run-all.sh` — one Bash call that opens a single shared streaming pane and
+   forks all providers in parallel. Each provider produces `<base>-<provider>.png`,
+   and the pane shows colored banners + an animated spinner as results land.
+
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
+     --mode generate \
+     --prompt "<prompt>" \
+     --output-base "<base>"
+   ```
+
+   For edit mode, add `--input-image <path>`. To run a subset of providers, pass
+   `--providers gemini,openai` (comma-separated). To pass per-provider tuning flags,
+   use `--gemini-extra "..."`, `--openai-extra "..."`, `--xai-extra "..."` — each is
+   a single shell-split string of additional arguments forwarded to that provider.
+
+   ```bash
+   # Generate at 4K with Gemini, high quality with OpenAI, 2K with xAI
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
+     --mode generate \
+     --prompt "<prompt>" \
+     --output-base "hero" \
+     --gemini-extra "--image-size 4K --aspect-ratio 16:9" \
+     --openai-extra "--quality high" \
+     --xai-extra    "--resolution 2k"
+   ```
+
+   Per-provider stderr/stdout is captured under `$DISPLAY_PANE_DIR/logs/<provider>.{out,err}`
+   while the pane is open — useful if a provider fails and you want to diagnose.
 
 6. Report the output file path(s) back. If multiple providers were used, mention all files so the user can compare.
 

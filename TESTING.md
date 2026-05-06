@@ -168,8 +168,9 @@ These tests require a running Claude Code session with the plugin loaded. They v
 
 1. Run `/generate-image a simple blue circle`
 2. Select "All in parallel"
-3. Verify three tasks are created (one per provider)
-4. Verify three output files are generated with provider-suffixed filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`)
+3. Verify a single task is created tracking the parallel run (`run-all.sh` owns parallelism; the agent does not orchestrate per-provider Task subagents)
+4. Verify a streaming pane opens to the right (30% width) showing colored banners + animated spinner as each provider completes
+5. Verify three output files are generated with provider-suffixed filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`)
 
 ### 3.4 Output Location
 
@@ -178,13 +179,14 @@ These tests require a running Claude Code session with the plugin loaded. They v
 3. Verify the directory is created if it did not exist
 4. Verify the file is written to the specified path
 
-### 3.5 Parallel Generation with Task Tracking
+### 3.5 Parallel Generation via run-all.sh
 
 1. Run `/generate-image a sunset over the ocean` and select "All in parallel"
-2. Observe that three tasks appear (TaskCreate)
-3. All are marked in_progress (TaskUpdate)
-4. As each completes, it is marked completed
-5. All output paths are reported
+2. Observe that a single task tracking the parallel run is created and marked in_progress
+3. A streaming pane opens (30% width side pane). As each provider finishes, a colored banner appears (gemini blue / openai gray / xai red) with the model name and elapsed timing, followed by the rendered image
+4. While providers are still working, the bottom of the pane shows an animated spinner with the names of pending providers in their accent colors
+5. When all providers complete, the pane shows interactive controls (`[f]inder [p]review [esc/ctrl-d]`)
+6. The task is marked completed and all output paths are reported. If any provider failed, run-all.sh exits with status 1 and the error appears as a red banner inline (with details in `$DISPLAY_PANE_DIR/logs/<provider>.err`)
 
 ## 4. Edge Cases
 

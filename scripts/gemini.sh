@@ -7,6 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 
+readonly PROVIDER_NAME="gemini"
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [options]
@@ -150,6 +152,7 @@ build_request_body() {
 REQUEST_BODY=$(build_request_body)
 
 echo "Calling Gemini API (model: ${MODEL}, mode: ${MODE})..." >&2
+display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
 RESPONSE=$(curl -s -w "\n%{http_code}" \
   -X POST "${API_URL}" \
@@ -161,9 +164,8 @@ HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "Error: Gemini API returned HTTP ${HTTP_CODE}" >&2
-  echo "$BODY" | jq -r '.error.message // .' >&2
-  exit 1
+  api_msg=$(echo "$BODY" | jq -r '.error.message // .' 2>/dev/null || echo "$BODY")
+  provider_die "Gemini API returned HTTP ${HTTP_CODE}: ${api_msg}"
 fi
 
 IMAGE_DATA=$(echo "$BODY" | jq -r '
@@ -172,12 +174,11 @@ IMAGE_DATA=$(echo "$BODY" | jq -r '
   | .inlineData.data' | head -1)
 
 if [[ -z "$IMAGE_DATA" || "$IMAGE_DATA" == "null" ]]; then
-  echo "Error: No image data in response" >&2
   TEXT_RESPONSE=$(echo "$BODY" | jq -r '.candidates[0].content.parts[] | select(.text != null) | .text' 2>/dev/null || true)
   if [[ -n "$TEXT_RESPONSE" ]]; then
-    echo "Model response: ${TEXT_RESPONSE}" >&2
+    provider_die "No image data in response. Model said: ${TEXT_RESPONSE}"
   fi
-  exit 1
+  provider_die "No image data in response"
 fi
 
 MIME_TYPE=$(echo "$BODY" | jq -r '
@@ -207,6 +208,6 @@ if [[ -n "$TEXT_RESPONSE" && "$TEXT_RESPONSE" != "null" ]]; then
   echo "Description: ${TEXT_RESPONSE}" >&2
 fi
 
-display_image "$OUTPUT"
+provider_finish "$OUTPUT"
 
 echo "$OUTPUT"

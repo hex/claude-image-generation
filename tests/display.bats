@@ -1155,8 +1155,7 @@ teardown() {
 
   local mock_dir="${BATS_TMPDIR}/mock_pane_done_$$"
   mkdir -p "$mock_dir"
-  local args_file="${mock_dir}/tmux_args"
-  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\necho "%%%%99"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\necho "%%%%99"\n' > "$mock_dir/tmux"
   printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
   chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
   export PATH="$mock_dir:$PATH"
@@ -1164,15 +1163,132 @@ teardown() {
   local watch_dir
   watch_dir=$(display_pane_open)
 
-  [[ -f "$args_file" ]]
-  local captured
-  captured=$(cat "$args_file")
-  [[ "$captured" == *".done"* ]] || {
-    echo "Expected watcher to check for .done sentinel"
-    echo "Actual: $captured"
+  [[ -f "$watch_dir/watcher.sh" ]] || {
+    echo "Expected watcher.sh to exist"
     rm -rf "$watch_dir"
     return 1
   }
+  local watcher_content
+  watcher_content=$(cat "$watch_dir/watcher.sh")
+  [[ "$watcher_content" == *".done"* ]] || {
+    echo "Expected watcher.sh to poll for .done sentinel"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  rm -rf "$watch_dir"
+}
+
+@test "display: display_pane_status writes TSV row to status file" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_status_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+
+  display_pane_status gemini complete 1500 gemini-3-pro-image-preview /tmp/x.png
+
+  [[ -f "$pane_dir/status" ]]
+  local row
+  row=$(cat "$pane_dir/status")
+  # Five tab-separated fields: provider, state, ms, model, path
+  local field_count
+  field_count=$(awk -F'\t' '{print NF; exit}' "$pane_dir/status")
+  [[ "$field_count" -eq 5 ]] || {
+    echo "Expected 5 fields, got $field_count: $row"
+    return 1
+  }
+  [[ "$row" == *"gemini"* && "$row" == *"complete"* && "$row" == *"1500"* ]] || {
+    echo "Row missing expected fields: $row"
+    return 1
+  }
+}
+
+@test "display: display_pane_status fails when DISPLAY_PANE_DIR unset" {
+  source "$DISPLAY_SH"
+  unset DISPLAY_PANE_DIR 2>/dev/null || true
+  run display_pane_status gemini complete 100 model /tmp/x.png
+  assert_status 1
+  assert_output_contains "DISPLAY_PANE_DIR"
+}
+
+@test "display: display_pane_error writes message to errors/<provider>.txt" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_err_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+
+  display_pane_error openai "rate limit hit"
+
+  [[ -f "$pane_dir/errors/openai.txt" ]]
+  local content
+  content=$(cat "$pane_dir/errors/openai.txt")
+  [[ "$content" == "rate limit hit" ]] || {
+    echo "Expected exact error message, got: $content"
+    return 1
+  }
+}
+
+@test "display: display_pane_begin/finish/fail are no-ops when DISPLAY_PANE_DIR unset" {
+  source "$DISPLAY_SH"
+  unset DISPLAY_PANE_DIR 2>/dev/null || true
+
+  # Should not write anything, not fail, and not require DISPLAY_PANE_DIR
+  run display_pane_begin gemini gemini-3-pro
+  assert_status 0
+  run display_pane_finish gemini gemini-3-pro /tmp/x.png
+  assert_status 0
+  run display_pane_fail gemini gemini-3-pro "error msg"
+  assert_status 0
+}
+
+@test "display: display_pane_finish records elapsed timing after begin" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_timing_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+
+  display_pane_begin xai grok-imagine-image-pro
+  sleep 0.05
+  display_pane_finish xai grok-imagine-image-pro /tmp/dummy.png
+
+  [[ -f "$pane_dir/status" ]]
+  # First row: querying. Second row: complete with elapsed > 0.
+  local complete_row
+  complete_row=$(grep -P '^xai\tcomplete' "$pane_dir/status" 2>/dev/null \
+    || awk -F'\t' '$1=="xai" && $2=="complete"' "$pane_dir/status")
+  local ms
+  ms=$(echo "$complete_row" | awk -F'\t' '{print $3}')
+  [[ -n "$ms" && "$ms" -gt 0 ]] || {
+    echo "Expected positive elapsed ms, got: '$ms' (full row: $complete_row)"
+    return 1
+  }
+}
+
+@test "display: display_pane_open watcher uses council-style provider colors" {
+  source "$DISPLAY_SH"
+  export TMUX="/tmp/tmux-501/default,12345,0"
+  export TMUX_PANE="%0"
+  export LC_TERMINAL="iTerm2"
+
+  local mock_dir="${BATS_TMPDIR}/mock_pane_colors_$$"
+  mkdir -p "$mock_dir"
+  printf '#!/bin/bash\necho "%%%%99"\n' > "$mock_dir/tmux"
+  printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
+  chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
+  export PATH="$mock_dir:$PATH"
+
+  local watch_dir
+  watch_dir=$(display_pane_open)
+  local watcher_content
+  watcher_content=$(cat "$watch_dir/watcher.sh")
+
+  # Colors keyed off provider names — verify both the case branches and at
+  # least one of the council-derived RGB triplets are present.
+  [[ "$watcher_content" == *"gemini)"* ]] || { echo "Missing gemini case"; rm -rf "$watch_dir"; return 1; }
+  [[ "$watcher_content" == *"openai)"* ]] || { echo "Missing openai case"; rm -rf "$watch_dir"; return 1; }
+  [[ "$watcher_content" == *"xai)"*    ]] || { echo "Missing xai case";    rm -rf "$watch_dir"; return 1; }
+  [[ "$watcher_content" == *"30;64;175"* ]]   || { echo "Missing gemini blue-700"; rm -rf "$watch_dir"; return 1; }
+  [[ "$watcher_content" == *"185;28;28"* ]]   || { echo "Missing xai red-700";     rm -rf "$watch_dir"; return 1; }
+  [[ "$watcher_content" == *"draw_loading"* ]] || { echo "Missing spinner";         rm -rf "$watch_dir"; return 1; }
   rm -rf "$watch_dir"
 }
 
@@ -1184,8 +1300,7 @@ teardown() {
 
   local mock_dir="${BATS_TMPDIR}/mock_pane_ctrl_$$"
   mkdir -p "$mock_dir"
-  local args_file="${mock_dir}/tmux_args"
-  printf '#!/bin/bash\nprintf "%%s" "$*" > "%s"\necho "%%%%99"\n' "$args_file" > "$mock_dir/tmux"
+  printf '#!/bin/bash\necho "%%%%99"\n' > "$mock_dir/tmux"
   printf '#!/bin/bash\nexit 0\n' > "$mock_dir/imgcat"
   chmod +x "$mock_dir/tmux" "$mock_dir/imgcat"
   export PATH="$mock_dir:$PATH"
@@ -1193,24 +1308,25 @@ teardown() {
   local watch_dir
   watch_dir=$(display_pane_open)
 
-  [[ -f "$args_file" ]]
-  local captured
-  captured=$(cat "$args_file")
-  [[ "$captured" == *"[f]inder"* ]] || {
-    echo "Expected controls to include [f]inder"
-    echo "Actual: $captured"
+  [[ -f "$watch_dir/watcher.sh" ]] || {
+    echo "Expected watcher.sh to exist"
     rm -rf "$watch_dir"
     return 1
   }
-  [[ "$captured" == *"[p]review"* ]] || {
-    echo "Expected controls to include [p]review"
-    echo "Actual: $captured"
+  local watcher_content
+  watcher_content=$(cat "$watch_dir/watcher.sh")
+  [[ "$watcher_content" == *"[f]inder"* ]] || {
+    echo "Expected watcher.sh to include [f]inder control"
     rm -rf "$watch_dir"
     return 1
   }
-  [[ "$captured" == *"esc"* ]] || {
-    echo "Expected controls to include esc"
-    echo "Actual: $captured"
+  [[ "$watcher_content" == *"[p]review"* ]] || {
+    echo "Expected watcher.sh to include [p]review control"
+    rm -rf "$watch_dir"
+    return 1
+  }
+  [[ "$watcher_content" == *"esc"* ]] || {
+    echo "Expected watcher.sh to include esc control"
     rm -rf "$watch_dir"
     return 1
   }

@@ -356,6 +356,87 @@ display_pane_close() {
   touch "$DISPLAY_PANE_DIR/.done"
 }
 
+# Appends a status event to the streaming pane's status log so the watcher
+# can render colored banners and animated pending indicators per provider.
+# Usage: display_pane_status <provider> <state> [elapsed_ms] [model] [path]
+# State is one of: querying, complete, error
+display_pane_status() {
+  if [[ -z "${DISPLAY_PANE_DIR:-}" || ! -d "${DISPLAY_PANE_DIR:-}" ]]; then
+    echo "display_pane_status: DISPLAY_PANE_DIR is not set or not a directory" >&2
+    return 1
+  fi
+  local provider="$1" state="$2" ms="${3:-}" model="${4:-}" path="${5:-}"
+  if [[ -n "$path" && "$path" != /* ]]; then
+    path="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$provider" "$state" "$ms" "$model" "$path" \
+    >> "$DISPLAY_PANE_DIR/status"
+}
+
+# Records a provider-specific error message so the watcher can display it
+# inline beneath an error banner. Usage: display_pane_error <provider> <message>
+display_pane_error() {
+  if [[ -z "${DISPLAY_PANE_DIR:-}" || ! -d "${DISPLAY_PANE_DIR:-}" ]]; then
+    echo "display_pane_error: DISPLAY_PANE_DIR is not set or not a directory" >&2
+    return 1
+  fi
+  local provider="$1" message="$2"
+  mkdir -p "$DISPLAY_PANE_DIR/errors"
+  printf '%s' "$message" > "$DISPLAY_PANE_DIR/errors/${provider}.txt"
+}
+
+# Returns current epoch in milliseconds. macOS `date` lacks %N so we route
+# through perl, which ships on every macOS and Linux distro by default.
+__pane_now_ms() {
+  perl -MTime::HiRes=time -e 'printf "%d", time*1000' 2>/dev/null
+}
+
+# Provider-script helpers — no-op when DISPLAY_PANE_DIR is unset, so providers
+# can call them unconditionally. begin records the querying state and starts
+# the timer; finish/fail compute elapsed ms and emit complete/error events.
+display_pane_begin() {
+  [[ -z "${DISPLAY_PANE_DIR:-}" ]] && return 0
+  local provider="$1" model="$2"
+  __PANE_START_MS=$(__pane_now_ms)
+  display_pane_status "$provider" querying "" "$model" ""
+}
+
+display_pane_finish() {
+  [[ -z "${DISPLAY_PANE_DIR:-}" ]] && return 0
+  local provider="$1" model="$2" path="$3"
+  local elapsed=""
+  if [[ -n "${__PANE_START_MS:-}" ]]; then
+    local now
+    now=$(__pane_now_ms)
+    [[ -n "$now" ]] && elapsed=$((now - __PANE_START_MS))
+  fi
+  display_pane_status "$provider" complete "$elapsed" "$model" "$path"
+}
+
+display_pane_fail() {
+  [[ -z "${DISPLAY_PANE_DIR:-}" ]] && return 0
+  local provider="$1" model="$2" message="$3"
+  display_pane_error "$provider" "$message"
+  display_pane_status "$provider" error "" "$model" ""
+}
+
+# Convenience for provider scripts. Reads PROVIDER_NAME and MODEL from the
+# caller's scope. provider_die emits the error event then exits with code 1.
+# provider_finish emits the complete event and falls back to direct terminal
+# display when running outside a streaming pane.
+provider_die() {
+  local msg="$*"
+  echo "$msg" >&2
+  display_pane_fail "${PROVIDER_NAME:-unknown}" "${MODEL:-}" "$msg"
+  exit 1
+}
+
+provider_finish() {
+  local output="$1"
+  display_pane_finish "${PROVIDER_NAME:-unknown}" "${MODEL:-}" "$output"
+  [[ -z "${DISPLAY_PANE_DIR:-}" ]] && display_image "$output"
+}
+
 # Opens a tmux pane that watches for images and displays them as they arrive.
 # Creates a temp directory with a manifest file and render script.
 # Prints the watch directory path to stdout (caller sets DISPLAY_PANE_DIR).
@@ -375,6 +456,7 @@ display_pane_open() {
   # Write terminal-specific render script
   local render_cmd
   local width="${DISPLAY_IMAGE_WIDTH:-512}"
+  local height="${DISPLAY_IMAGE_HEIGHT:-512}"
   case "$terminal" in
     iterm2)
       local imgcat_path
@@ -383,7 +465,9 @@ display_pane_open() {
         rm -rf "$watch_dir"
         return 1
       }
-      render_cmd="$(printf '%q' "$imgcat_path") -W ${width}px \"\$1\""
+      # Without -r, PNGs with DPI metadata render at native size instead of
+      # the requested width — the bug this combination of flags closes.
+      render_cmd="$(printf '%q' "$imgcat_path") -W ${width}px -H ${height}px -r \"\$1\""
       ;;
     kitty)
       render_cmd="kitten icat --align left \"\$1\""
@@ -408,8 +492,178 @@ $render_cmd
 RENDEREOF
   chmod +x "$watch_dir/render.sh"
 
-  local safe_watch_dir
+  cat > "$watch_dir/watcher.sh" <<'WATCHEREOF'
+#!/bin/bash
+WATCH="$1"
+trap 'rm -rf "$WATCH"' EXIT
+
+declare -A provider_state
+declare -A provider_timing
+declare -A provider_model
+declare -A provider_path
+declare -A rendered
+status_lines_processed=0
+manifest_shown=0
+spinner_frame=0
+SPINNERS=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+
+# Provider palette: emits four space-separated RGB triplets — bg, fg, accent,
+# spinner — into the variables named by the first four args. Single source of
+# truth for every place we color provider output. WCAG AA across themes.
+provider_palette() {
+    local __bg="$1" __fg="$2" __accent="$3" __spinner="$4" name="$5"
+    case "$name" in
+        gemini) printf -v "$__bg" '30;64;175';   printf -v "$__fg" '255;255;255'; printf -v "$__accent" '147;197;253'; printf -v "$__spinner" '59;130;246'   ;;
+        openai) printf -v "$__bg" '229;231;235'; printf -v "$__fg" '31;41;55';    printf -v "$__accent" '100;116;139'; printf -v "$__spinner" '229;231;235' ;;
+        xai)    printf -v "$__bg" '185;28;28';   printf -v "$__fg" '255;255;255'; printf -v "$__accent" '252;165;165'; printf -v "$__spinner" '248;113;113' ;;
+        *)      printf -v "$__bg" '55;65;81';    printf -v "$__fg" '255;255;255'; printf -v "$__accent" '156;163;175'; printf -v "$__spinner" '156;163;175' ;;
+    esac
+}
+
+draw_loading() {
+    local pending=()
+    for p in "${!provider_state[@]}"; do
+        [[ "${provider_state[$p]}" == "querying" ]] && pending+=("$p")
+    done
+    [[ ${#pending[@]} -eq 0 ]] && return 0
+    local frame="${SPINNERS[$((spinner_frame % ${#SPINNERS[@]}))]}"
+
+    local list="" first=1 _bg _fg _accent _spinner chunk
+    for p in "${pending[@]}"; do
+        provider_palette _bg _fg _accent _spinner "$p"
+        if [[ $first -eq 1 ]]; then
+            first=0
+        else
+            list+=$'\033[2m, \033[0m'
+        fi
+        printf -v chunk '\033[1;38;2;%sm%s\033[0m' "$_spinner" "$p"
+        list+="$chunk"
+    done
+
+    provider_palette _bg _fg _accent _spinner "${pending[0]}"
+    printf '\r\033[K   \033[1;38;2;%sm%s\033[0m   \033[2mgenerating\033[0m   %s' \
+        "$_spinner" "$frame" "$list"
+}
+
+clear_loading() {
+    printf '\r\033[K'
+}
+
+build_banner_line() {
+    local out_var="$1" name="$2"
+    local state="${provider_state[$name]:-}"
+    local ms="${provider_timing[$name]:-}"
+    local model="${provider_model[$name]:-}"
+    local bg fg accent _spinner
+    provider_palette bg fg accent _spinner "$name"
+    local upper
+    upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
+
+    local model_inline=""
+    if [[ -n "$model" ]]; then
+        printf -v model_inline ' \033[22;3;38;2;%sm%s\033[23;1;38;2;%sm' "$accent" "$model" "$fg"
+    fi
+
+    local timing_str=""
+    if [[ -n "$ms" && "$ms" =~ ^[0-9]+$ ]]; then
+        if (( ms >= 1000 )); then
+            printf -v timing_str '%d.%ds' $((ms/1000)) $((ms%1000/100))
+        else
+            timing_str="${ms}ms"
+        fi
+    fi
+
+    local status_inline=""
+    case "$state" in
+        complete) [[ -n "$timing_str" ]] && printf -v status_inline ' \033[22;3m(%s)\033[23;1m' "$timing_str" ;;
+        error)    printf -v status_inline ' \033[22;3;31m(error)\033[23;1m' ;;
+    esac
+
+    printf -v "$out_var" '\033[1;38;2;%s;48;2;%sm  %s%s%s  \033[K\033[0m' \
+        "$fg" "$bg" "$upper" "$model_inline" "$status_inline"
+}
+
+while true; do
+    if [[ -f "$WATCH/status" ]]; then
+        mapfile -t status_lines < "$WATCH/status" 2>/dev/null
+        while [[ $status_lines_processed -lt ${#status_lines[@]} ]]; do
+            line="${status_lines[$status_lines_processed]}"
+            status_lines_processed=$((status_lines_processed + 1))
+            IFS=$'\t' read -r provider state ms model path <<<"$line"
+            provider_state[$provider]="$state"
+            [[ -n "$ms" ]] && provider_timing[$provider]="$ms"
+            [[ -n "$model" ]] && provider_model[$provider]="$model"
+            [[ -n "$path" ]] && provider_path[$provider]="$path"
+
+            if [[ "$state" == "complete" ]]; then
+                [[ -n "${rendered[$provider]:-}" ]] && continue
+                rendered[$provider]=1
+                clear_loading
+                printf '\033Ptmux;\033\033]1337;SetMark\a\033\\'
+                build_banner_line banner_line "$provider"
+                printf '\n\n%s\n\n' "$banner_line"
+                if [[ -n "${provider_path[$provider]:-}" && -f "${provider_path[$provider]}" ]]; then
+                    "$WATCH/render.sh" "${provider_path[$provider]}"
+                fi
+                printf '\n\n'
+            elif [[ "$state" == "error" ]]; then
+                [[ -n "${rendered[$provider]:-}" ]] && continue
+                rendered[$provider]=1
+                clear_loading
+                printf '\n\033[1;38;2;185;28;28m✗ %s error\033[0m\n' "$provider"
+                if [[ -f "$WATCH/errors/${provider}.txt" ]]; then
+                    while IFS= read -r err_line; do
+                        printf '   \033[2;38;2;252;165;165m%s\033[0m\n' "$err_line"
+                    done < "$WATCH/errors/${provider}.txt"
+                fi
+                echo
+            fi
+        done
+    fi
+
+    # Manifest entries lack provider attribution — render with a plain header.
+    if [[ -f "$WATCH/manifest" ]]; then
+        mapfile -t manifest_lines < "$WATCH/manifest" 2>/dev/null
+        while [[ $manifest_shown -lt ${#manifest_lines[@]} ]]; do
+            mpath="${manifest_lines[$manifest_shown]}"
+            manifest_shown=$((manifest_shown + 1))
+            [[ -z "$mpath" ]] && continue
+            clear_loading
+            mname=$(basename "$mpath")
+            printf '\n--- %s ---\n' "$mname"
+            "$WATCH/render.sh" "$mpath"
+            echo
+        done
+    fi
+
+    spinner_frame=$((spinner_frame + 1))
+    draw_loading
+
+    [[ -f "$WATCH/.done" ]] && break
+    sleep 0.12
+done
+
+clear_loading
+
+_esc=$(printf '\033')
+printf '[f]inder [p]review [esc/ctrl-d] close '
+while true; do
+    read -n1 -s -r _key || break
+    if [ "$_key" = "$_esc" ]; then break; fi
+    if [ "$_key" = "f" ] || [ "$_key" = "F" ]; then
+        { awk -F'\t' '$5!=""{print $5}' "$WATCH/status" 2>/dev/null;
+          cat "$WATCH/manifest" 2>/dev/null; } | sort -u | xargs -I{} open -R {} 2>/dev/null
+    elif [ "$_key" = "p" ] || [ "$_key" = "P" ]; then
+        { awk -F'\t' '$5!=""{print $5}' "$WATCH/status" 2>/dev/null;
+          cat "$WATCH/manifest" 2>/dev/null; } | sort -u | xargs open -a Preview 2>/dev/null
+    fi
+done
+WATCHEREOF
+  chmod +x "$watch_dir/watcher.sh"
+
+  local safe_watch_dir safe_watcher
   safe_watch_dir=$(printf '%q' "$watch_dir")
+  safe_watcher=$(printf '%q' "$watch_dir/watcher.sh")
 
   local -a target_args=()
   if [[ -n "${TMUX_PANE:-}" ]]; then
@@ -417,7 +671,7 @@ RENDEREOF
   fi
 
   tmux split-window -h -l '30%' "${target_args[@]}" \
-    "bash -c 'trap \"rm -rf ${safe_watch_dir}\" EXIT; _shown=0; while true; do if [ -f ${safe_watch_dir}/manifest ]; then _total=\$(wc -l < ${safe_watch_dir}/manifest | tr -d \" \"); while [ \$_shown -lt \$_total ]; do _shown=\$((_shown + 1)); _path=\$(sed -n \"\${_shown}p\" ${safe_watch_dir}/manifest); _name=\$(basename \"\$_path\"); echo \"--- \$_name ---\"; ${safe_watch_dir}/render.sh \"\$_path\"; echo; done; fi; if [ -f ${safe_watch_dir}/.done ]; then break; fi; sleep 0.3; done; _esc=\$(printf \"\\033\"); printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then xargs open -R < ${safe_watch_dir}/manifest 2>/dev/null; elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then xargs open -a Preview < ${safe_watch_dir}/manifest 2>/dev/null; fi; done'" \
+    "bash $safe_watcher $safe_watch_dir" \
     >/dev/null
 
   printf '%s' "$watch_dir"

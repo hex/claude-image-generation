@@ -41,29 +41,26 @@ Generate or edit an image based on the user's request.
    d. Mark the task completed (or note the error if it failed)
 
    **If multiple providers selected:**
-   a. Create a task per provider with TaskCreate:
-      - "Generate image with Gemini" (activeForm: "Generating image with Gemini...")
-      - "Generate image with OpenAI" (activeForm: "Generating image with OpenAI...")
-      - "Generate image with xAI" (activeForm: "Generating image with xAI...")
-   b. Mark all in_progress with TaskUpdate
-   c. Open a streaming display pane (single Bash call, capture the watch directory path):
+   a. Create one task tracking the whole parallel run with TaskCreate:
+      - subject: "Generate image with all providers in parallel"
+      - activeForm: "Generating with Gemini, OpenAI, and xAI..."
+   b. Mark it in_progress with TaskUpdate.
+   c. Run `scripts/run-all.sh` in a single Bash call — it opens the streaming pane, forks all
+      providers in parallel, captures their stdio under `$DISPLAY_PANE_DIR/logs/`, and closes
+      the pane when every provider has returned:
       ```bash
-      source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_open
+      bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
+        --mode <generate|edit> \
+        --prompt "<prompt>" \
+        --output-base "<base>" \
+        [--input-image "<input-path>"]
       ```
-      This outputs a path like `/tmp/display_pane.XXXXXX` — capture it as `DISPLAY_PANE_DIR`.
-   d. Launch Task subagents in parallel (subagent_type: Bash), each running one script.
-      Use different output filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`).
-      Pass `DISPLAY_PANE_DIR` so images appear progressively in the shared pane:
-      ```bash
-      DISPLAY_PANE_DIR=<captured-path> bash "${CLAUDE_PLUGIN_ROOT}/scripts/<provider>.sh" \
-        --mode <generate|edit> --prompt "<prompt>" --output "<output-path>"
-      ```
-   e. As each subagent returns, mark its corresponding task completed (or note the error)
-   f. After all providers complete, close the streaming pane to show interactive controls:
-      ```bash
-      DISPLAY_PANE_DIR=<captured-path> bash -c \
-        'source "${CLAUDE_PLUGIN_ROOT}/scripts/display.sh" && display_pane_close'
-      ```
+      Each provider produces `<base>-gemini.png`, `<base>-openai.png`, `<base>-xai.png`.
+      To run a subset, pass `--providers gemini,openai`. To pass per-provider tuning, use
+      `--gemini-extra "..."`, `--openai-extra "..."`, `--xai-extra "..."`.
+   d. Mark the task completed when run-all.sh exits. Its exit status reports whether any
+      provider failed; per-provider error details are in `$DISPLAY_PANE_DIR/logs/<provider>.err`
+      and shown inline in the streaming pane as a red error banner.
 
 5. After generation completes, confirm the output path(s) to the user.
    If multiple were generated, let the user know all files are available so they can compare.
