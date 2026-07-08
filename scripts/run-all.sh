@@ -92,21 +92,25 @@ declare -a pids=()
 IFS=',' read -ra provider_list <<< "$PROVIDERS"
 for p in "${provider_list[@]}"; do
   p="${p// /}"
+  # macOS ships bash 3.2, which has neither ${p^^} nor associative arrays, so the
+  # per-provider extras are selected by name rather than an uppercased indirect lookup.
   case "$p" in
-    gemini|openai|xai) ;;
+    gemini) extra="$GEMINI_EXTRA" ;;
+    openai) extra="$OPENAI_EXTRA" ;;
+    xai)    extra="$XAI_EXTRA" ;;
     *) echo "Warning: unknown provider '$p' (skipping)" >&2; continue ;;
   esac
-  extra_var="${p^^}_EXTRA"
-  extra="${!extra_var}"
   args=(--mode "$MODE" --prompt "$PROMPT" --output "${OUTPUT_BASE}-${p}.png")
   [[ "$MODE" == "edit" && -n "$INPUT_IMAGE" ]] && args+=(--input-image "$INPUT_IMAGE")
-  [[ -n "$extra" ]] && read -ra extra_arr <<<"$extra" && args+=("${extra_arr[@]}")
+  # ${arr[@]+"${arr[@]}"} expands to nothing when the array is empty, which bash 3.2
+  # otherwise reports as an unbound variable under `set -u`.
+  [[ -n "$extra" ]] && read -ra extra_arr <<<"$extra" && args+=(${extra_arr[@]+"${extra_arr[@]}"})
   spawn_provider "$p" "${SCRIPT_DIR}/${p}.sh" "${args[@]}"
   pids+=($!)
 done
 
 overall_status=0
-for pid in "${pids[@]}"; do
+for pid in ${pids[@]+"${pids[@]}"}; do
   wait "$pid" || overall_status=1
 done
 

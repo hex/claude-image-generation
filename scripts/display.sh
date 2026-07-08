@@ -324,7 +324,7 @@ display_image_in_pane() {
   local safe_path
   safe_path=$(printf '%q' "$file_path")
 
-  tmux split-window -v -l '40%' "${target_args[@]}" \
+  tmux split-window -v -l '40%' ${target_args[@]+"${target_args[@]}"} \
     "bash -c '_esc=\$(printf \"\\033\"); echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; fi; done'"
 }
 
@@ -497,15 +497,35 @@ RENDEREOF
 WATCH="$1"
 trap 'rm -rf "$WATCH"' EXIT
 
-declare -A provider_state
-declare -A provider_timing
-declare -A provider_model
-declare -A provider_path
-declare -A rendered
+# macOS ships bash 3.2, which has no associative arrays. Provider attributes are kept
+# in variables named <map>_<provider> (state, timing, model, path, rendered), and the
+# set of providers seen so far is tracked as a space-separated list so we can iterate.
+seen_providers=""
 status_lines_processed=0
 manifest_shown=0
 spinner_frame=0
 SPINNERS=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+
+# map_set <map> <provider> <value> — store one attribute for a provider.
+map_set() {
+    local __key="${2//[^A-Za-z0-9_]/_}"
+    printf -v "${1}_${__key}" '%s' "$3"
+}
+
+# map_get <out_var> <map> <provider> — read an attribute into out_var ("" if unset).
+# printf -v writes through dynamic scope, so no subshell fork per lookup.
+map_get() {
+    local __src="${2}_${3//[^A-Za-z0-9_]/_}"
+    printf -v "$1" '%s' "${!__src:-}"
+}
+
+# note_provider <provider> — remember a provider once, preserving first-seen order.
+note_provider() {
+    case " $seen_providers " in
+        *" $1 "*) ;;
+        *) seen_providers="${seen_providers}${seen_providers:+ }$1" ;;
+    esac
+}
 
 # Provider palette: emits four space-separated RGB triplets — bg, fg, accent,
 # spinner — into the variables named by the first four args. Single source of
@@ -521,9 +541,10 @@ provider_palette() {
 }
 
 draw_loading() {
-    local pending=()
-    for p in "${!provider_state[@]}"; do
-        [[ "${provider_state[$p]}" == "querying" ]] && pending+=("$p")
+    local pending=() p __state
+    for p in $seen_providers; do
+        map_get __state provider_state "$p"
+        [[ "$__state" == "querying" ]] && pending+=("$p")
     done
     [[ ${#pending[@]} -eq 0 ]] && return 0
     local frame="${SPINNERS[$((spinner_frame % ${#SPINNERS[@]}))]}"
@@ -551,9 +572,10 @@ clear_loading() {
 
 build_banner_line() {
     local out_var="$1" name="$2"
-    local state="${provider_state[$name]:-}"
-    local ms="${provider_timing[$name]:-}"
-    local model="${provider_model[$name]:-}"
+    local state ms model
+    map_get state provider_state "$name"
+    map_get ms provider_timing "$name"
+    map_get model provider_model "$name"
     local bg fg accent _spinner
     provider_palette bg fg accent _spinner "$name"
     local upper
@@ -585,30 +607,38 @@ build_banner_line() {
 
 while true; do
     if [[ -f "$WATCH/status" ]]; then
-        mapfile -t status_lines < "$WATCH/status" 2>/dev/null
+        # The status file holds at most a handful of rows, so re-reading it each tick
+        # with a fork-free read loop is cheap and replaces bash 4's mapfile.
+        status_lines=()
+        while IFS= read -r __line || [[ -n "$__line" ]]; do
+            status_lines+=("$__line")
+        done < "$WATCH/status" 2>/dev/null
         while [[ $status_lines_processed -lt ${#status_lines[@]} ]]; do
             line="${status_lines[$status_lines_processed]}"
             status_lines_processed=$((status_lines_processed + 1))
             IFS=$'\t' read -r provider state ms model path <<<"$line"
-            provider_state[$provider]="$state"
-            [[ -n "$ms" ]] && provider_timing[$provider]="$ms"
-            [[ -n "$model" ]] && provider_model[$provider]="$model"
-            [[ -n "$path" ]] && provider_path[$provider]="$path"
+            note_provider "$provider"
+            map_set provider_state "$provider" "$state"
+            [[ -n "$ms" ]] && map_set provider_timing "$provider" "$ms"
+            [[ -n "$model" ]] && map_set provider_model "$provider" "$model"
+            [[ -n "$path" ]] && map_set provider_path "$provider" "$path"
 
+            map_get already_rendered rendered "$provider"
             if [[ "$state" == "complete" ]]; then
-                [[ -n "${rendered[$provider]:-}" ]] && continue
-                rendered[$provider]=1
+                [[ -n "$already_rendered" ]] && continue
+                map_set rendered "$provider" 1
                 clear_loading
                 printf '\033Ptmux;\033\033]1337;SetMark\a\033\\'
                 build_banner_line banner_line "$provider"
                 printf '\n\n%s\n\n' "$banner_line"
-                if [[ -n "${provider_path[$provider]:-}" && -f "${provider_path[$provider]}" ]]; then
-                    "$WATCH/render.sh" "${provider_path[$provider]}"
+                map_get ppath provider_path "$provider"
+                if [[ -n "$ppath" && -f "$ppath" ]]; then
+                    "$WATCH/render.sh" "$ppath"
                 fi
                 printf '\n\n'
             elif [[ "$state" == "error" ]]; then
-                [[ -n "${rendered[$provider]:-}" ]] && continue
-                rendered[$provider]=1
+                [[ -n "$already_rendered" ]] && continue
+                map_set rendered "$provider" 1
                 clear_loading
                 printf '\n\033[1;38;2;185;28;28m✗ %s error\033[0m\n' "$provider"
                 if [[ -f "$WATCH/errors/${provider}.txt" ]]; then
@@ -623,7 +653,10 @@ while true; do
 
     # Manifest entries lack provider attribution — render with a plain header.
     if [[ -f "$WATCH/manifest" ]]; then
-        mapfile -t manifest_lines < "$WATCH/manifest" 2>/dev/null
+        manifest_lines=()
+        while IFS= read -r __mline || [[ -n "$__mline" ]]; do
+            manifest_lines+=("$__mline")
+        done < "$WATCH/manifest" 2>/dev/null
         while [[ $manifest_shown -lt ${#manifest_lines[@]} ]]; do
             mpath="${manifest_lines[$manifest_shown]}"
             manifest_shown=$((manifest_shown + 1))
@@ -670,7 +703,7 @@ WATCHEREOF
     target_args=(-t "$TMUX_PANE")
   fi
 
-  tmux split-window -h -l '30%' "${target_args[@]}" \
+  tmux split-window -h -l '30%' ${target_args[@]+"${target_args[@]}"} \
     "bash $safe_watcher $safe_watch_dir" \
     >/dev/null
 
@@ -816,7 +849,7 @@ display_images_in_pane() {
     target_args=(-t "$TMUX_PANE")
   fi
 
-  tmux split-window -h -l "$pane_width" "${target_args[@]}" \
+  tmux split-window -h -l "$pane_width" ${target_args[@]+"${target_args[@]}"} \
     "bash -c '_esc=\$(printf \"\\033\"); ${display_cmd}printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi; done'"
 }
 
