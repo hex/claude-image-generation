@@ -106,9 +106,11 @@ build_request_body() {
       webp) mime_type="image/webp" ;;
       *) mime_type="image/png" ;;
     esac
-    local image_b64
-    image_b64=$(base64 < "$INPUT_IMAGE" | tr -d '\n')
-    parts=$(jq -n --arg mime "$mime_type" --arg data "$image_b64" \
+    # The base64 image is streamed into jq via --rawfile rather than passed as an
+    # argument: a normal image exceeds ARG_MAX (1 MB on macOS) and jq would die with
+    # "argument list too long". jq -n leaves stdin free for the rawfile.
+    parts=$(base64 < "$INPUT_IMAGE" | tr -d '\n' \
+      | jq -n --arg mime "$mime_type" --rawfile data /dev/stdin \
       '[{"inlineData": {"mimeType": $mime, "data": $data}}]')
   fi
 
@@ -136,11 +138,12 @@ build_request_body() {
       '. + {"thinkingConfig": {"thinkingLevel": $level}}')
   fi
 
+  # parts can hold a multi-megabyte base64 image, so it enters jq on stdin as the main
+  # input rather than as --argjson, which would exceed ARG_MAX.
   local request
-  request=$(jq -n \
-    --argjson parts "$parts" \
+  request=$(echo "$parts" | jq \
     --argjson gen "$gen_config" \
-    '{"contents": [{"parts": $parts}], "generationConfig": $gen}')
+    '{"contents": [{"parts": .}], "generationConfig": $gen}')
 
   if [[ -n "$SEARCH_GROUNDING" ]]; then
     request=$(echo "$request" | jq '. + {"tools": [{"google_search": {}}]}')
@@ -154,11 +157,13 @@ REQUEST_BODY=$(build_request_body)
 echo "Calling Gemini API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
-RESPONSE=$(curl -s -w "\n%{http_code}" \
+# The body embeds the base64 image in edit mode, so it is streamed to curl on stdin
+# (--data-binary @-) instead of passed as -d, which would exceed ARG_MAX.
+RESPONSE=$(printf '%s' "$REQUEST_BODY" | curl -s -w "\n%{http_code}" \
   -X POST "${API_URL}" \
   -H "Content-Type: application/json" \
   -H "x-goog-api-key: ${GEMINI_API_KEY}" \
-  -d "$REQUEST_BODY")
+  --data-binary @-)
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')

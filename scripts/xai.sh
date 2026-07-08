@@ -112,16 +112,26 @@ if [[ "$MODE" == "edit" && -n "$INPUT_IMAGE" ]]; then
     webp) local_mime_type="image/webp" ;;
     gif) local_mime_type="image/gif" ;;
   esac
-  image_b64=$(base64 < "$INPUT_IMAGE" | tr -d '\n')
-  data_uri="data:${local_mime_type};base64,${image_b64}"
-  REQUEST_BODY=$(echo "$REQUEST_BODY" | jq --arg url "$data_uri" '. + {"image_url": $url}')
+  # A normal image's base64 exceeds ARG_MAX, so it reaches jq through --rawfile
+  # instead of an argument. This jq reads REQUEST_BODY on stdin, so the base64 needs
+  # its own file; the data: prefix is small enough to stay an argument.
+  image_b64_file=$(mktemp)
+  trap 'rm -f "$image_b64_file"' EXIT
+  base64 < "$INPUT_IMAGE" | tr -d '\n' > "$image_b64_file"
+  REQUEST_BODY=$(echo "$REQUEST_BODY" \
+    | jq --arg prefix "data:${local_mime_type};base64," --rawfile b64 "$image_b64_file" \
+    '. + {"image_url": ($prefix + $b64)}')
+  rm -f "$image_b64_file"
+  trap - EXIT
 fi
 
-RESPONSE=$(curl -s -w "\n%{http_code}" \
+# The body embeds the base64 image in edit mode, so it is streamed to curl on stdin
+# (--data-binary @-) instead of passed as -d, which would exceed ARG_MAX.
+RESPONSE=$(printf '%s' "$REQUEST_BODY" | curl -s -w "\n%{http_code}" \
   -X POST "https://api.x.ai/v1/images/generations" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${XAI_API_KEY}" \
-  -d "$REQUEST_BODY")
+  --data-binary @-)
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
