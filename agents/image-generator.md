@@ -1,6 +1,11 @@
 ---
 name: image-generator
-description: Use this agent when the conversation context involves generating or editing images. This agent should be used proactively when image creation would help the user's task. Examples:
+description: |
+  Use this agent when the conversation context involves generating or editing images. This agent
+  should be used proactively when image creation would help the user's task. It also covers named
+  product and brand assets, which users rarely call "images": app icons, bot avatars, logos,
+  favicons, hero images, banners, thumbnails, og-images, splash screens, and illustrations.
+  Examples:
 
   <example>
   Context: User is building a website and needs visual assets.
@@ -21,6 +26,16 @@ description: Use this agent when the conversation context involves generating or
   </example>
 
   <example>
+  Context: User is building a Slack bot and reaches the branding step.
+  user: "let's generate an image for the bot icon first"
+  assistant: "I'll use the image-generator agent to produce a square app icon."
+  <commentary>
+  An app or bot icon is a generated image asset even though the user never said "image
+  generation". Trigger the agent rather than hand-authoring SVG.
+  </commentary>
+  </example>
+
+  <example>
   Context: User is working on a presentation or documentation.
   user: "Generate a diagram showing the authentication flow as a visual"
   assistant: "I'll generate that authentication flow diagram for you."
@@ -28,7 +43,6 @@ description: Use this agent when the conversation context involves generating or
   User needs a visual asset for their work, proactively generate it.
   </commentary>
   </example>
-
 model: inherit
 color: magenta
 tools: ["Bash", "Read", "AskUserQuestion", "Task", "TaskCreate", "TaskUpdate", "TaskList"]
