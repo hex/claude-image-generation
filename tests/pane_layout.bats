@@ -58,6 +58,28 @@ OVERSIZED_FIXTURE="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
   rm -rf "$dir"
 }
 
+@test "normalize_for_display pins DPI so equal-pixel images render the same size" {
+  command -v sips >/dev/null || skip "sips is a macOS built-in; not available here"
+  source "$DISPLAY_SH"
+  [[ -f "$OVERSIZED_FIXTURE" ]] || skip "oversized fixture missing"
+
+  local dir="${BATS_TMPDIR}/norm_dpi_$$"
+  mkdir -p "$dir"
+  # Two copies of the same image at different DPI, mirroring real providers (Gemini 300, xAI 72).
+  # iTerm2 sizes by pixels/DPI, so equal-pixel copies with different DPI render at different sizes.
+  cp "$OVERSIZED_FIXTURE" "$dir/lo.png"
+  sips -s dpiWidth 300 -s dpiHeight 300 "$OVERSIZED_FIXTURE" --out "$dir/hi.png" >/dev/null 2>&1
+
+  normalize_for_display "$dir/lo.png" "$dir/lo.jpg"
+  normalize_for_display "$dir/hi.png" "$dir/hi.jpg"
+
+  local dlo dhi
+  dlo=$(sips -g dpiWidth "$dir/lo.jpg" 2>/dev/null | awk '/dpiWidth/{print $2}')
+  dhi=$(sips -g dpiWidth "$dir/hi.jpg" 2>/dev/null | awk '/dpiWidth/{print $2}')
+  [[ "$dlo" == "$dhi" ]] || { echo "normalized DPI differs: lo=$dlo hi=$dhi"; return 1; }
+  rm -rf "$dir"
+}
+
 @test "normalize_for_display reports failure when the source is unreadable" {
   command -v sips >/dev/null || skip "sips is a macOS built-in; not available here"
   source "$DISPLAY_SH"

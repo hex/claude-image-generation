@@ -148,9 +148,13 @@ display_image_iterm2() {
 normalize_for_display() {
   local src="$1" dst="$2"
   local box="${DISPLAY_IMAGE_WIDTH:-512}"
+  # iTerm2 sizes an inline image by its physical dimensions (pixels / DPI), not the requested
+  # pixel box, so images that differ in pixel count OR DPI render at different sizes. Pinning both
+  # -- resize to the box and a fixed DPI -- makes every provider's copy identical, so they render
+  # uniformly. 150 DPI at a 512px box yields ~3.4in, the size that already looked right for Gemini.
   # sips exits 0 even when the source is missing and it writes nothing, so success is judged by a
   # non-empty result rather than sips's exit code.
-  sips -Z "$box" -s format jpeg "$src" --out "$dst" >/dev/null 2>&1
+  sips -Z "$box" -s format jpeg -s dpiWidth 150 -s dpiHeight 150 "$src" --out "$dst" >/dev/null 2>&1
   [[ -s "$dst" ]]
 }
 
