@@ -1225,6 +1225,23 @@ teardown() {
   assert_status 0
 }
 
+@test "display: provider_finish survives a failing display when no streaming pane is active" {
+  # Reproduces a provider script running under `set -e` with no streaming pane, where the
+  # inline display fails (e.g. tmux 'no space for new pane' in a pane too small to split).
+  # The image is already saved, so a best-effort display failure must not abort the script
+  # before it reports the output path.
+  run bash -c '
+    set -euo pipefail
+    source "'"$DISPLAY_SH"'"
+    unset DISPLAY_PANE_DIR
+    display_image() { echo "display boom" >&2; return 1; }
+    provider_finish "/tmp/generated.png"
+    echo "AFTER_FINISH"
+  '
+  assert_status 0
+  assert_output_contains "AFTER_FINISH"
+}
+
 @test "display: display_pane_error writes message to errors/<provider>.txt" {
   source "$DISPLAY_SH"
   local pane_dir="${BATS_TMPDIR}/pane_err_$$"

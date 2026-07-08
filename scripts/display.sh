@@ -138,6 +138,22 @@ display_image_iterm2() {
     "$name_b64" "$size" "$max_w" "$max_h" "$image_b64" >> "$target"
 }
 
+# Rewrites an image into a small JPEG so the terminal honours the display box. gpt-image-2 PNGs
+# carry physical-size metadata (e.g. 1024px at 72 DPI) that iTerm2 prefers over the requested pixel
+# box, so they render far larger than sibling JPEGs even though imgcat asks for the same size.
+# Re-encoding to a <=box-px JPEG drops that metadata and matches the format terminals already size
+# correctly. Uses sips, a macOS built-in, so it adds no dependency; callers fall back to the
+# original image when sips is unavailable or the source cannot be read.
+# Usage: normalize_for_display <src> <dst>
+normalize_for_display() {
+  local src="$1" dst="$2"
+  local box="${DISPLAY_IMAGE_WIDTH:-512}"
+  # sips exits 0 even when the source is missing and it writes nothing, so success is judged by a
+  # non-empty result rather than sips's exit code.
+  sips -Z "$box" -s format jpeg "$src" --out "$dst" >/dev/null 2>&1
+  [[ -s "$dst" ]]
+}
+
 # ── Kitty Display (APC graphics protocol) ──────────────────────────────
 
 # Read base64 lines from stdin and emit Kitty APC escape sequences.
@@ -434,11 +450,26 @@ provider_die() {
 provider_finish() {
   local output="$1"
   display_pane_finish "${PROVIDER_NAME:-unknown}" "${MODEL:-}" "$output"
-  # When the streaming pane is active the image is already shown there. The explicit
-  # return keeps the && test's false result (pane active) from becoming the function's
-  # exit status, which under the caller's `set -e` would abort before it prints the path.
-  [[ -z "${DISPLAY_PANE_DIR:-}" ]] && display_image "$output"
+  # The image is already saved; inline display is best-effort. When no streaming pane is
+  # active, show it directly, but swallow any failure (e.g. tmux 'no space for new pane' in a
+  # pane too small to split) so it never aborts the caller's `set -e` before the path prints.
+  if [[ -z "${DISPLAY_PANE_DIR:-}" ]]; then
+    display_image "$output" || true
+  fi
   return 0
+}
+
+# Classifies a pane as visually "wide" or "tall" from its cell dimensions. Terminal cells are
+# roughly twice as tall as they are wide, so a pane only reads as wide once its column count
+# reaches twice its row count. A wide pane gets a column (row-of-tiles) montage; a tall pane
+# gets a row (column-of-tiles) montage. Usage: pane_orientation <cols> <rows>
+pane_orientation() {
+  local cols="$1" rows="$2"
+  if (( cols >= rows * 2 )); then
+    echo "wide"
+  else
+    echo "tall"
+  fi
 }
 
 # Opens a tmux pane that watches for images and displays them as they arrive.
@@ -453,6 +484,14 @@ display_pane_open() {
 
   local watch_dir
   watch_dir=$(mktemp -d "${TMPDIR:-/tmp}/display_pane.XXXXXX")
+
+  # The render script sources this library so it can reuse normalize_for_display. Resolve to an
+  # absolute path because render.sh runs in a pane whose working directory may differ.
+  local self="${BASH_SOURCE[0]}"
+  case "$self" in
+    /*) ;;
+    *) self="$(cd "$(dirname "$self")" && pwd)/$(basename "$self")" ;;
+  esac
 
   local terminal
   terminal=$(get_outer_terminal) || true
@@ -469,8 +508,8 @@ display_pane_open() {
         rm -rf "$watch_dir"
         return 1
       }
-      # Without -r, PNGs with DPI metadata render at native size instead of
-      # the requested width — the bug this combination of flags closes.
+      # The image is pre-normalized to the box (see render.sh below); these flags keep imgcat
+      # inside the same box as a fallback when normalization is unavailable.
       render_cmd="$(printf '%q' "$imgcat_path") -W ${width}px -H ${height}px -r \"\$1\""
       ;;
     kitty)
@@ -490,10 +529,21 @@ display_pane_open() {
       ;;
   esac
 
-  cat > "$watch_dir/render.sh" <<RENDEREOF
-#!/bin/bash
-$render_cmd
+  # render.sh normalizes each image to the display box before handing it to the terminal, so
+  # DPI-laden PNGs can't out-size their JPEG siblings. Normalization is best-effort: if sips is
+  # absent or fails, $1 stays the original image and the terminal displays it as before.
+  {
+    printf '#!/bin/bash\n'
+    printf 'source %q\n' "$self"
+    cat <<'RENDEREOF'
+__norm="$(mktemp "${TMPDIR:-/tmp}/render.XXXXXX")"
+if normalize_for_display "$1" "$__norm"; then
+  set -- "$__norm"
+fi
 RENDEREOF
+    printf '%s\n' "$render_cmd"
+    printf 'rm -f "$__norm"\n'
+  } > "$watch_dir/render.sh"
   chmod +x "$watch_dir/render.sh"
 
   cat > "$watch_dir/watcher.sh" <<'WATCHEREOF'
