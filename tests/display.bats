@@ -1210,6 +1210,21 @@ teardown() {
   assert_output_contains "DISPLAY_PANE_DIR"
 }
 
+@test "display: provider_finish returns success when the streaming pane is active" {
+  source "$DISPLAY_SH"
+  local pane_dir="${BATS_TMPDIR}/pane_finish_$$"
+  mkdir -p "$pane_dir"
+  export DISPLAY_PANE_DIR="$pane_dir"
+  PROVIDER_NAME=gemini
+  MODEL=test-model
+
+  # Provider scripts call provider_finish under `set -e` and then print the output
+  # path. If it returns non-zero on a successful generation, the script aborts before
+  # reporting the path and run-all.sh records a failure for an image that was created.
+  run provider_finish "/tmp/generated.png"
+  assert_status 0
+}
+
 @test "display: display_pane_error writes message to errors/<provider>.txt" {
   source "$DISPLAY_SH"
   local pane_dir="${BATS_TMPDIR}/pane_err_$$"

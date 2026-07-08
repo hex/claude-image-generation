@@ -434,7 +434,11 @@ provider_die() {
 provider_finish() {
   local output="$1"
   display_pane_finish "${PROVIDER_NAME:-unknown}" "${MODEL:-}" "$output"
+  # When the streaming pane is active the image is already shown there. The explicit
+  # return keeps the && test's false result (pane active) from becoming the function's
+  # exit status, which under the caller's `set -e` would abort before it prints the path.
   [[ -z "${DISPLAY_PANE_DIR:-}" ]] && display_image "$output"
+  return 0
 }
 
 # Opens a tmux pane that watches for images and displays them as they arrive.
