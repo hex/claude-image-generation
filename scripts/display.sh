@@ -147,15 +147,16 @@ display_image_iterm2() {
 # Usage: normalize_for_display <src> <dst>
 normalize_for_display() {
   local src="$1" dst="$2"
-  # iTerm2 sizes an inline image by its point size = pixels * 72 / DPI and ignores imgcat's width
-  # flags in the tmux-integration path, so the image bytes are the only reliable size control.
-  # Pinning pixels to 2x the target points and DPI to 144 gives 2*pt*72/144 = pt points for every
-  # image, so all providers render at the same size; the 2x pixel budget keeps them retina-sharp.
-  # DISPLAY_PANE_IMAGE_PT is the single size knob (on-screen points).
+  # Percent width (see display_pane_open) sets the on-screen size, so these source pixels only affect
+  # the preview's sharpness and its wire payload -- not how big it displays. Keep the payload small:
+  # above ~17KB on the wire, tmux control-mode flow control (pause-after) intermittently drops the
+  # image write and the pane shows a blank. A 240px JPEG at quality 60 lands ~11KB on the wire with
+  # margin to spare; the full-resolution image is saved separately, so a soft preview is fine.
+  # DISPLAY_PANE_IMAGE_PX is the source pixel budget; DPI is pinned only to keep copies uniform.
   # sips exits 0 even when the source is missing and it writes nothing, so success is judged by a
   # non-empty result rather than sips's exit code.
-  local pt="${DISPLAY_PANE_IMAGE_PT:-200}"
-  sips -Z "$((pt * 2))" -s format jpeg -s dpiWidth 144 -s dpiHeight 144 "$src" --out "$dst" >/dev/null 2>&1
+  local px="${DISPLAY_PANE_IMAGE_PX:-240}"
+  sips -Z "$px" -s format jpeg -s formatOptions 60 -s dpiWidth 72 -s dpiHeight 72 "$src" --out "$dst" >/dev/null 2>&1
   [[ -s "$dst" ]]
 }
 
@@ -513,11 +514,14 @@ display_pane_open() {
         rm -rf "$watch_dir"
         return 1
       }
-      # No width flag: imgcat uses the image's inherent size, which normalize_for_display has
-      # pinned to the target point size. An explicit -W is honoured inconsistently on iTerm2's
-      # tmux-integration path and was inflating the render, so the inherent size is the reliable
-      # control here.
-      render_cmd="$(printf '%q' "$imgcat_path") -r \"\$1\""
+      # Size by percent of pane width. iTerm2 converts an inline image to a cell count and clamps it
+      # to the full pane width when that count exceeds the pane. Inherent and pixel widths derive the
+      # count by dividing by the pane's per-cell size, which is momentarily stale on a freshly split
+      # pane -- the fastest provider renders first, before the pane settles, and trips the clamp to
+      # full width. A percent width derives the count as a fraction of the cell grid (which control
+      # mode does report), so it can never exceed the pane and the clamp cannot fire.
+      # DISPLAY_PANE_IMAGE_PCT is the on-screen size knob (percent of pane width).
+      render_cmd="$(printf '%q' "$imgcat_path") -W ${DISPLAY_PANE_IMAGE_PCT:-30}% -r \"\$1\""
       ;;
     kitty)
       render_cmd="kitten icat --align left \"\$1\""
@@ -595,7 +599,7 @@ provider_palette() {
     local __bg="$1" __fg="$2" __accent="$3" __spinner="$4" name="$5"
     case "$name" in
         gemini) printf -v "$__bg" '30;64;175';   printf -v "$__fg" '255;255;255'; printf -v "$__accent" '147;197;253'; printf -v "$__spinner" '59;130;246'   ;;
-        openai) printf -v "$__bg" '229;231;235'; printf -v "$__fg" '31;41;55';    printf -v "$__accent" '100;116;139'; printf -v "$__spinner" '229;231;235' ;;
+        openai) printf -v "$__bg" '229;231;235'; printf -v "$__fg" '31;41;55';    printf -v "$__accent" '100;116;139'; printf -v "$__spinner" '16;163;127'  ;;
         xai)    printf -v "$__bg" '185;28;28';   printf -v "$__fg" '255;255;255'; printf -v "$__accent" '252;165;165'; printf -v "$__spinner" '248;113;113' ;;
         *)      printf -v "$__bg" '55;65;81';    printf -v "$__fg" '255;255;255'; printf -v "$__accent" '156;163;175'; printf -v "$__spinner" '156;163;175' ;;
     esac
@@ -623,7 +627,7 @@ draw_loading() {
     done
 
     provider_palette _bg _fg _accent _spinner "${pending[0]}"
-    printf '\r\033[K   \033[1;38;2;%sm%s\033[0m   \033[2mgenerating\033[0m   %s' \
+    printf '\r\033[K   \033[1;38;2;%sm%s\033[0m   \033[3mgenerating\033[0m   %s' \
         "$_spinner" "$frame" "$list"
 }
 
@@ -691,12 +695,14 @@ while true; do
                 clear_loading
                 printf '\033Ptmux;\033\033]1337;SetMark\a\033\\'
                 build_banner_line banner_line "$provider"
-                printf '\n\n%s\n\n' "$banner_line"
+                # One blank line above each banner separates providers; one below sets the banner
+                # off from its image so the two don't crowd.
+                printf '\n%s\n\n' "$banner_line"
                 map_get ppath provider_path "$provider"
                 if [[ -n "$ppath" && -f "$ppath" ]]; then
                     "$WATCH/render.sh" "$ppath"
                 fi
-                printf '\n\n'
+                printf '\n'
             elif [[ "$state" == "error" ]]; then
                 [[ -n "$already_rendered" ]] && continue
                 map_set rendered "$provider" 1
