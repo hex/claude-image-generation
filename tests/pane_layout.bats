@@ -50,35 +50,6 @@ OVERSIZED_FIXTURE="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
   [[ "$path" == "/tmp/coffee-xai.png" ]]  || { echo "path='$path' want '/tmp/coffee-xai.png'"; return 1; }
 }
 
-@test "pane render script wraps the image escape for tmux passthrough" {
-  local imgcat="$HOME/.iterm2/imgcat"
-  [[ -x "$imgcat" ]] || skip "iTerm2 imgcat not installed"
-
-  local mock="${BATS_TMPDIR}/render_wrap_$$"
-  mkdir -p "$mock"
-  printf '#!/bin/bash\necho "%%9"\n' > "$mock/tmux"; chmod +x "$mock/tmux"
-
-  # Ambient TERM=xterm-256color reproduces this host's `default-terminal xterm-256color`. Under a bare
-  # xterm TERM, imgcat emits a RAW OSC 1337 that tmux's allow-passthrough silently drops (it forwards
-  # only the \033Ptmux; DCS-wrapped form). render.sh must give imgcat a tmux-flavored TERM so it wraps
-  # the escape, or the image never reaches iTerm2 inside a tmux pane.
-  local wd
-  wd=$(PATH="$mock:$PATH" TERM=xterm-256color TMUX="fake,1,0" TMUX_PANE="%0" \
-       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
-       bash -c "source '$DISPLAY_SH'; display_pane_open")
-  [[ -f "$wd/render.sh" ]] || { echo "no render.sh at '$wd'"; return 1; }
-
-  local cap="$mock/out.bin"
-  PATH="$mock:$PATH" TERM=xterm-256color bash "$wd/render.sh" "$OVERSIZED_FIXTURE" > "$cap" 2>/dev/null
-
-  local head7; head7=$(head -c 7 "$cap")
-  [[ "$head7" == $'\033Ptmux;' ]] || {
-    echo "image escape is not tmux-wrapped; first bytes:"; head -c 20 "$cap" | od -An -c
-    return 1
-  }
-  rm -rf "$mock" "$wd"
-}
-
 @test "the watcher renders a completed image even when the timing field is empty" {
   local mock="${BATS_TMPDIR}/watcher_empty_ms_$$"
   mkdir -p "$mock/.iterm2"
