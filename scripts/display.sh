@@ -147,14 +147,15 @@ display_image_iterm2() {
 # Usage: normalize_for_display <src> <dst>
 normalize_for_display() {
   local src="$1" dst="$2"
-  local box="${DISPLAY_IMAGE_WIDTH:-512}"
-  # iTerm2 sizes an inline image by its physical dimensions (pixels / DPI), not the requested
-  # pixel box, so images that differ in pixel count OR DPI render at different sizes. Pinning both
-  # -- resize to the box and a fixed DPI -- makes every provider's copy identical, so they render
-  # uniformly. 150 DPI at a 512px box yields ~3.4in, the size that already looked right for Gemini.
+  # iTerm2 sizes an inline image by its point size = pixels * 72 / DPI and ignores imgcat's width
+  # flags in the tmux-integration path, so the image bytes are the only reliable size control.
+  # Pinning pixels to 2x the target points and DPI to 144 gives 2*pt*72/144 = pt points for every
+  # image, so all providers render at the same size; the 2x pixel budget keeps them retina-sharp.
+  # DISPLAY_PANE_IMAGE_PT is the single size knob (on-screen points).
   # sips exits 0 even when the source is missing and it writes nothing, so success is judged by a
   # non-empty result rather than sips's exit code.
-  sips -Z "$box" -s format jpeg -s dpiWidth 150 -s dpiHeight 150 "$src" --out "$dst" >/dev/null 2>&1
+  local pt="${DISPLAY_PANE_IMAGE_PT:-200}"
+  sips -Z "$((pt * 2))" -s format jpeg -s dpiWidth 144 -s dpiHeight 144 "$src" --out "$dst" >/dev/null 2>&1
   [[ -s "$dst" ]]
 }
 
@@ -512,9 +513,11 @@ display_pane_open() {
         rm -rf "$watch_dir"
         return 1
       }
-      # The image is pre-normalized to the box (see render.sh below); these flags keep imgcat
-      # inside the same box as a fallback when normalization is unavailable.
-      render_cmd="$(printf '%q' "$imgcat_path") -W ${width}px -H ${height}px -r \"\$1\""
+      # No width flag: imgcat uses the image's inherent size, which normalize_for_display has
+      # pinned to the target point size. An explicit -W is honoured inconsistently on iTerm2's
+      # tmux-integration path and was inflating the render, so the inherent size is the reliable
+      # control here.
+      render_cmd="$(printf '%q' "$imgcat_path") -r \"\$1\""
       ;;
     kitty)
       render_cmd="kitten icat --align left \"\$1\""
