@@ -91,6 +91,58 @@ OVERSIZED_FIXTURE="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
   rm -rf "$dir"
 }
 
+# Drives display_pane_open with stubbed pane dimensions and returns the captured
+# split-window argument string, so orientation-aware split tests can assert the flag.
+_open_pane_with_dims() {
+  local dims="$1"
+  local mock="${BATS_TMPDIR}/pane_split_$$_$BATS_TEST_NUMBER"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\nexit 0\n' > "$mock/.iterm2/imgcat"
+  local args_file="$mock/split_args"
+  cat > "$mock/tmux" <<STUB
+#!/bin/bash
+if [ "\$1" = "display-message" ]; then
+  echo "$dims"
+  exit 0
+fi
+if [ "\$1" = "split-window" ]; then
+  printf '%s' "\$*" > "$args_file"
+fi
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+
+  HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+    LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+    bash -c "source '$DISPLAY_SH'; display_pane_open >/dev/null"
+
+  cat "$args_file"
+  rm -rf "$mock"
+}
+
+@test "display_pane_open splits -v on a tall pane" {
+  # A tall/narrow pane has spare vertical room, so the streaming pane should be a
+  # bottom band (-v) rather than a narrow right-hand sliver. 40x100 is well under the
+  # 2x cols>=rows threshold, so pane_orientation classifies it tall.
+  local captured
+  captured=$(_open_pane_with_dims "40 100")
+  [[ "$captured" == *"split-window -v"* ]] || {
+    echo "Expected -v split for a tall pane, got: $captured"
+    return 1
+  }
+}
+
+@test "display_pane_open splits -h on a wide pane" {
+  # A wide pane has spare horizontal room, so the streaming pane should be a side
+  # column (-h). 200x20 clears the 2x threshold, so pane_orientation classifies it wide.
+  local captured
+  captured=$(_open_pane_with_dims "200 20")
+  [[ "$captured" == *"split-window -h"* ]] || {
+    echo "Expected -h split for a wide pane, got: $captured"
+    return 1
+  }
+}
+
 @test "the pane render script normalizes the image before displaying it" {
   command -v sips >/dev/null || skip "sips is a macOS built-in; not available here"
   source "$DISPLAY_SH"

@@ -467,8 +467,8 @@ provider_finish() {
 
 # Classifies a pane as visually "wide" or "tall" from its cell dimensions. Terminal cells are
 # roughly twice as tall as they are wide, so a pane only reads as wide once its column count
-# reaches twice its row count. A wide pane gets a column (row-of-tiles) montage; a tall pane
-# gets a row (column-of-tiles) montage. Usage: pane_orientation <cols> <rows>
+# reaches twice its row count. display_pane_open splits a wide pane's horizontal axis and a
+# tall pane's vertical axis so the streaming pane keeps a usable shape. Usage: pane_orientation <cols> <rows>
 pane_orientation() {
   local cols="$1" rows="$2"
   if (( cols >= rows * 2 )); then
@@ -770,7 +770,19 @@ WATCHEREOF
     target_args=(-t "$TMUX_PANE")
   fi
 
-  tmux split-window -h -l '30%' ${target_args[@]+"${target_args[@]}"} \
+  # Split the pane's longer axis so the streaming pane keeps a usable shape. A wide pane has
+  # spare horizontal room, so a side column (-h, new pane to the right) leaves both panes wide
+  # enough; a tall/narrow pane has spare vertical room, so a bottom band (-v, new pane below)
+  # avoids a cramped sliver. Query the pane being split (not the attached client), and fall back
+  # to -h when the dimensions don't read as positive integers.
+  local split_flag='-h'
+  local cols rows
+  read -r cols rows <<<"$(tmux display-message -p ${target_args[@]+"${target_args[@]}"} '#{pane_width} #{pane_height}' 2>/dev/null)"
+  if [[ "$cols" =~ ^[0-9]+$ && "$rows" =~ ^[0-9]+$ && "$cols" -gt 0 && "$rows" -gt 0 ]]; then
+    [[ "$(pane_orientation "$cols" "$rows")" == "tall" ]] && split_flag='-v'
+  fi
+
+  tmux split-window "$split_flag" -l '30%' ${target_args[@]+"${target_args[@]}"} \
     "bash $safe_watcher $safe_watch_dir" \
     >/dev/null
 
