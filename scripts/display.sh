@@ -537,7 +537,13 @@ display_pane_open() {
       # full width. A percent width derives the count as a fraction of the cell grid (which control
       # mode does report), so it can never exceed the pane and the clamp cannot fire.
       # DISPLAY_PANE_IMAGE_PCT is the on-screen size knob (percent of pane width).
-      render_cmd="$(printf '%q' "$imgcat_path") -W ${DISPLAY_PANE_IMAGE_PCT:-30}% -r \"\$1\""
+      #
+      # Force a tmux-flavored TERM for imgcat. Inside tmux an inline-image OSC must be wrapped in the
+      # \033Ptmux; passthrough DCS or tmux (allow-passthrough) drops it -- and imgcat decides to wrap
+      # by inspecting $TERM (screen*/tmux*), not $TMUX. A pane inherits tmux's default-terminal, which
+      # may be xterm-256color; under a bare xterm TERM imgcat emits a raw OSC that never reaches iTerm2,
+      # so the banner shows but the image is blank. Setting TERM only for this call makes imgcat wrap.
+      render_cmd="TERM=tmux-256color $(printf '%q' "$imgcat_path") -W ${DISPLAY_PANE_IMAGE_PCT:-30}% -r \"\$1\""
       ;;
     kitty)
       render_cmd="kitten icat --align left \"\$1\""
