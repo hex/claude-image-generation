@@ -478,6 +478,22 @@ pane_orientation() {
   fi
 }
 
+# Splits a tab-delimited status line into its five fields (provider, state, ms, model, path),
+# printing one field per line so an empty field survives as an empty line. `read` with a
+# whitespace IFS -- and tab is whitespace -- collapses consecutive delimiters, so an empty
+# timing field would shift every later field left: the path lands in the model slot and path
+# ends up empty, and the pane shows the raw path instead of the image. Parameter-expansion
+# slicing cuts at exact delimiter positions and keeps empty fields in place. The fifth field is
+# the whole remainder, so a path containing a tab stays intact. Usage: pane_parse_status_line <line>
+pane_parse_status_line() {
+  local line="$1"
+  printf '%s\n' "${line%%$'\t'*}"; line="${line#*$'\t'}"   # provider
+  printf '%s\n' "${line%%$'\t'*}"; line="${line#*$'\t'}"   # state
+  printf '%s\n' "${line%%$'\t'*}"; line="${line#*$'\t'}"   # ms
+  printf '%s\n' "${line%%$'\t'*}"; line="${line#*$'\t'}"   # model
+  printf '%s\n' "$line"                                    # path (remainder)
+}
+
 # Opens a tmux pane that watches for images and displays them as they arrive.
 # Creates a temp directory with a manifest file and render script.
 # Prints the watch directory path to stdout (caller sets DISPLAY_PANE_DIR).
@@ -557,8 +573,11 @@ RENDEREOF
   } > "$watch_dir/render.sh"
   chmod +x "$watch_dir/render.sh"
 
-  cat > "$watch_dir/watcher.sh" <<'WATCHEREOF'
-#!/bin/bash
+  # The watcher sources this library so it can reuse pane_parse_status_line for status parsing.
+  {
+    printf '#!/bin/bash\n'
+    printf 'source %q\n' "$self"
+    cat <<'WATCHEREOF'
 WATCH="$1"
 trap 'rm -rf "$WATCH"' EXIT
 
@@ -681,7 +700,8 @@ while true; do
         while [[ $status_lines_processed -lt ${#status_lines[@]} ]]; do
             line="${status_lines[$status_lines_processed]}"
             status_lines_processed=$((status_lines_processed + 1))
-            IFS=$'\t' read -r provider state ms model path <<<"$line"
+            { IFS= read -r provider; IFS= read -r state; IFS= read -r ms; IFS= read -r model; IFS= read -r path; } \
+                < <(pane_parse_status_line "$line")
             note_provider "$provider"
             map_set provider_state "$provider" "$state"
             [[ -n "$ms" ]] && map_set provider_timing "$provider" "$ms"
@@ -759,6 +779,7 @@ while true; do
     fi
 done
 WATCHEREOF
+  } > "$watch_dir/watcher.sh"
   chmod +x "$watch_dir/watcher.sh"
 
   local safe_watch_dir safe_watcher

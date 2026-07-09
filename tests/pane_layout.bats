@@ -32,6 +32,58 @@ OVERSIZED_FIXTURE="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
   done
 }
 
+@test "pane_parse_status_line keeps an empty timing field from swallowing the path" {
+  source "$DISPLAY_SH"
+  # A completed provider whose elapsed-time field is empty. A whitespace-IFS read collapses the
+  # double tab, so the model would land in the timing slot and the image path in the model slot,
+  # leaving path empty -- the pane then shows the raw path as a banner and never renders the image.
+  # Expected fields come from the known input, not from re-running the split.
+  local line
+  line=$(printf 'xai\tcomplete\t\tmascot-xai\t/tmp/coffee-xai.png')
+  local provider state ms model path
+  { IFS= read -r provider; IFS= read -r state; IFS= read -r ms; IFS= read -r model; IFS= read -r path; } \
+    < <(pane_parse_status_line "$line")
+  [[ "$provider" == "xai" ]]              || { echo "provider='$provider' want 'xai'"; return 1; }
+  [[ "$state" == "complete" ]]            || { echo "state='$state' want 'complete'"; return 1; }
+  [[ -z "$ms" ]]                          || { echo "ms='$ms' want empty"; return 1; }
+  [[ "$model" == "mascot-xai" ]]          || { echo "model='$model' want 'mascot-xai'"; return 1; }
+  [[ "$path" == "/tmp/coffee-xai.png" ]]  || { echo "path='$path' want '/tmp/coffee-xai.png'"; return 1; }
+}
+
+@test "the watcher renders a completed image even when the timing field is empty" {
+  local mock="${BATS_TMPDIR}/watcher_empty_ms_$$"
+  mkdir -p "$mock/.iterm2"
+  # Stub imgcat announces it was asked to display something; reaching it proves the path parsed.
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  # tmux stub reports wide dims and swallows split-window, so display_pane_open only builds files.
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+
+  local wd
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+
+  # A completed provider whose elapsed-time field is empty, pointing at a real image. The empty
+  # field is what a whitespace-IFS read collapses, stranding the path and blanking the pane.
+  printf 'xai\tcomplete\t\tmascot-xai\t%s\n' "$OVERSIZED_FIXTURE" > "$wd/status"
+  touch "$wd/.done"
+
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"DISPLAYED:"* ]] || {
+    echo "watcher never rendered the image (empty timing field swallowed the path):"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
 @test "normalize_for_display shrinks an oversized image to the display box" {
   command -v sips >/dev/null || skip "sips is a macOS built-in; not available here"
   source "$DISPLAY_SH"
