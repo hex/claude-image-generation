@@ -1,7 +1,7 @@
 ---
 name: image-generation
 description: Generates and edits images using Google Gemini, OpenAI GPT Image, and xAI Grok Image APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "gpt image", "gemini image", or "grok image".
-version: 2026.5.0
+version: 2026.7.0
 ---
 
 # Image Generation with Gemini, OpenAI, and xAI
@@ -88,7 +88,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" \
 Use `scripts/run-all.sh` — a single Bash call that owns the streaming pane lifecycle and
 forks all providers in parallel. The watcher renders per-provider colored banners (gemini
 blue / openai gray / xai red) with model + timing, plus an animated bottom spinner of
-providers still working.
+pending providers shown until the first image renders. Once the first image appears the
+spinner goes silent so the inline images accumulate (further redraws would erase them in
+tmux control mode).
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
@@ -149,7 +151,7 @@ otherwise.
 | `--input-image` | file path | (edit only) |
 | `--aspect-ratio` | 14 ratios (1:1, 16:9, 21:9, 1:4, 4:1, 1:8, 8:1, etc.) | 1:1 |
 | `--image-size` | 512, 1K, 2K, 4K (UPPERCASE) | (API default 1K) |
-| `--thinking-level` | minimal, High | minimal |
+| `--thinking-level` | minimal, High | unset (API `minimal`) |
 | `--image-only` | (flag) | off |
 | `--search-grounding` | (flag) | off |
 | `--model` | gemini model name | gemini-3-pro-image-preview |
@@ -167,7 +169,7 @@ otherwise.
 | `--output-format` | png, jpeg, webp | png |
 | `--output-compression` | 0-100 (jpeg/webp only) | -- |
 | `--moderation` | auto, low | auto |
-| `--input-fidelity` | low, high (edit only) | low |
+| `--input-fidelity` | low, high (edit only) | unset (API `low`) |
 | `--model` | OpenAI model name | gpt-image-2 |
 
 ### xai.sh

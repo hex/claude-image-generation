@@ -1,6 +1,6 @@
 {
   "name": "claude-image-generation",
-  "version": "2026.5.0",
+  "version": "2026.7.0",
   "description": "Generate and edit images using Google Gemini, OpenAI GPT Image, and xAI Grok Image APIs",
   "author": {
     "name": "hex",

@@ -6,12 +6,11 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 
 - **Text-to-image generation** with Google Gemini, OpenAI GPT Image 2, or xAI Grok Image
 - **Image editing** with text instructions (all providers)
-- **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners and pending-provider spinner
+- **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners, and a pending-provider spinner shown until the first image renders
 - **Interactive provider selection** via AskUserQuestion at runtime
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
 - **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code)
-- **Streaming display** -- images appear progressively in a shared pane during parallel generation
-- **Grid view** -- compare multiple provider results stacked in a vertical side pane
+- **Streaming display** -- images appear progressively in a shared pane during parallel generation, accumulating as each provider finishes
 - **Open in Finder/Preview** -- press 'f' for Finder or 'p' for Preview in the display pane
 
 ## Installation
@@ -175,7 +174,7 @@ bash scripts/gemini.sh \
 | `--input-image` | file path | -- | Edit mode only |
 | `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9` on Pro (default); add `1:4`, `4:1`, `1:8`, `8:1` on `gemini-3.1-flash-image-preview` | `1:1` | No |
 | `--image-size` | `512`, `1K`, `2K`, `4K` (UPPERCASE); `512` requires `gemini-3.1-flash-image-preview` | (API default `1K`) | No |
-| `--thinking-level` | `minimal`, `High` | `minimal` | No |
+| `--thinking-level` | `minimal`, `High` | unset (API default `minimal`) | No |
 | `--image-only` | (flag, no value) | off | No |
 | `--search-grounding` | (flag, no value) | off | No |
 | `--model` | Gemini model name | `gemini-3-pro-image-preview` | No |
@@ -220,7 +219,7 @@ bash scripts/openai.sh \
 | `--output-format` | `png`, `jpeg`, `webp` | `png` | No |
 | `--output-compression` | integer 0-100 (jpeg/webp only) | -- | No |
 | `--moderation` | `auto`, `low` | `auto` | No |
-| `--input-fidelity` | `low`, `high` (edit only) | `low` | No |
+| `--input-fidelity` | `low`, `high` (edit only) | unset (API default `low`) | No |
 | `--model` | OpenAI model name | `gpt-image-2` | No |
 
 #### xai.sh
@@ -352,7 +351,7 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 
 When running inside **tmux** (including Claude Code sessions), single images open in a bottom pane (`-v` split) and multiple images open in a vertical side pane (`-h` split, 30% width) targeting the originating pane (via `$TMUX_PANE`). The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
 
-For parallel generation, use `scripts/run-all.sh` — a single shell that opens the streaming pane, exports `DISPLAY_PANE_DIR`, forks all providers with `&`, waits, and closes the pane. The watcher renders per-provider colored banners (blue/gray/red) with model + timing, plus an animated bottom spinner of providers still working. Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
+For parallel generation, use `scripts/run-all.sh` — a single shell that opens the streaming pane, exports `DISPLAY_PANE_DIR`, forks all providers with `&`, waits, and closes the pane. The watcher renders per-provider colored banners (blue/gray/red) with model + timing, plus an animated bottom spinner of pending providers shown until the first image renders (after which it stays silent, since further redraws would erase the accumulated inline images in tmux control mode). Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
 
 ## Requirements
 

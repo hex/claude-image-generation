@@ -53,6 +53,10 @@ bats tests/openai.bats
 | `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image` |
 | `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode |
 | `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
+| `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), fixed 30% image sizing + DPI normalization, empty-timing parse, spinner silencing after the first image |
+| `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction |
+| `tests/bash32_compat.bats` | provider + display scripts | bash 3.2 array / associative-array safety |
+| `tests/frontmatter.bats` | skill / agent / command | YAML frontmatter validation |
 
 Tests do not make real API calls. They validate argument parsing, error messages, exit codes, and terminal protocol output.
 
@@ -169,7 +173,7 @@ These tests require a running Claude Code session with the plugin loaded. They v
 1. Run `/generate-image a simple blue circle`
 2. Select "All in parallel"
 3. Verify a single task is created tracking the parallel run (`run-all.sh` owns parallelism; the agent does not orchestrate per-provider Task subagents)
-4. Verify a streaming pane opens (30% of the terminal's longer axis — a right-hand column on a wide terminal, a bottom band on a tall/narrow one) showing colored banners + animated spinner as each provider completes
+4. Verify a streaming pane opens (30% of the terminal's longer axis — a right-hand column on a wide terminal, a bottom band on a tall/narrow one) showing a colored banner + rendered image as each provider completes, plus a bottom spinner of pending providers that is shown only until the first image renders
 5. Verify three output files are generated with provider-suffixed filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`)
 
 ### 3.4 Output Location
@@ -184,7 +188,7 @@ These tests require a running Claude Code session with the plugin loaded. They v
 1. Run `/generate-image a sunset over the ocean` and select "All in parallel"
 2. Observe that a single task tracking the parallel run is created and marked in_progress
 3. A streaming pane opens, taking 30% of the terminal's longer axis (a right-hand column when the terminal is wide, a bottom band when it is tall/narrow). As each provider finishes, a colored banner appears (gemini blue / openai gray / xai red) with the model name and elapsed timing, followed by the rendered image
-4. While providers are still working, the bottom of the pane shows an animated spinner with the names of pending providers in their accent colors
+4. Until the first image renders, the bottom of the pane shows an animated spinner with the names of pending providers in their accent colors. Once the first image appears the spinner goes silent — further redraws would erase the accumulated inline images in tmux control mode — so later providers appear as banner + image with no spinner
 5. When all providers complete, the pane shows interactive controls (`[f]inder [p]review [esc/ctrl-d]`)
 6. The task is marked completed and all output paths are reported. If any provider failed, run-all.sh exits with status 1 and the error appears as a red banner inline (with details in `$DISPLAY_PANE_DIR/logs/<provider>.err`)
 
@@ -247,7 +251,7 @@ These tests require a running Claude Code session with the plugin loaded. They v
 | `--model` flag override | Manual | Flag takes precedence over env var |
 | Single-provider generation | Feature | Image file created, valid PNG |
 | Single-provider editing | Feature | Edited image created, original untouched |
-| All-providers parallel | Feature | Three tasks, three output files, all completed |
+| All-providers parallel | Feature | One task tracking the parallel run, three output files, all completed |
 | Output directory creation | Feature | Nonexistent directory is created |
 | Invalid API key | Edge case | HTTP error reported, script exits 1 |
 | Nonexistent input image | Edge case | Script exits with error |
