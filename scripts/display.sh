@@ -588,6 +588,7 @@ seen_providers=""
 status_lines_processed=0
 manifest_shown=0
 spinner_frame=0
+any_image_rendered=""
 SPINNERS=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 
 # map_set <map> <provider> <value> — store one attribute for a provider.
@@ -625,6 +626,10 @@ provider_palette() {
 }
 
 draw_loading() {
+    # Once any image is on the pane, stop the animated spinner. In tmux control mode every
+    # redraw resyncs the pane to tmux's text grid and erases inline images, which live as
+    # overlays outside it; the spinner is only safe to animate while no image is shown yet.
+    [[ -n "$any_image_rendered" ]] && return 0
     local pending=() p __state
     for p in $seen_providers; do
         map_get __state provider_state "$p"
@@ -721,6 +726,7 @@ while true; do
                 map_get ppath provider_path "$provider"
                 if [[ -n "$ppath" && -f "$ppath" ]]; then
                     "$WATCH/render.sh" "$ppath"
+                    any_image_rendered=1
                 fi
                 printf '\n'
             elif [[ "$state" == "error" ]]; then
@@ -752,6 +758,7 @@ while true; do
             mname=$(basename "$mpath")
             printf '\n--- %s ---\n' "$mname"
             "$WATCH/render.sh" "$mpath"
+            any_image_rendered=1
             echo
         done
     fi

@@ -84,6 +84,44 @@ STUB
   rm -rf "$mock"
 }
 
+@test "the spinner goes silent once an image renders so it can't wipe accumulated images" {
+  local mock="${BATS_TMPDIR}/watcher_spinner_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+
+  local wd
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+
+  # One provider has finished (its image is on the pane); another is still generating. In tmux
+  # control mode every spinner redraw resyncs the pane to tmux's text grid and erases inline
+  # images, which live as overlays outside it. So the animated spinner must stay silent for the
+  # rest of the run once any image has rendered -- otherwise it wipes the images it sits beneath.
+  {
+    printf 'xai\tcomplete\t\tmascot-xai\t%s\n' "$OVERSIZED_FIXTURE"
+    printf 'openai\tquerying\t\t\t\n'
+  } > "$wd/status"
+  touch "$wd/.done"
+
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"DISPLAYED:"* ]] || { echo "image never rendered: $output"; return 1; }
+  [[ "$output" != *"generating"* ]] || {
+    echo "spinner drew while an image was displayed (would erase it in control mode):"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
 @test "normalize_for_display shrinks an oversized image to the display box" {
   command -v sips >/dev/null || skip "sips is a macOS built-in; not available here"
   source "$DISPLAY_SH"
