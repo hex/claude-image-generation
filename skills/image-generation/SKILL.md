@@ -29,7 +29,7 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, and xAI Grok I
 - **Strengths**: Prompt revision by chat model, flat per-image pricing, diverse style range, many aspect ratios
 - **Aspect ratios**: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, auto
 - **Resolution**: `--resolution` takes `1k`, `2k` (LOWERCASE required, opposite of Gemini)
-- **Editing**: Same endpoint as generation; source image passed as data URI
+- **Editing**: Dedicated `/v1/images/edits` endpoint; up to 3 input images passed as data URIs in an `images` array
 - **Env var**: `XAI_API_KEY` or `GROK_API_KEY`
 
 ## Usage
@@ -102,7 +102,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
 Each provider produces `<base>-gemini.png`, `<base>-openai.png`, `<base>-xai.png`.
 
 Optional flags:
-- `--input-image <path>` — required for `--mode edit`
+- `--input-image <path>` — required for `--mode edit`; repeatable, every image is forwarded to each provider. Forwarding happens in edit mode only — for Gemini's generate-mode reference images, call gemini.sh directly
 - `--providers gemini,openai` — comma-separated subset
 - `--gemini-extra "--image-size 4K --aspect-ratio 16:9"` — pass-through args to gemini.sh
 - `--openai-extra "--quality high"` — pass-through args to openai.sh
@@ -128,8 +128,8 @@ otherwise.
 ### Editing
 - Describe what to change, not the whole image
 - Be specific about which elements to preserve vs modify
-- For Gemini: supports iterative multi-turn refinement
-- For OpenAI: can accept up to 16 reference images
+- `--input-image` is repeatable on all providers, but the modes differ: Gemini accepts up to 14 images in both `--mode generate` (references for a fresh composition) and `--mode edit`; OpenAI (up to 16) and xAI (up to 3) accept input images in `--mode edit` only — their generation endpoints take no images
+- For Gemini: supports iterative multi-turn refinement; compose the flat 14-image budget as up to 6 object + 5 character-consistency + 3 style-reference images. There is no API field to tag an image's role — the model infers it from the prompt, so state which images are objects, characters, or style references
 - For xAI: prompts are revised by a chat model before generation
 
 ## Error Handling
@@ -148,7 +148,7 @@ otherwise.
 | `--mode` | generate, edit | (required) |
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
-| `--input-image` | file path | (edit only) |
+| `--input-image` | file path, repeatable (max 14) | (required for edit; optional refs in generate) |
 | `--aspect-ratio` | 14 ratios (1:1, 16:9, 21:9, 1:4, 4:1, 1:8, 8:1, etc.) | 1:1 |
 | `--image-size` | 512, 1K, 2K, 4K (UPPERCASE) | (API default 1K) |
 | `--thinking-level` | minimal, High | unset (API `minimal`) |
@@ -162,7 +162,7 @@ otherwise.
 | `--mode` | generate, edit | (required) |
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
-| `--input-image` | file path | (edit only) |
+| `--input-image` | file path, repeatable (max 16) | (edit only) |
 | `--size` | auto, 1024x1024, 1536x1024, 1024x1536 | 1024x1024 |
 | `--quality` | auto, low, medium, high | high |
 | `--background` | auto, transparent, opaque | auto |
@@ -178,7 +178,7 @@ otherwise.
 | `--mode` | generate, edit | (required) |
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
-| `--input-image` | file path | (edit only) |
+| `--input-image` | file path, repeatable (max 3) | (edit only) |
 | `--aspect-ratio` | 14 ratios (1:1, 16:9, 19.5:9, 20:9, auto, etc.) | (none) |
 | `--resolution` | 1k, 2k (LOWERCASE) | (API default) |
 | `--model` | xAI model name | grok-imagine-image-pro |

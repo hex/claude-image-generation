@@ -17,7 +17,7 @@ Options:
   --mode              generate or edit (required)
   --prompt            Text prompt describing the image (required)
   --output            Output file path (required)
-  --input-image       Input image path for edit mode (required for edit)
+  --input-image       Input image path for edit mode (required for edit, repeatable)
   --size              Image size: auto, 1024x1024, 1536x1024, 1024x1536 (default: 1024x1024)
   --quality           Quality: auto, low, medium, high (default: high)
   --background        Background: auto, transparent, opaque (default: auto)
@@ -25,7 +25,7 @@ Options:
   --output-compression  Compression 0-100 (for jpeg/webp only)
   --moderation        Moderation: auto, low (default: auto)
   --input-fidelity    Edit mode only: low, high (default: low)
-                      'high' preserves faces/logos/textures — first 5 images for gpt-image-2/1.5
+                      'high' preserves faces/logos/textures — only the first image gets it
   --model             OpenAI model (default: gpt-image-2)
                       Alternatives: gpt-image-1.5, gpt-image-1-mini (3-4x cheaper), gpt-image-1
 
@@ -39,7 +39,7 @@ EOF
 MODE=""
 PROMPT=""
 OUTPUT=""
-INPUT_IMAGE=""
+INPUT_IMAGES=()
 SIZE="1024x1024"
 QUALITY="high"
 BACKGROUND="auto"
@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="$2"; shift 2 ;;
     --prompt) PROMPT="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
-    --input-image) INPUT_IMAGE="$2"; shift 2 ;;
+    --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --size) SIZE="$2"; shift 2 ;;
     --quality) QUALITY="$2"; shift 2 ;;
     --background) BACKGROUND="$2"; shift 2 ;;
@@ -94,9 +94,19 @@ if [[ -z "$MODE" || -z "$PROMPT" || -z "$OUTPUT" ]]; then
   usage
 fi
 
-if [[ "$MODE" == "edit" && -z "$INPUT_IMAGE" ]]; then
+if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   echo "Error: --input-image is required for edit mode" >&2
   usage
+fi
+
+if [[ ${#INPUT_IMAGES[@]} -gt 16 ]]; then
+  echo "Error: at most 16 input images supported for openai" >&2
+  exit 1
+fi
+
+if [[ "$MODEL" == dall-e-2* && ${#INPUT_IMAGES[@]} -gt 1 ]]; then
+  echo "Error: at most 1 input image for dall-e-2" >&2
+  exit 1
 fi
 
 if [[ -z "${OPENAI_API_KEY:-}" ]]; then
@@ -147,9 +157,13 @@ elif [[ "$MODE" == "edit" ]]; then
   echo "Calling OpenAI API (model: ${MODEL}, mode: edit)..." >&2
   display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
-  EDIT_ARGS=(-F "model=${MODEL}" -F "prompt=${PROMPT}" -F "image=@${INPUT_IMAGE}" \
+  EDIT_ARGS=(-F "model=${MODEL}" -F "prompt=${PROMPT}" \
     -F "size=${SIZE}" -F "quality=${QUALITY}" -F "background=${BACKGROUND}" \
     -F "output_format=${OUTPUT_FORMAT}" -F "moderation=${MODERATION}")
+
+  for img in "${INPUT_IMAGES[@]}"; do
+    EDIT_ARGS+=(-F "image[]=@${img}")
+  done
 
   if [[ -n "$OUTPUT_COMPRESSION" ]]; then
     EDIT_ARGS+=(-F "output_compression=${OUTPUT_COMPRESSION}")

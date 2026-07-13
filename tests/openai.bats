@@ -76,6 +76,25 @@ setup() {
   assert_output_contains "model: flag-model"
 }
 
+@test "openai: more than 16 input images is rejected" {
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  local args=(--mode edit --prompt "combine these" --output "/tmp/out.png")
+  for i in $(seq 1 17); do
+    args+=(--input-image "/tmp/x.png")
+  done
+  run "$OPENAI_SH" "${args[@]}"
+  assert_status 1
+  assert_output_contains "at most 16"
+}
+
+@test "openai: dall-e-2 with multiple images rejected" {
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  run "$OPENAI_SH" --mode edit --prompt "combine these" --output "/tmp/out.png" \
+    --model dall-e-2 --input-image "/tmp/x.png" --input-image "/tmp/y.png"
+  assert_status 1
+  assert_output_contains "at most 1 input image for dall-e-2"
+}
+
 @test "openai: usage text includes all documented options" {
   run "$OPENAI_SH"
   assert_status 1

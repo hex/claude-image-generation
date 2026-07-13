@@ -17,7 +17,7 @@ Options:
   --mode              generate or edit (required)
   --prompt            Text prompt describing the image (required)
   --output            Output file path (required)
-  --input-image       Input image path for edit mode (required for edit)
+  --input-image       Input image path for edit mode (required for edit, repeatable)
   --aspect-ratio      Aspect ratio (default: 1:1)
                       Standard: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
                       Extreme (3.1 Flash only): 1:4, 4:1, 1:8, 8:1
@@ -40,7 +40,7 @@ EOF
 MODE=""
 PROMPT=""
 OUTPUT=""
-INPUT_IMAGE=""
+INPUT_IMAGES=()
 ASPECT_RATIO="1:1"
 IMAGE_SIZE=""
 THINKING_LEVEL=""
@@ -53,7 +53,7 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="$2"; shift 2 ;;
     --prompt) PROMPT="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
-    --input-image) INPUT_IMAGE="$2"; shift 2 ;;
+    --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
     --image-size) IMAGE_SIZE="$2"; shift 2 ;;
     --thinking-level) THINKING_LEVEL="$2"; shift 2 ;;
@@ -83,9 +83,14 @@ if [[ -z "$MODE" || -z "$PROMPT" || -z "$OUTPUT" ]]; then
   usage
 fi
 
-if [[ "$MODE" == "edit" && -z "$INPUT_IMAGE" ]]; then
+if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   echo "Error: --input-image is required for edit mode" >&2
   usage
+fi
+
+if [[ ${#INPUT_IMAGES[@]} -gt 14 ]]; then
+  echo "Error: at most 14 input images supported for gemini" >&2
+  exit 1
 fi
 
 if [[ -z "${GEMINI_API_KEY:-}" ]]; then
@@ -98,20 +103,24 @@ API_URL="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:genera
 build_request_body() {
   local parts="[]"
 
-  if [[ "$MODE" == "edit" && -n "$INPUT_IMAGE" ]]; then
-    local mime_type
-    case "${INPUT_IMAGE##*.}" in
-      png) mime_type="image/png" ;;
-      jpg|jpeg) mime_type="image/jpeg" ;;
-      webp) mime_type="image/webp" ;;
-      *) mime_type="image/png" ;;
-    esac
-    # The base64 image is streamed into jq via --rawfile rather than passed as an
-    # argument: a normal image exceeds ARG_MAX (1 MB on macOS) and jq would die with
-    # "argument list too long". jq -n leaves stdin free for the rawfile.
-    parts=$(base64 < "$INPUT_IMAGE" | tr -d '\n' \
-      | jq -n --arg mime "$mime_type" --rawfile data /dev/stdin \
-      '[{"inlineData": {"mimeType": $mime, "data": $data}}]')
+  if [[ ${#INPUT_IMAGES[@]} -gt 0 ]]; then
+    local img mime_type img_b64_file
+    for img in "${INPUT_IMAGES[@]}"; do
+      case "${img##*.}" in
+        png) mime_type="image/png" ;;
+        jpg|jpeg) mime_type="image/jpeg" ;;
+        webp) mime_type="image/webp" ;;
+        *) mime_type="image/png" ;;
+      esac
+      # The base64 image is streamed into jq via --rawfile rather than passed as an
+      # argument: a normal image exceeds ARG_MAX (1 MB on macOS) and jq would die with
+      # "argument list too long". The growing parts JSON travels on stdin (as jq's main
+      # input) rather than --argjson, for the same reason.
+      img_b64_file=$(mktemp -p "$tmpdir")
+      base64 < "$img" | tr -d '\n' > "$img_b64_file"
+      parts=$(echo "$parts" | jq --arg mime "$mime_type" --rawfile data "$img_b64_file" \
+        '. + [{"inlineData": {"mimeType": $mime, "data": $data}}]')
+    done
   fi
 
   parts=$(echo "$parts" | jq --arg prompt "$PROMPT" '. + [{"text": $prompt}]')
@@ -152,6 +161,10 @@ build_request_body() {
   echo "$request"
 }
 
+if [[ ${#INPUT_IMAGES[@]} -gt 0 ]]; then
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT
+fi
 REQUEST_BODY=$(build_request_body)
 
 echo "Calling Gemini API (model: ${MODEL}, mode: ${MODE})..." >&2

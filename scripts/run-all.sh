@@ -22,7 +22,7 @@ Options:
   --mode           generate or edit (required)
   --prompt         text prompt (required)
   --output-base    base path; produces <base>-gemini.png, <base>-openai.png, <base>-xai.png
-  --input-image    input image path (required for edit mode)
+  --input-image    input image path (required for edit mode, repeatable)
   --providers      comma-separated subset (default: gemini,openai,xai)
   --gemini-extra   extra args passed to gemini.sh (single shell-split string)
   --openai-extra   extra args passed to openai.sh (single shell-split string)
@@ -37,7 +37,7 @@ EOF
 MODE=""
 PROMPT=""
 OUTPUT_BASE=""
-INPUT_IMAGE=""
+INPUT_IMAGES=()
 PROVIDERS="gemini,openai,xai"
 GEMINI_EXTRA=""
 OPENAI_EXTRA=""
@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="$2"; shift 2 ;;
     --prompt) PROMPT="$2"; shift 2 ;;
     --output-base) OUTPUT_BASE="$2"; shift 2 ;;
-    --input-image) INPUT_IMAGE="$2"; shift 2 ;;
+    --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --providers) PROVIDERS="$2"; shift 2 ;;
     --gemini-extra) GEMINI_EXTRA="$2"; shift 2 ;;
     --openai-extra) OPENAI_EXTRA="$2"; shift 2 ;;
@@ -63,7 +63,7 @@ if [[ -z "$MODE" || -z "$PROMPT" || -z "$OUTPUT_BASE" ]]; then
   usage
 fi
 
-if [[ "$MODE" == "edit" && -z "$INPUT_IMAGE" ]]; then
+if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   echo "Error: --input-image is required for edit mode" >&2
   usage
 fi
@@ -101,7 +101,11 @@ for p in "${provider_list[@]}"; do
     *) echo "Warning: unknown provider '$p' (skipping)" >&2; continue ;;
   esac
   args=(--mode "$MODE" --prompt "$PROMPT" --output "${OUTPUT_BASE}-${p}.png")
-  [[ "$MODE" == "edit" && -n "$INPUT_IMAGE" ]] && args+=(--input-image "$INPUT_IMAGE")
+  if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -gt 0 ]]; then
+    for img in "${INPUT_IMAGES[@]}"; do
+      args+=(--input-image "$img")
+    done
+  fi
   # ${arr[@]+"${arr[@]}"} expands to nothing when the array is empty, which bash 3.2
   # otherwise reports as an unbound variable under `set -u`.
   [[ -n "$extra" ]] && read -ra extra_arr <<<"$extra" && args+=(${extra_arr[@]+"${extra_arr[@]}"})

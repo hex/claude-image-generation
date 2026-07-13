@@ -83,6 +83,15 @@ setup() {
   assert_output_contains "model: custom-xai-model"
 }
 
+@test "xai: more than 3 input images is rejected" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  run "$XAI_SH" --mode edit --prompt "combine these" --output "/tmp/out.png" \
+    --input-image "/tmp/x.png" --input-image "/tmp/x.png" \
+    --input-image "/tmp/x.png" --input-image "/tmp/x.png"
+  assert_status 1
+  assert_output_contains "at most 3"
+}
+
 @test "xai: usage text includes all documented options" {
   run "$XAI_SH"
   assert_status 1

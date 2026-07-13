@@ -11,7 +11,7 @@ POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateCon
 Header: `x-goog-api-key: YOUR_API_KEY`
 
 ### Request Format
-The Gemini API uses a unified `generateContent` endpoint. Images are passed as `inlineData` parts alongside text parts.
+The Gemini API uses a unified `generateContent` endpoint. Images are passed as `inlineData` parts alongside text parts. Multiple input images become multiple `inlineData` parts (up to 14) ahead of the text part; the same payload shape serves both editing and reference-based generation — there is no separate edit endpoint.
 
 ```json
 {
@@ -121,7 +121,7 @@ Token rates: input $0.50/MTok, output text+thinking $3.00/MTok, output images $6
 - Input images auto-scaled to max 3072x3072
 - **SynthID watermark is mandatory** — embedded in every image, cannot be disabled
 - ONE image per API call (use Batch API for bulk)
-- Multi-image input: up to 14 refs (10 object + 4 character on 3.1 Flash; 6+5+3 on Pro)
+- Multi-image input: up to 14 refs (10 object + 4 character on 3.1 Flash; 6 object + 5 character + 3 style on Pro)
 - No transparent backgrounds, no negative prompts, no function calling/structured outputs/caching
 - Text rendering: keep under 25 characters for reliable output
 
@@ -161,12 +161,15 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 ```
 model=gpt-image-2
 prompt=edit instruction
-image=@path/to/image.png
+image[]=@path/to/first.png
+image[]=@path/to/second.png
 size=1024x1024
 output_format=png
 moderation=auto
 input_fidelity=high
 ```
+
+Multiple input images are sent as repeated `image[]` fields (up to 16). The generation endpoint accepts no image parameters, so reference-based composition goes through `/v1/images/edits`.
 
 ### Edit Request (JSON body alternative, available since 2026-02-09)
 ```json
@@ -257,7 +260,7 @@ Batch API (available since 2026-02-10) does NOT count against IPM limits.
 ### Constraints
 - Prompt max: 32,000 characters
 - Up to 10 images per generation request
-- Up to 16 input images for editing (multipart: repeated `image` fields; JSON: `images` array)
+- Up to 16 input images for editing (multipart: repeated `image[]` fields; JSON: `images` array)
 - Organization verification required
 
 ---
@@ -268,7 +271,7 @@ Batch API (available since 2026-02-10) does NOT count against IPM limits.
 - Generation: `POST https://api.x.ai/v1/images/generations`
 - Editing: `POST https://api.x.ai/v1/images/edits` (dedicated edit endpoint, added 2026-01-28)
 
-The plugin currently uses `/v1/images/generations` with `image_url` for both — this still works. The dedicated edit endpoint supports multi-image editing (up to 5 images).
+The plugin posts generation to `/v1/images/generations` and editing to `/v1/images/edits` (edit mode previously went through the generations endpoint with a single `image_url` — that legacy form still works). The edit endpoint supports multi-image editing (up to 5 images; the plugin's scripts cap at 3).
 
 ### Authentication
 Header: `Authorization: Bearer YOUR_API_KEY`
@@ -298,7 +301,7 @@ Substitute `grok-imagine-image` for the standard-tier model — parameter schema
 }
 ```
 
-### Edit Request — dedicated `/v1/images/edits` endpoint (new)
+### Edit Request — dedicated `/v1/images/edits` endpoint (used by the plugin)
 Single image:
 ```json
 {
@@ -320,6 +323,8 @@ Multi-image (up to 5):
   "aspect_ratio": "3:2"
 }
 ```
+
+The plugin always sends the `images` array form — even for a single input image — with each entry a base64 data URI: `{"type": "image_url", "url": "data:image/png;base64,..."}`.
 
 **Important quirk**: For single-image edits, the output aspect ratio matches the input image's ratio. You cannot override `aspect_ratio` on single-image edits. Multi-image edits allow override (defaults to first image's ratio).
 

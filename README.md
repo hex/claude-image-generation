@@ -6,6 +6,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 
 - **Text-to-image generation** with Google Gemini, OpenAI GPT Image 2, or xAI Grok Image
 - **Image editing** with text instructions (all providers)
+- **Multi-image input** — repeatable `--input-image` for multi-image edits (all providers) and Gemini reference-based generation
 - **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners, and a pending-provider spinner shown until the first image renders
 - **Interactive provider selection** via AskUserQuestion at runtime
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
@@ -171,7 +172,7 @@ bash scripts/gemini.sh \
 | `--mode` | `generate`, `edit` | -- | Yes |
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
-| `--input-image` | file path | -- | Edit mode only |
+| `--input-image` | file path, repeatable (max 14) | -- | Edit mode; optional in generate mode as references |
 | `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9` on Pro (default); add `1:4`, `4:1`, `1:8`, `8:1` on `gemini-3.1-flash-image-preview` | `1:1` | No |
 | `--image-size` | `512`, `1K`, `2K`, `4K` (UPPERCASE); `512` requires `gemini-3.1-flash-image-preview` | (API default `1K`) | No |
 | `--thinking-level` | `minimal`, `High` | unset (API default `minimal`) | No |
@@ -212,7 +213,7 @@ bash scripts/openai.sh \
 | `--mode` | `generate`, `edit` | -- | Yes |
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
-| `--input-image` | file path | -- | Edit mode only |
+| `--input-image` | file path, repeatable (max 16; `dall-e-2` allows 1) | -- | Edit mode only |
 | `--size` | `auto`, `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` | No |
 | `--quality` | `auto`, `low`, `medium`, `high` | `high` | No |
 | `--background` | `auto`, `transparent`, `opaque` | `auto` | No |
@@ -267,12 +268,63 @@ bash scripts/xai.sh \
 | `--mode` | `generate`, `edit` | -- | Yes |
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
-| `--input-image` | file path | -- | Edit mode only |
+| `--input-image` | file path, repeatable (max 3) | -- | Edit mode only |
 | `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `auto` | (none) | No |
 | `--resolution` | `1k`, `2k` (LOWERCASE) | (API default) | No |
 | `--model` | xAI model name | `grok-imagine-image-pro` | No |
 
-**Note**: For single-image edits, xAI ignores `--aspect-ratio` and uses the input image's ratio. Multi-image edits (5 images max) allow aspect ratio override.
+**Note**: For single-image edits, xAI ignores `--aspect-ratio` and uses the input image's ratio. Multi-image edits allow aspect ratio override (the script accepts up to 3 images; the API itself supports up to 5).
+
+#### Reference Images and Multi-Image Composition
+
+`--input-image` is repeatable on all three scripts. Passing more images than a provider supports exits with code 1 before any API call:
+
+| Provider | Max images | Modes |
+|----------|------------|-------|
+| Gemini | 14 | `generate` (references for a fresh composition) and `edit` |
+| OpenAI | 16 | `edit` only (its generation endpoint takes no images) |
+| xAI | 3 | `edit` only |
+
+```bash
+# Gemini: compose a new image from reference images (generate mode)
+bash scripts/gemini.sh \
+  --mode generate \
+  --prompt "a product shot combining the chair from the first image with the fabric of the second" \
+  --input-image ./chair.png \
+  --input-image ./fabric.png \
+  --output ./composite.png
+
+# OpenAI: multi-image edit
+bash scripts/openai.sh \
+  --mode edit \
+  --prompt "place the logo from the second image onto the mug in the first" \
+  --input-image ./mug.png \
+  --input-image ./logo.png \
+  --output ./branded.png
+
+# xAI: multi-image edit
+bash scripts/xai.sh \
+  --mode edit \
+  --prompt "blend both scenes into one panorama" \
+  --input-image ./left.png \
+  --input-image ./right.png \
+  --output ./panorama.png
+
+# All providers in parallel (edit mode only)
+bash scripts/run-all.sh \
+  --mode edit \
+  --prompt "combine these" \
+  --input-image ./ref-a.png \
+  --input-image ./ref-b.png \
+  --output-base ./combined
+```
+
+Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-consistency + 3 style-reference images. There is no API field to tag an image's role — the model infers it from the prompt, so state which images are objects, characters, or style references.
+
+**Notes:**
+
+- `run-all.sh` forwards every `--input-image` to each selected provider, but only in `--mode edit`. Gemini's generate-mode reference images are not forwarded through run-all — call `scripts/gemini.sh` directly for generate-with-references.
+- `dall-e-2` edits are a known limitation: the script rejects multiple images for `dall-e-2`, but single-image `dall-e-2` edits also do not work — the script sends form fields only the gpt-image models accept.
 
 ## Provider Comparison
 
@@ -283,7 +335,7 @@ bash scripts/xai.sh \
 | Text rendering | Very good (under 25 chars) | Excellent | Good |
 | Transparent BG | No | Yes | No |
 | Aspect ratios | 10 on Pro / 14 on 3.1 Flash | 3 fixed sizes | 14 options (incl. 20:9, auto) |
-| Image editing | Multi-turn, up to 14 refs | Single image (API supports up to 16) | Same endpoint, via `image_url` |
+| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 3 images |
 | Quality tiers | N/A | auto / low / medium / high | N/A |
 | Thinking mode | Yes (`--thinking-level`) | No | No |
 | Search grounding | Yes (Google Search) | No | No |

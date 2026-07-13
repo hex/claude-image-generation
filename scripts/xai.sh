@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Generates or edits images using xAI Grok Image API.
-# ABOUTME: Uses a single /v1/images/generations endpoint for both generation and editing.
+# ABOUTME: Posts to /v1/images/generations for generation and /v1/images/edits for editing.
 
 set -euo pipefail
 
@@ -17,7 +17,7 @@ Options:
   --mode          generate or edit (required)
   --prompt        Text prompt describing the image (required)
   --output        Output file path (required)
-  --input-image   Input image path for edit mode (required for edit)
+  --input-image   Input image path for edit mode (required for edit, repeatable, max 3)
   --aspect-ratio  Aspect ratio (default: none — model picks)
                   1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2,
                   19.5:9, 9:19.5, 20:9, 9:20, auto
@@ -36,7 +36,7 @@ EOF
 MODE=""
 PROMPT=""
 OUTPUT=""
-INPUT_IMAGE=""
+INPUT_IMAGES=()
 ASPECT_RATIO=""
 RESOLUTION=""
 MODEL="${XAI_IMAGE_MODEL:-grok-imagine-image-pro}"
@@ -46,7 +46,7 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="$2"; shift 2 ;;
     --prompt) PROMPT="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
-    --input-image) INPUT_IMAGE="$2"; shift 2 ;;
+    --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
     --resolution) RESOLUTION="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
@@ -66,9 +66,14 @@ if [[ -z "$MODE" || -z "$PROMPT" || -z "$OUTPUT" ]]; then
   usage
 fi
 
-if [[ "$MODE" == "edit" && -z "$INPUT_IMAGE" ]]; then
+if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   echo "Error: --input-image is required for edit mode" >&2
   usage
+fi
+
+if [[ ${#INPUT_IMAGES[@]} -gt 3 ]]; then
+  echo "Error: at most 3 input images supported for xai" >&2
+  exit 1
 fi
 
 XAI_API_KEY="${XAI_API_KEY:-${GROK_API_KEY:-}}"
@@ -85,8 +90,8 @@ fi
 echo "Calling xAI API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
-# Build request body -- xAI uses the same endpoint for generation and editing.
-# For editing, the source image is passed as image_url (public URL or data URI).
+# Build request body. Generation posts to /v1/images/generations; edit mode switches the
+# target to /v1/images/edits below and attaches source images as an images[] array.
 REQUEST_BODY=$(jq -n \
   --arg model "$MODEL" \
   --arg prompt "$PROMPT" \
@@ -105,30 +110,35 @@ if [[ -n "$RESOLUTION" ]]; then
   REQUEST_BODY=$(echo "$REQUEST_BODY" | jq --arg res "$RESOLUTION" '. + {"resolution": $res}')
 fi
 
-if [[ "$MODE" == "edit" && -n "$INPUT_IMAGE" ]]; then
-  local_mime_type="image/png"
-  case "${INPUT_IMAGE##*.}" in
-    jpg|jpeg) local_mime_type="image/jpeg" ;;
-    webp) local_mime_type="image/webp" ;;
-    gif) local_mime_type="image/gif" ;;
-  esac
-  # A normal image's base64 exceeds ARG_MAX, so it reaches jq through --rawfile
-  # instead of an argument. This jq reads REQUEST_BODY on stdin, so the base64 needs
-  # its own file; the data: prefix is small enough to stay an argument.
-  image_b64_file=$(mktemp)
-  trap 'rm -f "$image_b64_file"' EXIT
-  base64 < "$INPUT_IMAGE" | tr -d '\n' > "$image_b64_file"
-  REQUEST_BODY=$(echo "$REQUEST_BODY" \
-    | jq --arg prefix "data:${local_mime_type};base64," --rawfile b64 "$image_b64_file" \
-    '. + {"image_url": ($prefix + $b64)}')
-  rm -f "$image_b64_file"
-  trap - EXIT
+API_URL="https://api.x.ai/v1/images/generations"
+
+if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -gt 0 ]]; then
+  API_URL="https://api.x.ai/v1/images/edits"
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT
+  REQUEST_BODY=$(echo "$REQUEST_BODY" | jq '. + {"images": []}')
+  for img in "${INPUT_IMAGES[@]}"; do
+    local_mime_type="image/png"
+    case "${img##*.}" in
+      jpg|jpeg) local_mime_type="image/jpeg" ;;
+      webp) local_mime_type="image/webp" ;;
+      gif) local_mime_type="image/gif" ;;
+    esac
+    # A normal image's base64 exceeds ARG_MAX, so it reaches jq through --rawfile
+    # instead of an argument. This jq reads REQUEST_BODY on stdin, so the base64 needs
+    # its own file; the data: prefix is small enough to stay an argument.
+    image_b64_file=$(mktemp -p "$tmpdir")
+    base64 < "$img" | tr -d '\n' > "$image_b64_file"
+    REQUEST_BODY=$(echo "$REQUEST_BODY" \
+      | jq --arg prefix "data:${local_mime_type};base64," --rawfile b64 "$image_b64_file" \
+      '.images += [{"type": "image_url", "url": ($prefix + $b64)}]')
+  done
 fi
 
 # The body embeds the base64 image in edit mode, so it is streamed to curl on stdin
 # (--data-binary @-) instead of passed as -d, which would exceed ARG_MAX.
 RESPONSE=$(printf '%s' "$REQUEST_BODY" | curl -s -w "\n%{http_code}" \
-  -X POST "https://api.x.ai/v1/images/generations" \
+  -X POST "${API_URL}" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${XAI_API_KEY}" \
   --data-binary @-)

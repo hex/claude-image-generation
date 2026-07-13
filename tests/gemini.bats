@@ -79,6 +79,17 @@ setup() {
   assert_output_contains "model: gemini-flag-model"
 }
 
+@test "gemini: more than 14 input images is rejected" {
+  export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
+  local args=(--mode edit --prompt "combine these" --output "/tmp/out.png")
+  for i in $(seq 1 15); do
+    args+=(--input-image "/tmp/x.png")
+  done
+  run "$GEMINI_SH" "${args[@]}"
+  assert_status 1
+  assert_output_contains "at most 14"
+}
+
 @test "gemini: usage text includes all documented options" {
   run "$GEMINI_SH"
   assert_status 1

@@ -49,12 +49,13 @@ bats tests/openai.bats
 
 | Test file | Script under test | What it covers |
 |-----------|-------------------|----------------|
-| `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image` |
-| `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image` |
-| `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode |
+| `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 14 input images rejected |
+| `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 16 input images rejected, multiple images with `dall-e-2` rejected |
+| `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 3 input images rejected |
 | `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
 | `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), fixed 30% image sizing + DPI normalization, empty-timing parse, spinner silencing after the first image |
-| `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction |
+| `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction; multi-image payload shape (gemini inlineData part count in edit and generate modes, openai repeated `image[]` multipart fields, xai `images` array length) |
+| `tests/run-all.bats` | `scripts/run-all.sh` | `--input-image` forwarding — every repeated flag reaches each provider (provider scripts stubbed) |
 | `tests/bash32_compat.bats` | provider + display scripts | bash 3.2 array / associative-array safety |
 | `tests/frontmatter.bats` | skill / agent / command | YAML frontmatter validation |
 
@@ -120,6 +121,67 @@ export XAI_IMAGE_MODEL="grok-imagine-image-pro"
 bash scripts/xai.sh --mode generate --prompt "test" --output /tmp/test.png
 # Expected: stderr includes "model: grok-imagine-image-pro"
 ```
+
+### Multi-Image Input Validation
+
+`--input-image` is repeatable. Over-cap runs exit with code 1 before any API call, so no API key is needed.
+
+```bash
+# Gemini: 15 images (cap 14)
+args=(); for i in $(seq 1 15); do args+=(--input-image /tmp/x.png); done
+bash scripts/gemini.sh --mode edit --prompt "test" --output /tmp/test.png "${args[@]}"
+# Expected: exits 1, "Error: at most 14 input images supported for gemini"
+
+# OpenAI: 17 images (cap 16)
+args=(); for i in $(seq 1 17); do args+=(--input-image /tmp/x.png); done
+bash scripts/openai.sh --mode edit --prompt "test" --output /tmp/test.png "${args[@]}"
+# Expected: exits 1, "Error: at most 16 input images supported for openai"
+
+# OpenAI: dall-e-2 rejects multiple images
+bash scripts/openai.sh --mode edit --prompt "test" --output /tmp/test.png \
+  --model dall-e-2 --input-image /tmp/x.png --input-image /tmp/y.png
+# Expected: exits 1, "Error: at most 1 input image for dall-e-2"
+
+# xAI: 4 images (cap 3)
+bash scripts/xai.sh --mode edit --prompt "test" --output /tmp/test.png \
+  --input-image /tmp/x.png --input-image /tmp/x.png \
+  --input-image /tmp/x.png --input-image /tmp/x.png
+# Expected: exits 1, "Error: at most 3 input images supported for xai"
+```
+
+### Multi-Image Smoke Tests (Real API Calls)
+
+**Setup:** Two existing image files (e.g., `./ref-a.png`, `./ref-b.png`) and API keys for the providers under test. Mirrors the single-image editing test in section 3.2, with repeated `--input-image` flags.
+
+```bash
+# Multi-image edit on each provider
+bash scripts/gemini.sh --mode edit \
+  --prompt "put the subject of the first image into the scene of the second" \
+  --input-image ./ref-a.png --input-image ./ref-b.png --output /tmp/multi-gemini.png
+bash scripts/openai.sh --mode edit \
+  --prompt "put the subject of the first image into the scene of the second" \
+  --input-image ./ref-a.png --input-image ./ref-b.png --output /tmp/multi-openai.png
+bash scripts/xai.sh --mode edit \
+  --prompt "put the subject of the first image into the scene of the second" \
+  --input-image ./ref-a.png --input-image ./ref-b.png --output /tmp/multi-xai.png
+
+# Gemini reference-based generation (generate mode with input images)
+bash scripts/gemini.sh --mode generate \
+  --prompt "a fresh composition in the style of the second image featuring the object from the first" \
+  --input-image ./ref-a.png --input-image ./ref-b.png --output /tmp/refs-gemini.png
+
+# Parallel multi-image edit
+bash scripts/run-all.sh --mode edit --prompt "combine these" \
+  --input-image ./ref-a.png --input-image ./ref-b.png --output-base /tmp/multi
+```
+
+**Expected:**
+
+- Each output file exists and draws on both input images
+- The Gemini generate-mode run produces a fresh composition, not an edit of either input
+- run-all.sh forwards both `--input-image` flags to every provider and produces three output files. Forwarding happens in edit mode only — a run-all `--mode generate` run does not pass input images to Gemini (call `scripts/gemini.sh` directly for generate-with-references)
+- xAI edit output is commonly JPEG data even when saved with a `.png` extension (verify with `file /tmp/multi-xai.png`)
+- Known limitation: `dall-e-2` edits remain non-functional even with a single image — the script sends form fields only the gpt-image models accept
 
 ## 3. Feature Tests (Via Slash Command)
 
@@ -251,6 +313,10 @@ These tests require a running Claude Code session with the plugin loaded. They v
 | `--model` flag override | Manual | Flag takes precedence over env var |
 | Single-provider generation | Feature | Image file created, valid PNG |
 | Single-provider editing | Feature | Edited image created, original untouched |
+| Multi-image edit payloads | Automated | gemini inlineData count, openai `image[]` fields, xai `images` array length |
+| Gemini generate with references | Automated / Manual | inlineData parts present in generate-mode payload |
+| Input-image caps | Automated / Manual | Exit 1 over cap: 14 gemini / 16 openai / 3 xai / 1 dall-e-2 |
+| run-all `--input-image` forwarding | Automated | Every repeated flag reaches each provider (edit mode) |
 | All-providers parallel | Feature | One task tracking the parallel run, three output files, all completed |
 | Output directory creation | Feature | Nonexistent directory is created |
 | Invalid API key | Edge case | HTTP error reported, script exits 1 |
