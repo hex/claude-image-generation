@@ -1,12 +1,12 @@
 ---
 name: image-generation
-description: Generates and edits images using Google Gemini, OpenAI GPT Image, and xAI Grok Image APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "gpt image", "gemini image", or "grok image".
+description: Generates and edits images using Google Gemini, OpenAI GPT Image, xAI Grok Image, and OpenRouter APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "generate with openrouter", "gpt image", "gemini image", "grok image", or "openrouter image".
 version: 2026.7.1
 ---
 
-# Image Generation with Gemini, OpenAI, and xAI
+# Image Generation with Gemini, OpenAI, xAI, and OpenRouter
 
-Generate and edit images using Google Gemini, OpenAI GPT Image 2, and xAI Grok Image APIs via shell scripts.
+Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image, and OpenRouter APIs via shell scripts.
 
 ## Available Providers
 
@@ -32,6 +32,14 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, and xAI Grok I
 - **Editing**: Dedicated `/v1/images/edits` endpoint; up to 3 input images passed as data URIs in an `images` array
 - **Env var**: `XAI_API_KEY` or `GROK_API_KEY`
 
+### OpenRouter (gateway)
+- **Model**: any OpenRouter model slug that supports image output; default `google/gemini-2.5-flash-image`. Others: `google/gemini-3-pro-image-preview`, `openai/gpt-5-image`, and more at [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image)
+- **Strengths**: One key reaches many providers' image models; useful for access, fallback, and comparison without separate accounts
+- **API shape**: Uses the chat-completions endpoint (`/api/v1/chat/completions`) with `modalities: ["image","text"]`, not a dedicated images endpoint. Images come back as base64 data URLs in `message.images[]`
+- **Editing**: Input images are attached as `image_url` content parts (base64 data URLs) in the user message
+- **Controls**: Aspect ratio, resolution, and quality are prompt-driven and model-dependent — describe them in the prompt rather than via flags
+- **Env var**: `OPENROUTER_API_KEY` (optional `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` for attribution)
+
 ## Usage
 
 ### Text-to-Image Generation
@@ -53,6 +61,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/openai.sh" \
 
 # xAI
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" \
+  --mode generate \
+  --prompt "a serene mountain landscape at sunset" \
+  --output ./generated.png
+
+# OpenRouter (any image model via --model; default google/gemini-2.5-flash-image)
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter.sh" \
   --mode generate \
   --prompt "a serene mountain landscape at sunset" \
   --output ./generated.png
@@ -81,16 +95,23 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" \
   --prompt "change the sky to a starry night" \
   --input-image ./original.png \
   --output ./edited.png
+
+# OpenRouter
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter.sh" \
+  --mode edit \
+  --prompt "change the sky to a starry night" \
+  --input-image ./original.png \
+  --output ./edited.png
 ```
 
 ### Parallel Generation
 
 Use `scripts/run-all.sh` — a single Bash call that owns the streaming pane lifecycle and
-forks all providers in parallel. The watcher renders per-provider colored banners (gemini
-blue / openai gray / xai red) with model + timing, plus an animated bottom spinner of
-pending providers shown until the first image renders. Once the first image appears the
-spinner goes silent so the inline images accumulate (further redraws would erase them in
-tmux control mode).
+forks the selected providers in parallel. The watcher renders per-provider colored banners
+(gemini blue / openai gray / xai red / openrouter indigo) with model + timing, plus an
+animated bottom spinner of pending providers shown until the first image renders. Once the
+first image appears the spinner goes silent so the inline images accumulate (further redraws
+would erase them in tmux control mode).
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
@@ -99,14 +120,16 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
   --output-base "<base>"
 ```
 
-Each provider produces `<base>-gemini.png`, `<base>-openai.png`, `<base>-xai.png`.
+Each provider produces `<base>-<provider>.png` (e.g. `<base>-gemini.png`, `<base>-openai.png`,
+`<base>-xai.png`). The default set is `gemini,openai,xai`; OpenRouter is opt-in.
 
 Optional flags:
 - `--input-image <path>` — required for `--mode edit`; repeatable, every image is forwarded to each provider. Forwarding happens in edit mode only — for Gemini's generate-mode reference images, call gemini.sh directly
-- `--providers gemini,openai` — comma-separated subset
+- `--providers gemini,openai` — comma-separated subset; add `openrouter` to include it (e.g. `--providers gemini,openai,xai,openrouter`)
 - `--gemini-extra "--image-size 4K --aspect-ratio 16:9"` — pass-through args to gemini.sh
 - `--openai-extra "--quality high"` — pass-through args to openai.sh
 - `--xai-extra "--resolution 2k"` — pass-through args to xai.sh
+- `--openrouter-extra "--model openai/gpt-5-image"` — pass-through args to openrouter.sh
 
 Per-provider stderr/stdout is captured under `$DISPLAY_PANE_DIR/logs/<provider>.{out,err}`
 while the pane is open. Errors render as a red error banner inline. After all providers
@@ -182,3 +205,14 @@ otherwise.
 | `--aspect-ratio` | 14 ratios (1:1, 16:9, 19.5:9, 20:9, auto, etc.) | (none) |
 | `--resolution` | 1k, 2k (LOWERCASE) | (API default) |
 | `--model` | xAI model name | grok-imagine-image-pro |
+
+### openrouter.sh
+| Flag | Values | Default |
+|------|--------|---------|
+| `--mode` | generate, edit | (required) |
+| `--prompt` | text | (required) |
+| `--output` | file path | (required) |
+| `--input-image` | file path, repeatable | (edit only) |
+| `--model` | any OpenRouter image model slug | google/gemini-2.5-flash-image |
+| `--site-url` | URL (sent as `HTTP-Referer`) | (from `OPENROUTER_SITE_URL`) |
+| `--site-name` | text (sent as `X-Title`) | (from `OPENROUTER_SITE_NAME`) |

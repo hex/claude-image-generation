@@ -1,10 +1,11 @@
 # claude-image-generation
 
-Claude Code plugin for generating and editing images using Google Gemini, OpenAI GPT Image, and xAI Grok Image APIs.
+Claude Code plugin for generating and editing images using Google Gemini, OpenAI GPT Image, xAI Grok Image, and OpenRouter APIs.
 
 ## Features
 
-- **Text-to-image generation** with Google Gemini, OpenAI GPT Image 2, or xAI Grok Image
+- **Text-to-image generation** with Google Gemini, OpenAI GPT Image 2, xAI Grok Image, or any image model on OpenRouter
+- **OpenRouter gateway** — reach any OpenRouter image model (Gemini, GPT Image, and more) through one key via the chat-completions API
 - **Image editing** with text instructions (all providers)
 - **Multi-image input** — repeatable `--input-image` for multi-image edits (all providers) and Gemini reference-based generation
 - **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners, and a pending-provider spinner shown until the first image renders
@@ -50,6 +51,7 @@ Set one or both as environment variables:
 | `GEMINI_API_KEY` | Google Gemini | [Google AI Studio](https://aistudio.google.com/apikey) |
 | `OPENAI_API_KEY` | OpenAI | [OpenAI Platform](https://platform.openai.com/api-keys) |
 | `XAI_API_KEY` or `GROK_API_KEY` | xAI | [xAI Console](https://console.x.ai) |
+| `OPENROUTER_API_KEY` | OpenRouter | [OpenRouter Keys](https://openrouter.ai/keys) |
 
 At least one key is required.
 
@@ -62,6 +64,7 @@ Override the default model per provider via environment variables:
 | `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` | Gemini model used for generation and editing |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2` | OpenAI model used for generation and editing |
 | `XAI_IMAGE_MODEL` | `grok-imagine-image-pro` | xAI model used for generation and editing |
+| `OPENROUTER_IMAGE_MODEL` | `google/gemini-2.5-flash-image` | OpenRouter model slug used for generation and editing |
 
 Command-line `--model` flag on the scripts takes precedence over environment variables.
 
@@ -100,6 +103,18 @@ These apply to inline display (iTerm2, Sixel) and tmux pane display.
 | `grok-imagine-image-pro` | Premium tier, higher quality, 30 RPM (default) |
 | `grok-imagine-image` | Standard tier, 1K/2K resolution, 300 RPM, same endpoint and parameters |
 
+### Available OpenRouter Models
+
+OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. A few:
+
+| Model | Characteristics |
+|-------|-----------------|
+| `google/gemini-2.5-flash-image` | Fast Gemini image model, generation + editing (default) |
+| `google/gemini-3-pro-image-preview` | Pro-tier Gemini image model, premium quality |
+| `openai/gpt-5-image` | OpenAI GPT image model via OpenRouter (also `openai/gpt-5-image-mini`) |
+
+Browse the full list at [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
+
 ## Usage
 
 ### Slash Command
@@ -109,7 +124,7 @@ These apply to inline display (iTerm2, Sixel) and tmux pane display.
 /generate-image --edit ./photo.png remove the background and make it transparent
 ```
 
-The command prompts you to select a provider (Gemini, OpenAI, xAI, or all in parallel) and an output path.
+The command prompts you to select a provider (Gemini, OpenAI, xAI, OpenRouter, or all in parallel) and an output path.
 
 ### Agent (Automatic)
 
@@ -275,15 +290,56 @@ bash scripts/xai.sh \
 
 **Note**: For single-image edits, xAI ignores `--aspect-ratio` and uses the input image's ratio. Multi-image edits allow aspect ratio override (the script accepts up to 3 images; the API itself supports up to 5).
 
+#### openrouter.sh
+
+OpenRouter is a gateway to many image models through a single key. It uses the chat-completions API, so `--model` accepts any OpenRouter model slug that supports image output.
+
+```bash
+# Generate (default model: google/gemini-2.5-flash-image)
+bash scripts/openrouter.sh \
+  --mode generate \
+  --prompt "a mountain at sunset" \
+  --output ./mountain.png
+
+# Generate with a specific model
+bash scripts/openrouter.sh \
+  --mode generate \
+  --prompt "a cat in a tree" \
+  --output ./cat.png \
+  --model openai/gpt-5-image
+
+# Edit (single or multiple --input-image)
+bash scripts/openrouter.sh \
+  --mode edit \
+  --prompt "add snow to the peaks" \
+  --input-image ./mountain.png \
+  --output ./snowy.png
+```
+
+**Flags:**
+
+| Flag | Values | Default | Required |
+|------|--------|---------|----------|
+| `--mode` | `generate`, `edit` | -- | Yes |
+| `--prompt` | text | -- | Yes |
+| `--output` | file path | -- | Yes |
+| `--input-image` | file path, repeatable | -- | Edit mode only |
+| `--model` | any OpenRouter image model slug | `google/gemini-2.5-flash-image` | No |
+| `--site-url` | URL | (none) | No (sent as `HTTP-Referer` for OpenRouter attribution) |
+| `--site-name` | text | (none) | No (sent as `X-Title` for OpenRouter attribution) |
+
+`--site-url` / `--site-name` also default from `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME`.
+
 #### Reference Images and Multi-Image Composition
 
-`--input-image` is repeatable on all three scripts. Passing more images than a provider supports exits with code 1 before any API call:
+`--input-image` is repeatable on all four scripts. Passing more images than a provider supports exits with code 1 before any API call:
 
 | Provider | Max images | Modes |
 |----------|------------|-------|
 | Gemini | 14 | `generate` (references for a fresh composition) and `edit` |
 | OpenAI | 16 | `edit` only (its generation endpoint takes no images) |
 | xAI | 3 | `edit` only |
+| OpenRouter | model-dependent | `edit` only (input images attached as chat image parts) |
 
 ```bash
 # Gemini: compose a new image from reference images (generate mode)
@@ -328,19 +384,19 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 
 ## Provider Comparison
 
-| Feature | Gemini | OpenAI | xAI |
-|---------|--------|--------|-----|
-| Default model | gemini-3-pro-image-preview | gpt-image-2 | grok-imagine-image-pro |
-| Max resolution | 4K (via `--image-size`) | 1536x1024 | 2K (via `--resolution`) |
-| Text rendering | Very good (under 25 chars) | Excellent | Good |
-| Transparent BG | No | Yes | No |
-| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | 3 fixed sizes | 14 options (incl. 20:9, auto) |
-| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 3 images |
-| Quality tiers | N/A | auto / low / medium / high | N/A |
-| Thinking mode | Yes (`--thinking-level`) | No | No |
-| Search grounding | Yes (Google Search) | No | No |
-| Pricing | Token-based | Token-based | Flat per-image |
-| Prompt revision | No | No | Yes (by chat model) |
+| Feature | Gemini | OpenAI | xAI | OpenRouter |
+|---------|--------|--------|-----|------------|
+| Default model | gemini-3-pro-image-preview | gpt-image-2 | grok-imagine-image-pro | google/gemini-2.5-flash-image |
+| Max resolution | 4K (via `--image-size`) | 1536x1024 | 2K (via `--resolution`) | Model-dependent |
+| Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
+| Transparent BG | No | Yes | No | Model-dependent |
+| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | 3 fixed sizes | 14 options (incl. 20:9, auto) | Prompt-driven |
+| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 3 images | Chat image parts (edit) |
+| Quality tiers | N/A | auto / low / medium / high | N/A | Model-dependent |
+| Thinking mode | Yes (`--thinking-level`) | No | No | Model-dependent |
+| Search grounding | Yes (Google Search) | No | No | Model-dependent |
+| Pricing | Token-based | Token-based | Flat per-image | Per OpenRouter model |
+| Prompt revision | No | No | Yes (by chat model) | No |
 
 ## Plugin Components
 
@@ -353,7 +409,8 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
-| Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; owns pane open/close lifecycle |
+| OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
+| Parallel runner | `scripts/run-all.sh` | Forks providers in parallel under one streaming pane; owns pane open/close lifecycle |
 | Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, streaming pane with colored banners + pending-provider spinner) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 | Automated tests | `tests/` | bats test suite for all scripts |
@@ -389,7 +446,7 @@ scripts/                       -- Shell scripts for API calls
 tests/                         -- Automated tests (bats)
 ```
 
-The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs that handle API communication, base64 encoding/decoding, and error reporting. They are invoked by the command, agent, and skill layers. All three source `display.sh` which auto-detects the terminal and displays generated images using the best available method.
+The scripts (`gemini.sh`, `openai.sh`, `xai.sh`, `openrouter.sh`) are standalone bash programs that handle API communication, base64 encoding/decoding, and error reporting. They are invoked by the command, agent, and skill layers. All of them source `display.sh` which auto-detects the terminal and displays generated images using the best available method.
 
 ### Terminal Image Display
 
@@ -403,14 +460,14 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 
 When running inside **tmux** (including Claude Code sessions), single images open in a bottom pane (`-v` split) and multiple images open in a vertical side pane (`-h` split, 30% width) targeting the originating pane (via `$TMUX_PANE`). The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
 
-For parallel generation, use `scripts/run-all.sh` — a single shell that opens the streaming pane, exports `DISPLAY_PANE_DIR`, forks all providers with `&`, waits, and closes the pane. The watcher renders per-provider colored banners (blue/gray/red) with model + timing, plus an animated bottom spinner of pending providers shown until the first image renders (after which it stays silent, since further redraws would erase the accumulated inline images in tmux control mode). Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
+For parallel generation, use `scripts/run-all.sh` — a single shell that opens the streaming pane, exports `DISPLAY_PANE_DIR`, forks all providers with `&`, waits, and closes the pane. The watcher renders per-provider colored banners (blue/gray/red/indigo) with model + timing, plus an animated bottom spinner of pending providers shown until the first image renders (after which it stays silent, since further redraws would erase the accumulated inline images in tmux control mode). Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
 
 ## Requirements
 
 - `curl` -- HTTP requests to provider APIs
 - `jq` -- JSON construction and parsing
 - `base64` -- Image data encoding/decoding (included in macOS and most Linux distributions)
-- At least one API key: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, or `GROK_API_KEY`
+- At least one API key: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GROK_API_KEY`, or `OPENROUTER_API_KEY`
 
 **Optional (for Sixel image display):**
 - `img2sixel` (from libsixel), `chafa`, or `magick` (ImageMagick 7) -- any one of these enables Sixel terminal display

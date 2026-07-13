@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: Runs Gemini, OpenAI, and xAI image scripts in parallel under one
-# ABOUTME: streaming tmux pane with council-style colored banners + spinner.
+# ABOUTME: Runs image provider scripts (Gemini, OpenAI, xAI, and opt-in OpenRouter)
+# ABOUTME: in parallel under one streaming tmux pane with colored banners + spinner.
 
 set -euo pipefail
 
@@ -23,10 +23,12 @@ Options:
   --prompt         text prompt (required)
   --output-base    base path; produces <base>-gemini.png, <base>-openai.png, <base>-xai.png
   --input-image    input image path (required for edit mode, repeatable)
-  --providers      comma-separated subset (default: gemini,openai,xai)
-  --gemini-extra   extra args passed to gemini.sh (single shell-split string)
-  --openai-extra   extra args passed to openai.sh (single shell-split string)
-  --xai-extra      extra args passed to xai.sh    (single shell-split string)
+  --providers      comma-separated subset (default: gemini,openai,xai;
+                   openrouter is available but opt-in, e.g. --providers gemini,openrouter)
+  --gemini-extra     extra args passed to gemini.sh     (single shell-split string)
+  --openai-extra     extra args passed to openai.sh     (single shell-split string)
+  --xai-extra        extra args passed to xai.sh        (single shell-split string)
+  --openrouter-extra extra args passed to openrouter.sh (single shell-split string)
 
 Outside tmux, the streaming pane cannot open and providers fall back to direct
 terminal display in this shell (sequential output, but functional).
@@ -42,6 +44,7 @@ PROVIDERS="gemini,openai,xai"
 GEMINI_EXTRA=""
 OPENAI_EXTRA=""
 XAI_EXTRA=""
+OPENROUTER_EXTRA=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --gemini-extra) GEMINI_EXTRA="$2"; shift 2 ;;
     --openai-extra) OPENAI_EXTRA="$2"; shift 2 ;;
     --xai-extra) XAI_EXTRA="$2"; shift 2 ;;
+    --openrouter-extra) OPENROUTER_EXTRA="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
@@ -95,9 +99,10 @@ for p in "${provider_list[@]}"; do
   # macOS ships bash 3.2, which has neither ${p^^} nor associative arrays, so the
   # per-provider extras are selected by name rather than an uppercased indirect lookup.
   case "$p" in
-    gemini) extra="$GEMINI_EXTRA" ;;
-    openai) extra="$OPENAI_EXTRA" ;;
-    xai)    extra="$XAI_EXTRA" ;;
+    gemini)     extra="$GEMINI_EXTRA" ;;
+    openai)     extra="$OPENAI_EXTRA" ;;
+    xai)        extra="$XAI_EXTRA" ;;
+    openrouter) extra="$OPENROUTER_EXTRA" ;;
     *) echo "Warning: unknown provider '$p' (skipping)" >&2; continue ;;
   esac
   args=(--mode "$MODE" --prompt "$PROMPT" --output "${OUTPUT_BASE}-${p}.png")

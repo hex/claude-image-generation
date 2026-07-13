@@ -141,6 +141,33 @@ STUB
   }
 }
 
+@test "openrouter: edit mode builds a payload for a multi-megabyte image" {
+  [[ -f "$BIG_IMAGE" ]] || skip "test-input.png not present"
+  stub_curl '{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}'
+
+  OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY" run bash "${PLUGIN_ROOT}/scripts/openrouter.sh" \
+    --mode edit --prompt "add a rainbow" --input-image "$BIG_IMAGE" --output "$OUT"
+
+  assert_edit_succeeds
+}
+
+@test "openrouter: two --input-image builds two image_url content parts" {
+  [[ -f "$BIG_IMAGE" ]] || skip "test-input.png not present"
+  stub_curl '{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}'
+
+  OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY" run bash "${PLUGIN_ROOT}/scripts/openrouter.sh" \
+    --mode edit --prompt "combine these" \
+    --input-image "$BIG_IMAGE" --input-image "$BIG_IMAGE" --output "$OUT"
+
+  assert_edit_succeeds
+  local count
+  count=$(jq '[.messages[0].content[] | select(.type == "image_url")] | length' "$MOCK_DIR/request.txt")
+  [[ "$count" -eq 2 ]] || {
+    echo "Expected 2 image_url content parts, got: $count"
+    return 1
+  }
+}
+
 @test "gemini: generate mode with --input-image includes a reference part" {
   [[ -f "$BIG_IMAGE" ]] || skip "test-input.png not present"
   stub_curl '{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"ZmFrZQ=="}}]}}]}'

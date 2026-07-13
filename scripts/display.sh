@@ -621,6 +621,7 @@ provider_palette() {
         gemini) printf -v "$__bg" '30;64;175';   printf -v "$__fg" '255;255;255'; printf -v "$__accent" '147;197;253'; printf -v "$__spinner" '59;130;246'   ;;
         openai) printf -v "$__bg" '229;231;235'; printf -v "$__fg" '31;41;55';    printf -v "$__accent" '100;116;139'; printf -v "$__spinner" '16;163;127'  ;;
         xai)    printf -v "$__bg" '185;28;28';   printf -v "$__fg" '255;255;255'; printf -v "$__accent" '252;165;165'; printf -v "$__spinner" '248;113;113' ;;
+        openrouter) printf -v "$__bg" '67;56;202'; printf -v "$__fg" '255;255;255'; printf -v "$__accent" '199;210;254'; printf -v "$__spinner" '129;140;248' ;;
         *)      printf -v "$__bg" '55;65;81';    printf -v "$__fg" '255;255;255'; printf -v "$__accent" '156;163;175'; printf -v "$__spinner" '156;163;175' ;;
     esac
 }

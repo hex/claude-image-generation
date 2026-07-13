@@ -13,6 +13,9 @@ CLAUDE.md
 *.swo
 *~
 
+# API keys for testing
+.env
+
 # Skill evals (generated benchmarks, not part of plugin)
 skills/image-generation/evals/
 
