@@ -30,6 +30,16 @@ assert_output_not_contains() {
   fi
 }
 
+# Prevent the display machinery from splitting a real tmux pane during tests. Unsetting TMUX
+# makes is_tmux() false, so display_pane_open (run-all.sh) and display_image's tmux path (the
+# provider_finish fallback) both no-op instead of running `tmux split-window`. Tests that run a
+# provider script to completion should ALSO set DISPLAY_PANE_DIR to a scratch dir so
+# provider_finish skips display_image entirely rather than falling back to inline rendering.
+# Usage: disable_display
+disable_display() {
+  unset TMUX TMUX_PANE
+}
+
 # Assert exit status equals expected value
 # Usage: assert_status 1
 assert_status() {

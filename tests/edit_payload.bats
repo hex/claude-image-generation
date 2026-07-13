@@ -13,6 +13,9 @@ setup() {
   mkdir -p "$MOCK_DIR"
   OUT="${BATS_TMPDIR}/edit_out_$$.png"
   rm -f "$OUT"
+  disable_display
+  export DISPLAY_PANE_DIR="${MOCK_DIR}/pane"
+  mkdir -p "$DISPLAY_PANE_DIR"
 }
 
 teardown() {

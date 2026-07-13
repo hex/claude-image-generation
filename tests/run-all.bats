@@ -10,6 +10,7 @@ setup() {
   mkdir -p "$WORK_DIR"
   cp "${PLUGIN_ROOT}/scripts/run-all.sh" "$WORK_DIR/"
   cp "${PLUGIN_ROOT}/scripts/display.sh" "$WORK_DIR/"
+  disable_display
 }
 
 teardown() {
