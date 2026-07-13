@@ -53,7 +53,11 @@ teardown() {
     > "$watch_dir/status"
   touch "$watch_dir/.done"
 
-  run "$SYSTEM_BASH" "$watch_dir/watcher.sh" "$watch_dir"
+  # Redirect stdin from /dev/null: with .done already present the watcher renders once and
+  # drops into its interactive [f]inder/[p]review/[esc] key loop, whose `read` blocks forever
+  # on a live terminal but returns immediately on EOF. The test only checks the watcher runs
+  # clean under system bash, not the key loop, so a non-interactive stdin keeps it deterministic.
+  run "$SYSTEM_BASH" "$watch_dir/watcher.sh" "$watch_dir" </dev/null
 
   for marker in "declare: -A" "bad substitution" "mapfile" "readarray" "unbound variable"; do
     if [[ "$output" == *"$marker"* ]]; then
