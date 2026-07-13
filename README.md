@@ -362,7 +362,7 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 
 ### Versioning
 
-This plugin uses calendar versioning in `YYYY.M.PATCH` format (e.g., `2026.5.0`). The version is tracked in both `.claude-plugin/plugin.json` and `skills/image-generation/SKILL.md`.
+This plugin uses calendar versioning in `YYYY.M.PATCH` format (e.g., `2026.7.1`). The version is tracked in both `.claude-plugin/plugin.json` and `skills/image-generation/SKILL.md`.
 
 ### Testing
 
