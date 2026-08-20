@@ -10,7 +10,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners, and a pending-provider spinner shown until the first image renders
 - **Interactive provider selection** via AskUserQuestion at runtime
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
-- **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code)
+- **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code). Providers running at the same time share one pane, however they were launched
 - **Streaming display** -- images appear progressively in a shared pane during parallel generation, accumulating as each provider finishes
 - **Open in Finder/Preview** -- press 'f' for Finder or 'p' for Preview in the display pane
 
@@ -353,8 +353,8 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
-| Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; owns pane open/close lifecycle |
-| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, streaming pane with colored banners + pending-provider spinner) |
+| Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |
+| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider spinner) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 | Automated tests | `tests/` | bats test suite for all scripts |
 
@@ -401,9 +401,11 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`) are standalone bash programs th
 | WezTerm | Kitty graphics | `TERM_PROGRAM=WezTerm` |
 | Sixel terminals | Sixel (via img2sixel/chafa/magick) | Tool + terminal detection |
 
-When running inside **tmux** (including Claude Code sessions), single images open in a bottom pane (`-v` split) and multiple images open in a vertical side pane (`-h` split, 30% width) targeting the originating pane (via `$TMUX_PANE`). The pane uses `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
+When running inside **tmux** (including Claude Code sessions), provider images stream into a shared pane taking 30% of the terminal's longer axis, targeting the originating pane (via `$TMUX_PANE`). Every provider generating at that moment renders into that one pane. Direct calls to `display_image` / `display_images` outside a provider run still open a pane of their own: a bottom pane (`-v` split) for a single image, a vertical side pane (`-h` split, 30% width) for several. Panes use `imgcat` (iTerm2), `kitten icat` (Kitty), or a Sixel tool depending on the outer terminal. Press **f** to reveal in Finder, **p** to open in Preview, or **Esc**/**Ctrl+D** to close.
 
-For parallel generation, use `scripts/run-all.sh` — a single shell that opens the streaming pane, exports `DISPLAY_PANE_DIR`, forks all providers with `&`, waits, and closes the pane. The watcher renders per-provider colored banners (blue/gray/red) with model + timing, plus an animated bottom spinner of pending providers shown until the first image renders (after which it stays silent, since further redraws would erase the accumulated inline images in tmux control mode). Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
+For parallel generation, use `scripts/run-all.sh` — a single shell that joins the streaming pane, exports `DISPLAY_PANE_DIR`, forks all providers with `&`, waits, and releases the pane.
+
+Providers find that pane through a registry entry under `$TMPDIR` keyed by tmux session and window, so a provider launched on its own joins whatever is already streaming instead of splitting a pane of its own. The entry is a directory, making `mkdir` the atomic create-once lock: the winner opens the pane and publishes it, and callers that lose the claim wait briefly for that publication. Each participant holds a token under `active/`, and whoever drops the last one retires the entry and writes `.done`, so the pane closes once — after the last provider sharing it has finished. Sequential runs each get a fresh pane; concurrency is what makes providers share one. The watcher renders per-provider colored banners (blue/gray/red) with model + timing, plus an animated bottom spinner of pending providers shown until the first image renders (after which it stays silent, since further redraws would erase the accumulated inline images in tmux control mode). Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
 
 ## Requirements
 

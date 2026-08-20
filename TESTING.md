@@ -54,6 +54,7 @@ bats tests/openai.bats
 | `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 3 input images rejected |
 | `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
 | `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), fixed 30% image sizing + DPI normalization, empty-timing parse, spinner silencing after the first image |
+| `tests/shared_pane.bats` | `scripts/display.sh`, `scripts/run-all.sh` | One pane per batch: registry attach, create-race wait, abandoned-claim takeover, stale/dismissed entries, token refcount, run-all attach + ownership |
 | `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction; multi-image payload shape (gemini inlineData part count in edit and generate modes, openai repeated `image[]` multipart fields, xai `images` array length) |
 | `tests/run-all.bats` | `scripts/run-all.sh` | `--input-image` forwarding — every repeated flag reaches each provider (provider scripts stubbed) |
 | `tests/bash32_compat.bats` | provider + display scripts | bash 3.2 array / associative-array safety |
@@ -253,6 +254,22 @@ These tests require a running Claude Code session with the plugin loaded. They v
 4. Until the first image renders, the bottom of the pane shows an animated spinner with the names of pending providers in their accent colors. Once the first image appears the spinner goes silent — further redraws would erase the accumulated inline images in tmux control mode — so later providers appear as banner + image with no spinner
 5. When all providers complete, the pane shows interactive controls (`[f]inder [p]review [esc/ctrl-d]`)
 6. The task is marked completed and all output paths are reported. If any provider failed, run-all.sh exits with status 1 and the error appears as a red banner inline (with details in `$DISPLAY_PANE_DIR/logs/<provider>.err`)
+
+### 3.6 One Pane Across Concurrently-Launched Providers
+
+Run inside tmux. Launch two providers directly, at the same time, without run-all.sh:
+
+```bash
+bash scripts/gemini.sh --mode generate --prompt "a blue circle" --output /tmp/pane-gemini.png &
+bash scripts/xai.sh    --mode generate --prompt "a red square"  --output /tmp/pane-xai.png &
+wait
+```
+
+1. Verify exactly one pane opens, not one per provider
+2. Verify both providers render into it, each under its own colored banner
+3. Verify the pane stays open until the slower provider finishes, then shows `[f]inder [p]review [esc/ctrl-d]`
+4. Run the same two commands again after the pane is dismissed and verify a fresh pane opens rather than the images landing in the dismissed one
+5. Start a provider in the background, then run `run-all.sh` while it is still generating, and verify both stream into the same pane and that run-all does not dismiss it while the background provider is still working
 
 ## 4. Edge Cases
 

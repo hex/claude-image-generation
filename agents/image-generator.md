@@ -94,8 +94,9 @@ You are an image generation agent that creates and edits images using Google Gem
 4. Execute the scripts:
 
    **Single provider:**
-   Run the script directly via Bash, then mark the task completed. The script will
-   display the resulting image in a tmux pane (or directly to the terminal outside tmux).
+   Run the script directly via Bash, then mark the task completed. The script streams the
+   resulting image into this tmux window's shared display pane (or renders it directly to
+   the terminal outside tmux).
 
    ```bash
    # Generation
@@ -110,9 +111,13 @@ You are an image generation agent that creates and edits images using Google Gem
    ```
 
    **Multiple providers (parallel):**
-   Use `run-all.sh` — one Bash call that opens a single shared streaming pane and
-   forks all providers in parallel. Each provider produces `<base>-<provider>.png`,
-   and the pane shows colored banners + an animated spinner as results land.
+   Use `run-all.sh` — one Bash call that forks all providers in parallel into a single
+   shared streaming pane. Each provider produces `<base>-<provider>.png`, and the pane
+   shows colored banners + an animated spinner as results land.
+
+   Providers share a pane only while they overlap in time. Running the three scripts as
+   three separate sequential Bash calls gives three panes, one per call — so reach for
+   `run-all.sh` whenever more than one provider is wanted.
 
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \

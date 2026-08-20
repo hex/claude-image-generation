@@ -85,8 +85,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" \
 
 ### Parallel Generation
 
-Use `scripts/run-all.sh` — a single Bash call that owns the streaming pane lifecycle and
-forks all providers in parallel. The watcher renders per-provider colored banners (gemini
+Use `scripts/run-all.sh` — a single Bash call that forks all providers in parallel into one
+shared streaming pane. The watcher renders per-provider colored banners (gemini
 blue / openai gray / xai red) with model + timing, plus an animated bottom spinner of
 pending providers shown until the first image renders. Once the first image appears the
 spinner goes silent so the inline images accumulate (further redraws would erase them in
@@ -107,6 +107,11 @@ Optional flags:
 - `--gemini-extra "--image-size 4K --aspect-ratio 16:9"` — pass-through args to gemini.sh
 - `--openai-extra "--quality high"` — pass-through args to openai.sh
 - `--xai-extra "--resolution 2k"` — pass-through args to xai.sh
+
+Providers share a pane only while they overlap in time: each finds this tmux window's pane
+through a registry entry and joins it, and the pane closes once the last provider sharing it
+has finished. Running the provider scripts as separate sequential Bash calls therefore gives a
+pane per call, which is why `run-all.sh` is the way to reach more than one provider at once.
 
 Per-provider stderr/stdout is captured under `$DISPLAY_PANE_DIR/logs/<provider>.{out,err}`
 while the pane is open. Errors render as a red error banner inline. After all providers
