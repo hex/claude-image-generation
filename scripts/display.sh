@@ -432,19 +432,18 @@ display_pane_begin() {
   # A provider launched on its own inherits no DISPLAY_PANE_DIR, so it joins (or opens) this
   # window's shared pane here. Doing it at begin rather than at render time is what keeps a
   # batch to one pane: every provider lands on the same surface before any image exists.
-  local joined=""
   if [[ -z "${DISPLAY_PANE_DIR:-}" ]] && is_tmux; then
     local watch_dir
     if watch_dir=$(display_pane_attach_or_open 2>/dev/null); then
       DISPLAY_PANE_DIR="$watch_dir"
-      joined=1
+      __PANE_SELF_ATTACHED=1
     fi
   fi
   [[ -z "${DISPLAY_PANE_DIR:-}" ]] && return 0
-  # A process that joined the pane itself owns a share of it, and every provider it runs takes
-  # its own token -- one process driving two providers must be counted twice, or the first to
-  # finish would close the pane while the second is still generating.
-  if [[ -n "$joined" || -n "${__PANE_SELF_ATTACHED:-}" ]]; then
+  # Every provider run by a process that owns a share of the pane takes its own token, not just
+  # the one whose call did the attaching -- one process driving two providers must be counted
+  # twice, or the first to finish would close the pane while the second is still generating.
+  if [[ -n "${__PANE_SELF_ATTACHED:-}" ]]; then
     __pane_acquire "$provider"
   fi
   __PANE_START_MS=$(__pane_now_ms)
@@ -923,9 +922,20 @@ __pane_publish() {
     rm -rf "$reg"
     return 1
   fi
+  # The pane remembers its own entry rather than recomputing the window's slot when it closes.
+  # The slot may by then hold a different batch's entry: if this watcher dies while its provider
+  # is still generating, a later batch retires the stale slot and republishes. Recomputing would
+  # delete that live entry out from under the new pane.
   printf '%s' "$reg" > "$watch_dir/registry"
   printf '%s' "$watch_dir" > "$reg/dir"
   printf '%s' "$watch_dir"
+}
+
+# Prints the watch directory of the pane a registry entry names, when that pane can still accept
+# images. Fails without printing otherwise. Usage: __pane_try_attach <registry_dir>
+__pane_try_attach() {
+  __pane_registry_is_live "$1" || return 1
+  printf '%s' "$__PANE_REGISTRY_DIR"
 }
 
 # Returns the shared streaming pane for this tmux window, opening it if this is the first
@@ -941,8 +951,7 @@ display_pane_attach_or_open() {
   reg=$(__pane_registry_dir)
 
   # Something is already streaming in this window: join it.
-  if __pane_registry_is_live "$reg"; then
-    printf '%s' "$__PANE_REGISTRY_DIR"
+  if __pane_try_attach "$reg"; then
     return 0
   fi
 
@@ -966,8 +975,7 @@ display_pane_attach_or_open() {
   # it a bounded moment to publish rather than assuming the entry is abandoned.
   local waited=0
   while (( waited < 40 )); do
-    if __pane_registry_is_live "$reg"; then
-      printf '%s' "$__PANE_REGISTRY_DIR"
+    if __pane_try_attach "$reg"; then
       return 0
     fi
     sleep 0.05
