@@ -277,6 +277,17 @@ find_imgcat() {
   return 1
 }
 
+# Populates __PANE_TARGET_ARGS with the tmux flag that aims a command at the originating pane,
+# leaving it empty when TMUX_PANE is unset. bash 3.2 has no namerefs, so the result travels in a
+# fixed global rather than an array the caller names. Expand it as
+# ${__PANE_TARGET_ARGS[@]+"${__PANE_TARGET_ARGS[@]}"} so an empty array is not an unbound
+# variable under set -u. Usage: __pane_target_args
+__pane_target_args() {
+  __PANE_TARGET_ARGS=()
+  [[ -n "${TMUX_PANE:-}" ]] && __PANE_TARGET_ARGS=(-t "$TMUX_PANE")
+  return 0
+}
+
 # Opens a tmux split pane that displays an image and closes on keypress.
 # Usage: display_image_in_pane <file_path>
 display_image_in_pane() {
@@ -338,10 +349,8 @@ display_image_in_pane() {
   # Target the originating pane so the split opens here even if the user
   # has switched to a different tmux window/tab.
   # Uses an array to avoid zsh word-splitting issues with ${var:+...}.
-  local -a target_args=()
-  if [[ -n "${TMUX_PANE:-}" ]]; then
-    target_args=(-t "$TMUX_PANE")
-  fi
+  __pane_target_args
+  local -a target_args=(${__PANE_TARGET_ARGS[@]+"${__PANE_TARGET_ARGS[@]}"})
 
   local safe_path
   safe_path=$(printf '%q' "$file_path")
@@ -413,39 +422,59 @@ __pane_now_ms() {
   perl -MTime::HiRes=time -e 'printf "%d", time*1000' 2>/dev/null
 }
 
-# Provider-script helpers — no-op when DISPLAY_PANE_DIR is unset, so providers
-# can call them unconditionally. begin records the querying state and starts
-# the timer; finish/fail compute elapsed ms and emit complete/error events.
+# Provider-script helpers, safe to call unconditionally. begin joins this window's shared pane
+# when the caller has none, then records the querying state and starts the timer — outside tmux
+# it does nothing, but inside it costs a tmux round-trip and can wait briefly for another
+# provider to finish opening the pane. finish/fail compute elapsed ms, emit the complete/error
+# event, and release this participant's hold on the pane.
 display_pane_begin() {
   local provider="$1" model="$2"
   # A provider launched on its own inherits no DISPLAY_PANE_DIR, so it joins (or opens) this
   # window's shared pane here. Doing it at begin rather than at render time is what keeps a
   # batch to one pane: every provider lands on the same surface before any image exists.
+  local joined=""
   if [[ -z "${DISPLAY_PANE_DIR:-}" ]] && is_tmux; then
     local watch_dir
     if watch_dir=$(display_pane_attach_or_open 2>/dev/null); then
       DISPLAY_PANE_DIR="$watch_dir"
-      __PANE_SELF_ATTACHED=1
+      joined=1
     fi
   fi
   [[ -z "${DISPLAY_PANE_DIR:-}" ]] && return 0
-  # Register as still working so the last provider out can close the pane. Only self-attached
-  # providers take a token: when run-all.sh hands down DISPLAY_PANE_DIR it closes the pane
-  # itself, and a child writing .done early would cut the batch short.
-  if [[ -n "${__PANE_SELF_ATTACHED:-}" ]]; then
-    mkdir -p "$DISPLAY_PANE_DIR/active"
-    : > "$DISPLAY_PANE_DIR/active/${provider}.$$"
+  # A process that joined the pane itself owns a share of it, and every provider it runs takes
+  # its own token -- one process driving two providers must be counted twice, or the first to
+  # finish would close the pane while the second is still generating.
+  if [[ -n "$joined" || -n "${__PANE_SELF_ATTACHED:-}" ]]; then
+    __pane_acquire "$provider"
   fi
   __PANE_START_MS=$(__pane_now_ms)
   display_pane_status "$provider" querying "" "$model" ""
   return 0
 }
 
-# Drops this provider's active token and closes the shared pane once the batch's last provider
-# has released it. Ownership is the point: only a self-attached provider may close the pane. When
-# run-all.sh supplies DISPLAY_PANE_DIR it closes the pane itself after waiting on every child, so
-# a child writing .done here would dismiss the pane while its siblings are still generating.
-# Usage: __pane_release <provider>
+# Registers a participant as still working in the shared pane and marks this process as one of
+# the pane's owners, so the last one out can tell when the batch is finished and that it is
+# entitled to close it. Paired with __pane_release; keeping both halves here is what keeps the
+# active/ layout and the ownership flag internal to this file. Usage: __pane_acquire <name>
+__pane_acquire() {
+  __PANE_SELF_ATTACHED=1
+  mkdir -p "$DISPLAY_PANE_DIR/active"
+  : > "$DISPLAY_PANE_DIR/active/${1}.$$"
+}
+
+# Drops this participant's active token and closes the shared pane once the last one has released.
+# Only a process that acquired the pane itself may close it; a process handed DISPLAY_PANE_DIR by
+# a parent renders into the pane and leaves the closing to whoever handed it down.
+#
+# That asymmetry is deliberate, and two failures come back if it is levelled into "every process,
+# children included, holds its own token". A supervisor's token brackets the whole fork..wait span,
+# which per-child tokens cannot express:
+#   - Start skew splits the batch. Child A finishes while child B is still parsing arguments and
+#     has not reached display_pane_begin. active/ reads empty, A closes the pane and retires the
+#     registry entry, and B then opens a second pane -- the very thing this feature prevents.
+#   - No child ever arrives. `--providers bogus`, or every child dying before display_pane_begin,
+#     leaves active/ empty forever with nobody to notice, so the pane is never closed.
+# Usage: __pane_release <participant>
 __pane_release() {
   [[ -n "${__PANE_SELF_ATTACHED:-}" ]] || return 0
   local provider="$1"
@@ -833,10 +862,8 @@ WATCHEREOF
   safe_watch_dir=$(printf '%q' "$watch_dir")
   safe_watcher=$(printf '%q' "$watch_dir/watcher.sh")
 
-  local -a target_args=()
-  if [[ -n "${TMUX_PANE:-}" ]]; then
-    target_args=(-t "$TMUX_PANE")
-  fi
+  __pane_target_args
+  local -a target_args=(${__PANE_TARGET_ARGS[@]+"${__PANE_TARGET_ARGS[@]}"})
 
   # Split the pane's longer axis so the streaming pane keeps a usable shape. A wide pane has
   # spare horizontal room, so a side column (-h, new pane to the right) leaves both panes wide
@@ -861,10 +888,8 @@ WATCHEREOF
 # window rather than session because a pane only exists inside one window -- a provider running
 # in a different window must get its own pane, not stream into one the user cannot see.
 __pane_registry_dir() {
-  local -a target_args=()
-  if [[ -n "${TMUX_PANE:-}" ]]; then
-    target_args=(-t "$TMUX_PANE")
-  fi
+  __pane_target_args
+  local -a target_args=(${__PANE_TARGET_ARGS[@]+"${__PANE_TARGET_ARGS[@]}"})
   local key
   key=$(tmux display-message -p ${target_args[@]+"${target_args[@]}"} '#{session_id}-#{window_id}' 2>/dev/null)
   key="${key//[^A-Za-z0-9]/_}"
@@ -873,15 +898,20 @@ __pane_registry_dir() {
   printf '%s/display_pane_registry.%s' "${tmp%/}" "$key"
 }
 
-# Reports whether a registry entry still names a pane that can accept images.
+# Reports whether a registry entry still names a pane that can accept images, leaving the watch
+# directory it names in __PANE_REGISTRY_DIR. The value travels in a global because bash 3.2 has
+# no namerefs, and returning it here spares the caller a second pass over the same file.
 # Usage: __pane_registry_is_live <registry_dir>
 __pane_registry_is_live() {
-  local reg="$1" dir
+  local reg="$1"
+  __PANE_REGISTRY_DIR=""
   [[ -f "$reg/dir" ]] || return 1
-  dir=$(cat "$reg/dir" 2>/dev/null)
+  # The entry is written with printf and carries no trailing newline, so read fills the variable
+  # and then reports EOF; the status says nothing about whether it read anything.
+  IFS= read -r __PANE_REGISTRY_DIR < "$reg/dir" 2>/dev/null || :
   # .done means the watcher has left its poll loop for the dismiss prompt: the directory is
   # still there, but nothing will pick up an image written into it.
-  [[ -n "$dir" && -d "$dir" && ! -f "$dir/.done" ]]
+  [[ -n "$__PANE_REGISTRY_DIR" && -d "$__PANE_REGISTRY_DIR" && ! -f "$__PANE_REGISTRY_DIR/.done" ]]
 }
 
 # Opens the pane for a registry entry this process has just claimed and publishes it, printing
@@ -910,12 +940,18 @@ display_pane_attach_or_open() {
   local reg
   reg=$(__pane_registry_dir)
 
+  # Something is already streaming in this window: join it.
+  if __pane_registry_is_live "$reg"; then
+    printf '%s' "$__PANE_REGISTRY_DIR"
+    return 0
+  fi
+
   # The watcher removes its watch dir when it exits, so an entry can outlive the pane it names.
   # Retiring the dead entry here is what lets the next batch open a pane someone is watching.
   # An entry with nothing published yet is a different thing: its owner is still splitting the
   # pane, and it is waited for below. Retiring that one is how a batch forked in a single breath
   # ends up with two panes.
-  if [[ -f "$reg/dir" ]] && ! __pane_registry_is_live "$reg"; then
+  if [[ -f "$reg/dir" ]]; then
     rm -rf "$reg"
   fi
 
@@ -931,7 +967,7 @@ display_pane_attach_or_open() {
   local waited=0
   while (( waited < 40 )); do
     if __pane_registry_is_live "$reg"; then
-      cat "$reg/dir"
+      printf '%s' "$__PANE_REGISTRY_DIR"
       return 0
     fi
     sleep 0.05
@@ -1079,10 +1115,8 @@ display_images_in_pane() {
 
   local pane_width="30%"
 
-  local -a target_args=()
-  if [[ -n "${TMUX_PANE:-}" ]]; then
-    target_args=(-t "$TMUX_PANE")
-  fi
+  __pane_target_args
+  local -a target_args=(${__PANE_TARGET_ARGS[@]+"${__PANE_TARGET_ARGS[@]}"})
 
   tmux split-window -h -l "$pane_width" ${target_args[@]+"${target_args[@]}"} \
     "bash -c '_esc=\$(printf \"\\033\"); ${display_cmd}printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi; done'"

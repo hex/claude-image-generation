@@ -73,9 +73,8 @@ fi
 # the pane outlives any single provider and closes on the same last-one-out rule everyone uses.
 if pane_dir=$(display_pane_attach_or_open 2>/dev/null); then
   export DISPLAY_PANE_DIR="$pane_dir"
-  __PANE_SELF_ATTACHED=1
-  mkdir -p "$DISPLAY_PANE_DIR/logs" "$DISPLAY_PANE_DIR/active"
-  : > "$DISPLAY_PANE_DIR/active/run-all.$$"
+  mkdir -p "$DISPLAY_PANE_DIR/logs"
+  __pane_acquire run-all
 fi
 
 # Routes a provider's stdio to per-provider log files when the pane is open;

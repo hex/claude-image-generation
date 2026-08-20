@@ -79,23 +79,15 @@ assert_valid_json() {
 # transcripts captured into a local variable rather than bats' $output.
 # Usage: assert_output_contains_str "$captured" "expected substring"
 assert_output_contains_str() {
-  local actual="$1" expected="$2"
-  if [[ "$actual" != *"$expected"* ]]; then
-    echo "Expected string to contain: $expected"
-    echo "Actual string: $actual"
-    return 1
-  fi
+  local output="$1"
+  assert_output_contains "$2"
 }
 
 # Assert that a captured string does NOT contain a substring.
 # Usage: assert_output_not_contains_str "$captured" "unexpected substring"
 assert_output_not_contains_str() {
-  local actual="$1" unexpected="$2"
-  if [[ "$actual" == *"$unexpected"* ]]; then
-    echo "Expected string to NOT contain: $unexpected"
-    echo "Actual string: $actual"
-    return 1
-  fi
+  local output="$1"
+  assert_output_not_contains "$2"
 }
 
 # Points TMPDIR at a per-test scratch directory. display_pane_open builds its watch dir with
