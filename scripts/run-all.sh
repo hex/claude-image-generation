@@ -68,9 +68,14 @@ if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   usage
 fi
 
-if pane_dir=$(display_pane_open 2>/dev/null); then
+# Join this tmux window's streaming pane, opening it when nothing is streaming yet. run-all
+# holds a token for the whole batch and releases it once every provider has been waited on, so
+# the pane outlives any single provider and closes on the same last-one-out rule everyone uses.
+if pane_dir=$(display_pane_attach_or_open 2>/dev/null); then
   export DISPLAY_PANE_DIR="$pane_dir"
-  mkdir -p "$DISPLAY_PANE_DIR/logs"
+  __PANE_SELF_ATTACHED=1
+  mkdir -p "$DISPLAY_PANE_DIR/logs" "$DISPLAY_PANE_DIR/active"
+  : > "$DISPLAY_PANE_DIR/active/run-all.$$"
 fi
 
 # Routes a provider's stdio to per-provider log files when the pane is open;
@@ -119,7 +124,7 @@ for pid in ${pids[@]+"${pids[@]}"}; do
 done
 
 if [[ -n "${DISPLAY_PANE_DIR:-}" ]]; then
-  display_pane_close
+  __pane_release run-all
 fi
 
 exit "$overall_status"

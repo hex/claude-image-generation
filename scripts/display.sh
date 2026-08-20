@@ -417,10 +417,48 @@ __pane_now_ms() {
 # can call them unconditionally. begin records the querying state and starts
 # the timer; finish/fail compute elapsed ms and emit complete/error events.
 display_pane_begin() {
-  [[ -z "${DISPLAY_PANE_DIR:-}" ]] && return 0
   local provider="$1" model="$2"
+  # A provider launched on its own inherits no DISPLAY_PANE_DIR, so it joins (or opens) this
+  # window's shared pane here. Doing it at begin rather than at render time is what keeps a
+  # batch to one pane: every provider lands on the same surface before any image exists.
+  if [[ -z "${DISPLAY_PANE_DIR:-}" ]] && is_tmux; then
+    local watch_dir
+    if watch_dir=$(display_pane_attach_or_open 2>/dev/null); then
+      DISPLAY_PANE_DIR="$watch_dir"
+      __PANE_SELF_ATTACHED=1
+    fi
+  fi
+  [[ -z "${DISPLAY_PANE_DIR:-}" ]] && return 0
+  # Register as still working so the last provider out can close the pane. Only self-attached
+  # providers take a token: when run-all.sh hands down DISPLAY_PANE_DIR it closes the pane
+  # itself, and a child writing .done early would cut the batch short.
+  if [[ -n "${__PANE_SELF_ATTACHED:-}" ]]; then
+    mkdir -p "$DISPLAY_PANE_DIR/active"
+    : > "$DISPLAY_PANE_DIR/active/${provider}.$$"
+  fi
   __PANE_START_MS=$(__pane_now_ms)
   display_pane_status "$provider" querying "" "$model" ""
+  return 0
+}
+
+# Drops this provider's active token and closes the shared pane once the batch's last provider
+# has released it. Ownership is the point: only a self-attached provider may close the pane. When
+# run-all.sh supplies DISPLAY_PANE_DIR it closes the pane itself after waiting on every child, so
+# a child writing .done here would dismiss the pane while its siblings are still generating.
+# Usage: __pane_release <provider>
+__pane_release() {
+  [[ -n "${__PANE_SELF_ATTACHED:-}" ]] || return 0
+  local provider="$1"
+  rm -f "$DISPLAY_PANE_DIR/active/${provider}.$$"
+  # Anything left in active/ means another provider is still working, so the pane stays open.
+  [[ -n "$(ls -A "$DISPLAY_PANE_DIR/active" 2>/dev/null)" ]] && return 0
+  # Retire the entry before dismissing the pane so a provider starting up in this instant opens
+  # a fresh pane rather than attaching to one that is about to stop accepting images.
+  local reg
+  reg=$(cat "$DISPLAY_PANE_DIR/registry" 2>/dev/null)
+  [[ -n "$reg" ]] && rm -rf "$reg"
+  touch "$DISPLAY_PANE_DIR/.done"
+  return 0
 }
 
 display_pane_finish() {
@@ -433,6 +471,7 @@ display_pane_finish() {
     [[ -n "$now" ]] && elapsed=$((now - __PANE_START_MS))
   fi
   display_pane_status "$provider" complete "$elapsed" "$model" "$path"
+  __pane_release "$provider"
 }
 
 display_pane_fail() {
@@ -440,6 +479,7 @@ display_pane_fail() {
   local provider="$1" model="$2" message="$3"
   display_pane_error "$provider" "$message"
   display_pane_status "$provider" error "" "$model" ""
+  __pane_release "$provider"
 }
 
 # Convenience for provider scripts. Reads PROVIDER_NAME and MODEL from the
@@ -815,6 +855,94 @@ WATCHEREOF
     >/dev/null
 
   printf '%s' "$watch_dir"
+}
+
+# Prints the registry path that identifies this tmux window's shared streaming pane. Keyed by
+# window rather than session because a pane only exists inside one window -- a provider running
+# in a different window must get its own pane, not stream into one the user cannot see.
+__pane_registry_dir() {
+  local -a target_args=()
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    target_args=(-t "$TMUX_PANE")
+  fi
+  local key
+  key=$(tmux display-message -p ${target_args[@]+"${target_args[@]}"} '#{session_id}-#{window_id}' 2>/dev/null)
+  key="${key//[^A-Za-z0-9]/_}"
+  [[ -z "$key" ]] && key="default"
+  local tmp="${TMPDIR:-/tmp}"
+  printf '%s/display_pane_registry.%s' "${tmp%/}" "$key"
+}
+
+# Reports whether a registry entry still names a pane that can accept images.
+# Usage: __pane_registry_is_live <registry_dir>
+__pane_registry_is_live() {
+  local reg="$1" dir
+  [[ -f "$reg/dir" ]] || return 1
+  dir=$(cat "$reg/dir" 2>/dev/null)
+  # .done means the watcher has left its poll loop for the dismiss prompt: the directory is
+  # still there, but nothing will pick up an image written into it.
+  [[ -n "$dir" && -d "$dir" && ! -f "$dir/.done" ]]
+}
+
+# Opens the pane for a registry entry this process has just claimed and publishes it, printing
+# the watch directory. The entry is released again if the pane cannot be opened, so a failure
+# never leaves a claim that nothing will fulfil. Usage: __pane_publish <registry_dir>
+__pane_publish() {
+  local reg="$1" watch_dir
+  if ! watch_dir=$(display_pane_open); then
+    rm -rf "$reg"
+    return 1
+  fi
+  printf '%s' "$reg" > "$watch_dir/registry"
+  printf '%s' "$watch_dir" > "$reg/dir"
+  printf '%s' "$watch_dir"
+}
+
+# Returns the shared streaming pane for this tmux window, opening it if this is the first
+# caller. Concurrent providers all land on the same pane instead of each splitting its own.
+# Prints the watch directory to stdout, like display_pane_open. Usage: display_pane_attach_or_open
+display_pane_attach_or_open() {
+  if ! is_tmux; then
+    echo "Not inside tmux, cannot open display pane" >&2
+    return 1
+  fi
+
+  local reg
+  reg=$(__pane_registry_dir)
+
+  # The watcher removes its watch dir when it exits, so an entry can outlive the pane it names.
+  # Retiring the dead entry here is what lets the next batch open a pane someone is watching.
+  # An entry with nothing published yet is a different thing: its owner is still splitting the
+  # pane, and it is waited for below. Retiring that one is how a batch forked in a single breath
+  # ends up with two panes.
+  if [[ -f "$reg/dir" ]] && ! __pane_registry_is_live "$reg"; then
+    rm -rf "$reg"
+  fi
+
+  # The registry is a directory so that mkdir is the atomic create-once lock: exactly one
+  # racing provider can win it, and the winner is the one that opens the pane.
+  if mkdir "$reg" 2>/dev/null; then
+    __pane_publish "$reg"
+    return $?
+  fi
+
+  # Lost the claim, so the pane belongs to another provider. It may still be splitting, so give
+  # it a bounded moment to publish rather than assuming the entry is abandoned.
+  local waited=0
+  while (( waited < 40 )); do
+    if __pane_registry_is_live "$reg"; then
+      cat "$reg/dir"
+      return 0
+    fi
+    sleep 0.05
+    waited=$((waited + 1))
+  done
+
+  # The claim was abandoned before a pane was published. Take it over, or it strands every
+  # later provider in this window behind the same fruitless wait.
+  rm -rf "$reg"
+  mkdir "$reg" 2>/dev/null || return 1
+  __pane_publish "$reg"
 }
 
 # ── Main Entry Point ───────────────────────────────────────────────────

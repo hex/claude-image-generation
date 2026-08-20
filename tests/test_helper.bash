@@ -74,3 +74,26 @@ assert_valid_json() {
     return 1
   fi
 }
+
+# Assert that a captured string contains a substring. Companion to assert_output_contains for
+# transcripts captured into a local variable rather than bats' $output.
+# Usage: assert_output_contains_str "$captured" "expected substring"
+assert_output_contains_str() {
+  local actual="$1" expected="$2"
+  if [[ "$actual" != *"$expected"* ]]; then
+    echo "Expected string to contain: $expected"
+    echo "Actual string: $actual"
+    return 1
+  fi
+}
+
+# Assert that a captured string does NOT contain a substring.
+# Usage: assert_output_not_contains_str "$captured" "unexpected substring"
+assert_output_not_contains_str() {
+  local actual="$1" unexpected="$2"
+  if [[ "$actual" == *"$unexpected"* ]]; then
+    echo "Expected string to NOT contain: $unexpected"
+    echo "Actual string: $actual"
+    return 1
+  fi
+}
