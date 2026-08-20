@@ -4,6 +4,9 @@
 setup() {
   load test_helper
   XAI_SH="${PLUGIN_ROOT}/scripts/xai.sh"
+  # These tests run xai.sh far enough to reach the display pane, which would join or
+  # split a pane in the developer's own tmux session once per test.
+  disable_display
   # Clear API keys by default; tests that need them set them explicitly
   unset XAI_API_KEY 2>/dev/null || true
   unset GROK_API_KEY 2>/dev/null || true

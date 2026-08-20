@@ -10,6 +10,7 @@ SYSTEM_BASH="/bin/bash"
 
 # A mock tmux + imgcat on PATH so display_pane_open can build a pane without a real terminal.
 setup() {
+  isolate_tmpdir
   MOCK_DIR="${BATS_TMPDIR}/bash32_mocks_$$"
   mkdir -p "$MOCK_DIR"
   printf '#!/bin/bash\necho "%%99"\n' > "$MOCK_DIR/tmux"
@@ -19,6 +20,7 @@ setup() {
 
 teardown() {
   rm -rf "$MOCK_DIR" 2>/dev/null || true
+  cleanup_tmpdir
 }
 
 @test "bash32: scripts use no bash-4-only constructs" {

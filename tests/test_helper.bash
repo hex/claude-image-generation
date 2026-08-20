@@ -97,3 +97,18 @@ assert_output_not_contains_str() {
     return 1
   fi
 }
+
+# Points TMPDIR at a per-test scratch directory. display_pane_open builds its watch dir with
+# mktemp under TMPDIR, so without this a suite that opens panes accumulates watch dirs in the
+# developer's real temp directory. Pair with cleanup_tmpdir in teardown. Usage: isolate_tmpdir
+isolate_tmpdir() {
+  ISOLATED_TMPDIR="${BATS_TMPDIR}/isolated_tmp_$$_${BATS_TEST_NUMBER:-0}"
+  mkdir -p "$ISOLATED_TMPDIR"
+  export TMPDIR="$ISOLATED_TMPDIR"
+}
+
+# Removes the scratch directory isolate_tmpdir created. Usage: cleanup_tmpdir
+cleanup_tmpdir() {
+  [[ -n "${ISOLATED_TMPDIR:-}" ]] && rm -rf "$ISOLATED_TMPDIR"
+  return 0
+}

@@ -7,6 +7,14 @@ load test_helper
 DISPLAY_SH="${PLUGIN_ROOT}/scripts/display.sh"
 OVERSIZED_FIXTURE="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
 
+setup() {
+  isolate_tmpdir
+}
+
+teardown() {
+  cleanup_tmpdir
+}
+
 @test "pane_orientation classifies wide vs tall by the 2x cell-aspect threshold" {
   source "$DISPLAY_SH"
   # Terminal cells are ~2x taller than wide, so a pane reads as visually wide only once its

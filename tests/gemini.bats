@@ -4,6 +4,9 @@
 setup() {
   load test_helper
   GEMINI_SH="${PLUGIN_ROOT}/scripts/gemini.sh"
+  # These tests run gemini.sh far enough to reach the display pane, which would join or
+  # split a pane in the developer's own tmux session once per test.
+  disable_display
   # Clear API key by default; tests that need it set it explicitly
   unset GEMINI_API_KEY 2>/dev/null || true
   unset GEMINI_IMAGE_MODEL 2>/dev/null || true

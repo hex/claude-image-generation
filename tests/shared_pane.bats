@@ -302,3 +302,21 @@ stage_run_all() {
     return 1
   }
 }
+
+@test "suites that run the scripts for real keep them out of the live tmux session" {
+  # Provider scripts join this window's display pane as soon as they start querying, so a suite
+  # that runs one against the developer's own tmux session splits a real pane -- one per test,
+  # each left waiting for a keypress nobody will press. Such a suite must call disable_display.
+  # Suites that install a tmux stub are exempt: theirs is the behaviour under test.
+  local f offenders=""
+  for f in "${PLUGIN_ROOT}"/tests/*.bats; do
+    grep -qE '(GEMINI|OPENAI|XAI|RUN_ALL)_SH|scripts/(gemini|openai|xai|run-all)\.sh' "$f" || continue
+    grep -q '/tmux"' "$f" && continue
+    grep -q 'disable_display' "$f" || offenders="${offenders}${offenders:+ }$(basename "$f")"
+  done
+  [[ -z "$offenders" ]] || {
+    echo "These suites run the scripts against the live tmux session without disable_display:"
+    echo "  $offenders"
+    return 1
+  }
+}

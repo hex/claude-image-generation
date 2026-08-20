@@ -4,6 +4,9 @@
 setup() {
   load test_helper
   OPENAI_SH="${PLUGIN_ROOT}/scripts/openai.sh"
+  # These tests run openai.sh far enough to reach the display pane, which would join or
+  # split a pane in the developer's own tmux session once per test.
+  disable_display
   # Clear API key by default; tests that need it set it explicitly
   unset OPENAI_API_KEY 2>/dev/null || true
   unset OPENAI_IMAGE_MODEL 2>/dev/null || true
