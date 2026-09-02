@@ -400,7 +400,7 @@ There is no separate edit endpoint; editing is generation with input images atta
 The prompt is a normal chat message; image output is opted into with `modalities`. In generate mode `content` is a plain string:
 ```json
 {
-  "model": "google/gemini-2.5-flash-image",
+  "model": "google/gemini-3.1-flash-image",
   "modalities": ["image", "text"],
   "messages": [{"role": "user", "content": "a serene mountain landscape at sunset"}]
 }
@@ -408,7 +408,7 @@ The prompt is a normal chat message; image output is opted into with `modalities
 In edit mode `content` is an array whose first part is the text prompt, followed by one `image_url` part per input image. Each image is a base64 data URL (the plugin streams these via `jq --rawfile` and posts with `curl --data-binary @-` to stay under ARG_MAX, mirroring gemini.sh):
 ```json
 {
-  "model": "google/gemini-2.5-flash-image",
+  "model": "google/gemini-3.1-flash-image",
   "modalities": ["image", "text"],
   "messages": [{
     "role": "user",
@@ -436,7 +436,7 @@ The generated image is returned as a base64 data URL inside the assistant messag
 The plugin reads `.choices[0].message.images[0].image_url.url`, strips the `data:<mime>;base64,` prefix, and decodes the remainder. If no image is present it falls back to reporting `.choices[0].message.content` (a refusal or text-only reply). Errors come back as `.error.message`.
 
 ### Models
-`--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-2.5-flash-image`. Others include `google/gemini-3-pro-image-preview` and `openai/gpt-5-image`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
+`--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-3.1-flash-image`. Others include `google/gemini-3-pro-image-preview` and `openai/gpt-5-image`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
 
 ### Constraints
 - Aspect ratio, resolution, and quality are model-dependent and driven by the prompt — there are no dedicated flags for them

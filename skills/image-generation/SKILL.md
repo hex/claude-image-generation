@@ -33,7 +33,7 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 - **Env var**: `XAI_API_KEY` or `GROK_API_KEY`
 
 ### OpenRouter (gateway)
-- **Model**: any OpenRouter model slug that supports image output; default `google/gemini-2.5-flash-image`. Others: `google/gemini-3-pro-image-preview`, `openai/gpt-5-image`, and more at [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image)
+- **Model**: any OpenRouter model slug that supports image output; default `google/gemini-3.1-flash-image`. Others: `google/gemini-3-pro-image-preview`, `openai/gpt-5-image`, and more at [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image)
 - **Strengths**: One key reaches many providers' image models; useful for access, fallback, and comparison without separate accounts
 - **API shape**: Uses the chat-completions endpoint (`/api/v1/chat/completions`) with `modalities: ["image","text"]`, not a dedicated images endpoint. Images come back as base64 data URLs in `message.images[]`
 - **Editing**: Input images are attached as `image_url` content parts (base64 data URLs) in the user message
@@ -65,7 +65,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" \
   --prompt "a serene mountain landscape at sunset" \
   --output ./generated.png
 
-# OpenRouter (any image model via --model; default google/gemini-2.5-flash-image)
+# OpenRouter (any image model via --model; default google/gemini-3.1-flash-image)
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter.sh" \
   --mode generate \
   --prompt "a serene mountain landscape at sunset" \
@@ -218,6 +218,6 @@ otherwise.
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
 | `--input-image` | file path, repeatable | (edit only) |
-| `--model` | any OpenRouter image model slug | google/gemini-2.5-flash-image |
+| `--model` | any OpenRouter image model slug | google/gemini-3.1-flash-image |
 | `--site-url` | URL (sent as `HTTP-Referer`) | (from `OPENROUTER_SITE_URL`) |
 | `--site-name` | text (sent as `X-Title`) | (from `OPENROUTER_SITE_NAME`) |

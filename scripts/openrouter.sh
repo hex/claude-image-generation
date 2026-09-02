@@ -14,14 +14,14 @@ usage() {
 Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [options]
 
 OpenRouter is a gateway: --model accepts any OpenRouter model slug that supports
-image output (e.g. google/gemini-2.5-flash-image, openai/gpt-5-image).
+image output (e.g. google/gemini-3.1-flash-image, openai/gpt-5-image).
 
 Options:
   --mode              generate or edit (required)
   --prompt            Text prompt describing the image (required)
   --output            Output file path (required)
   --input-image       Input image path for edit mode (required for edit, repeatable)
-  --model             OpenRouter model slug (default: google/gemini-2.5-flash-image)
+  --model             OpenRouter model slug (default: google/gemini-3.1-flash-image)
   --site-url          Sent as HTTP-Referer for OpenRouter attribution (optional)
   --site-name         Sent as X-Title for OpenRouter attribution (optional)
 
@@ -38,7 +38,7 @@ MODE=""
 PROMPT=""
 OUTPUT=""
 INPUT_IMAGES=()
-MODEL="${OPENROUTER_IMAGE_MODEL:-google/gemini-2.5-flash-image}"
+MODEL="${OPENROUTER_IMAGE_MODEL:-google/gemini-3.1-flash-image}"
 SITE_URL="${OPENROUTER_SITE_URL:-}"
 SITE_NAME="${OPENROUTER_SITE_NAME:-}"
 
@@ -88,7 +88,7 @@ build_request_body() {
 
   if [[ ${#INPUT_IMAGES[@]} -gt 0 ]]; then
     content="[]"
-    local img mime_type img_b64_file data_url_file
+    local img mime_type data_url_file
     for img in "${INPUT_IMAGES[@]}"; do
       case "${img##*.}" in
         png) mime_type="image/png" ;;
@@ -100,7 +100,6 @@ build_request_body() {
       # A normal image exceeds ARG_MAX, so the base64 payload is streamed into jq
       # via --rawfile rather than passed as an argument (mirrors gemini.sh). The
       # data: prefix is prepended into the same file so jq embeds a complete URL.
-      img_b64_file=$(mktemp -p "$tmpdir")
       data_url_file=$(mktemp -p "$tmpdir")
       printf 'data:%s;base64,' "$mime_type" > "$data_url_file"
       base64 < "$img" | tr -d '\n' >> "$data_url_file"
@@ -157,6 +156,15 @@ fi
 DATA_URL=$(echo "$BODY" | jq -r '.choices[0].message.images[0].image_url.url // empty')
 
 if [[ -z "$DATA_URL" ]]; then
+  # A mid-generation upstream failure arrives as HTTP 200 with the error on the
+  # choice, not at the top level, so it is named here rather than dumped as a body.
+  CHOICE_ERROR=$(echo "$BODY" | jq -r '
+    (.choices[0].error)? // empty
+    | select(type == "object")
+    | "(" + ((.code // "?") | tostring) + "): " + ((.message // "") | tostring)' 2>/dev/null || true)
+  if [[ -n "$CHOICE_ERROR" ]]; then
+    provider_die "OpenRouter provider error ${CHOICE_ERROR}"
+  fi
   TEXT_RESPONSE=$(echo "$BODY" | jq -r '.choices[0].message.content // empty' 2>/dev/null || true)
   if [[ -n "$TEXT_RESPONSE" ]]; then
     provider_die "No image data in response. Model said: ${TEXT_RESPONSE}"

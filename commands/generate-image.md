@@ -17,7 +17,7 @@ Generate or edit an image based on the user's request.
    - **Gemini** (gemini-3-pro-image-preview): Premium quality, professional asset production, up to 14 reference images
    - **OpenAI** (gpt-image-2): Best for text rendering and transparent backgrounds
    - **xAI** (grok-imagine-image-pro): Premium tier, higher quality, flat per-image pricing
-   - **OpenRouter** (google/gemini-2.5-flash-image): Gateway to many image models through one key; pass any OpenRouter model slug via `--model`
+   - **OpenRouter** (google/gemini-3.1-flash-image): Gateway to many image models through one key; pass any OpenRouter model slug via `--model`
    - **All in parallel**: Generate with the default providers (Gemini, OpenAI, xAI) and pick the best result. OpenRouter is opt-in — include it explicitly with `--providers gemini,openai,xai,openrouter` if the user wants it in the parallel run.
 
 3. Ask the user where to save the output with AskUserQuestion:

@@ -4,6 +4,9 @@
 setup() {
   load test_helper
   OPENROUTER_SH="${PLUGIN_ROOT}/scripts/openrouter.sh"
+  # These tests run openrouter.sh far enough to reach the display pane, which would join or
+  # split a pane in the developer's own tmux session once per test.
+  disable_display
   # Clear API key by default; tests that need it set it explicitly
   unset OPENROUTER_API_KEY 2>/dev/null || true
   unset OPENROUTER_IMAGE_MODEL 2>/dev/null || true
@@ -62,11 +65,11 @@ setup() {
   assert_output_contains "Usage:"
 }
 
-@test "openrouter: default model is google/gemini-2.5-flash-image" {
+@test "openrouter: default model is google/gemini-3.1-flash-image" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
   # The script prints "Calling OpenRouter API (model: ...)" before the curl call
   run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-openrouter-out.png"
-  assert_output_contains "model: google/gemini-2.5-flash-image"
+  assert_output_contains "model: google/gemini-3.1-flash-image"
 }
 
 @test "openrouter: OPENROUTER_IMAGE_MODEL env var overrides default model" {
@@ -94,4 +97,21 @@ setup() {
   assert_output_contains "--site-url"
   assert_output_contains "--site-name"
   assert_output_contains "OPENROUTER_API_KEY"
+}
+
+# OpenRouter reports a mid-generation upstream failure as HTTP 200 with the error on the
+# choice, so the script has to name it rather than report a missing image.
+@test "openrouter: an error on the choice of a 200 response is reported by message" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export DISPLAY_PANE_DIR="${BATS_TMPDIR}/openrouter_pane_$$"
+  mkdir -p "$DISPLAY_PANE_DIR"
+  local mock_dir="${BATS_TMPDIR}/openrouter_mocks_$$"
+  mkdir -p "$mock_dir"
+  printf '%s\n200\n' '{"choices":[{"error":{"code":502,"message":"upstream boom"},"finish_reason":"error","message":{"content":""}}]}' > "$mock_dir/response.txt"
+  printf '#!/bin/bash\ncat >/dev/null\ncat "$(dirname "$0")/response.txt"\n' > "$mock_dir/curl"
+  chmod +x "$mock_dir/curl"
+  PATH="$mock_dir:$PATH" run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "${BATS_TMPDIR}/openrouter_err_$$.png"
+  rm -rf "$mock_dir" "$DISPLAY_PANE_DIR"
+  assert_status 1
+  assert_output_contains "OpenRouter provider error (502): upstream boom"
 }

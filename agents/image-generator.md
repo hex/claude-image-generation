@@ -175,7 +175,7 @@ xAI (`xai.sh`):
 - `--model grok-imagine-image` — standard tier with 10x higher RPM (300 vs 30)
 
 OpenRouter (`openrouter.sh`):
-- `--model <slug>` — any OpenRouter model that supports image output (e.g. `openai/gpt-5-image`, `google/gemini-3-pro-image-preview`). Default `google/gemini-2.5-flash-image`.
+- `--model <slug>` — any OpenRouter model that supports image output (e.g. `openai/gpt-5-image`, `google/gemini-3-pro-image-preview`). Default `google/gemini-3.1-flash-image`.
 - `--site-url` / `--site-name` — optional OpenRouter attribution headers. Aspect ratio, resolution, and quality are prompt-driven and model-dependent — describe them in the prompt.
 
 Infer appropriate flags from user intent: "hero image" → 2K/4K, "social post" → 1:1 or 9:16, "draft" → low quality or mini model, "for printing" → 4K, "transparent logo" → OpenAI with `--background transparent`.

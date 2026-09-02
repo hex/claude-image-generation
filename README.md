@@ -64,7 +64,7 @@ Override the default model per provider via environment variables:
 | `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` | Gemini model used for generation and editing |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2` | OpenAI model used for generation and editing |
 | `XAI_IMAGE_MODEL` | `grok-imagine-image-pro` | xAI model used for generation and editing |
-| `OPENROUTER_IMAGE_MODEL` | `google/gemini-2.5-flash-image` | OpenRouter model slug used for generation and editing |
+| `OPENROUTER_IMAGE_MODEL` | `google/gemini-3.1-flash-image` | OpenRouter model slug used for generation and editing |
 
 Command-line `--model` flag on the scripts takes precedence over environment variables.
 
@@ -109,7 +109,7 @@ OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any 
 
 | Model | Characteristics |
 |-------|-----------------|
-| `google/gemini-2.5-flash-image` | Fast Gemini image model, generation + editing (default) |
+| `google/gemini-3.1-flash-image` | Fast Gemini image model, generation + editing (default) |
 | `google/gemini-3-pro-image-preview` | Pro-tier Gemini image model, premium quality |
 | `openai/gpt-5-image` | OpenAI GPT image model via OpenRouter (also `openai/gpt-5-image-mini`) |
 
@@ -295,7 +295,7 @@ bash scripts/xai.sh \
 OpenRouter is a gateway to many image models through a single key. It uses the chat-completions API, so `--model` accepts any OpenRouter model slug that supports image output.
 
 ```bash
-# Generate (default model: google/gemini-2.5-flash-image)
+# Generate (default model: google/gemini-3.1-flash-image)
 bash scripts/openrouter.sh \
   --mode generate \
   --prompt "a mountain at sunset" \
@@ -324,7 +324,7 @@ bash scripts/openrouter.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path, repeatable | -- | Edit mode only |
-| `--model` | any OpenRouter image model slug | `google/gemini-2.5-flash-image` | No |
+| `--model` | any OpenRouter image model slug | `google/gemini-3.1-flash-image` | No |
 | `--site-url` | URL | (none) | No (sent as `HTTP-Referer` for OpenRouter attribution) |
 | `--site-name` | text | (none) | No (sent as `X-Title` for OpenRouter attribution) |
 
@@ -386,7 +386,7 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 
 | Feature | Gemini | OpenAI | xAI | OpenRouter |
 |---------|--------|--------|-----|------------|
-| Default model | gemini-3-pro-image-preview | gpt-image-2 | grok-imagine-image-pro | google/gemini-2.5-flash-image |
+| Default model | gemini-3-pro-image-preview | gpt-image-2 | grok-imagine-image-pro | google/gemini-3.1-flash-image |
 | Max resolution | 4K (via `--image-size`) | 1536x1024 | 2K (via `--resolution`) | Model-dependent |
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
 | Transparent BG | No | Yes | No | Model-dependent |
