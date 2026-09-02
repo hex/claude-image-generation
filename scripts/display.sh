@@ -660,6 +660,9 @@ trap 'rm -rf "$WATCH"' EXIT
 # in variables named <map>_<provider> (state, timing, model, path, rendered), and the
 # set of providers seen so far is tracked as a space-separated list so we can iterate.
 seen_providers=""
+# Providers in the order their blocks reached the pane (completion order), which is the order
+# a redraw replays; it differs from first-seen order whenever a later provider finishes first.
+drawn_order=""
 status_lines_processed=0
 manifest_shown=0
 spinner_frame=0
@@ -696,6 +699,15 @@ note_provider() {
     case " $seen_providers " in
         *" $1 "*) ;;
         *) seen_providers="${seen_providers}${seen_providers:+ }$1" ;;
+    esac
+}
+
+# note_drawn <provider> — remember a provider's place on the pane once; a block drawn again
+# after a retry keeps its original position.
+note_drawn() {
+    case " $drawn_order " in
+        *" $1 "*) ;;
+        *) drawn_order="${drawn_order}${drawn_order:+ }$1" ;;
     esac
 }
 
@@ -792,11 +804,12 @@ pane_cols() {
     printf '%s' "$size"
 }
 
-# redraw_all — clear screen and scrollback, then replay every provider block from state.
+# redraw_all — clear screen and scrollback, then replay every provider block from state, in
+# the order the blocks were first drawn.
 redraw_all() {
     local p __state
     printf '\033[2J\033[3J\033[H'
-    for p in $seen_providers; do
+    for p in $drawn_order; do
         map_get __state provider_state "$p"
         case "$__state" in
             complete) draw_complete "$p" ;;
@@ -952,11 +965,13 @@ while true; do
             if [[ "$state" == "complete" ]]; then
                 [[ -n "$already_rendered" ]] && continue
                 map_set rendered "$provider" 1
+                note_drawn "$provider"
                 clear_loading
                 draw_complete "$provider"
             elif [[ "$state" == "error" ]]; then
                 [[ -n "$already_rendered" ]] && continue
                 map_set rendered "$provider" 1
+                note_drawn "$provider"
                 clear_loading
                 draw_error "$provider"
             fi

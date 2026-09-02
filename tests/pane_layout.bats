@@ -385,6 +385,36 @@ STUB
   rm -rf "$mock"
 }
 
+@test "a redraw keeps the order the blocks were drawn in" {
+  local wd mock
+  make_resize_watcher
+  printf '50 200\n50 200\n50 200\n50 200\n50 200\n50 200\n50 120\n' > "$mock/widths"
+  # openai is seen first (its querying row leads) but xai finishes first, so the pane shows
+  # xai above openai. The redraw must keep that order, not fall back to first-seen order.
+  {
+    printf 'openai\tquerying\t\t\t\n'
+    printf 'xai\tquerying\t\t\t\n'
+    printf 'xai\tcomplete\t900\tgrok\t%s\n' "$OVERSIZED_FIXTURE"
+    printf 'openai\tcomplete\t900\tgpt-image-1\t%s\n' "$OVERSIZED_FIXTURE"
+  } > "$wd/status"
+  ( sleep 6; touch "$wd/.done" ) &
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 20 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *$'\033[2J\033[3J\033[H'* ]] || { echo "no redraw happened:"; echo "$output"; return 1; }
+  # Both providers share one fixture, so the banners are the only thing that tells them apart.
+  local rest before_xai before_openai
+  rest="${output#*$'\033[2J\033[3J\033[H'}"
+  before_xai="${rest%%XAI*}"
+  before_openai="${rest%%OPENAI*}"
+  [[ ${#before_xai} -lt ${#before_openai} ]] || {
+    echo "redraw put OPENAI before XAI; the pane had drawn xai first:"
+    echo "$rest"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
 @test "the dismiss prompt reflows on a resize and still closes on end of input" {
   local wd mock
   make_resize_watcher
