@@ -439,6 +439,40 @@ STUB
   rm -rf "$mock"
 }
 
+@test "the spinner line turns auto-wrap off while it draws and back on after" {
+  local mock="${BATS_TMPDIR}/watcher_wrap_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+  local wd
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+
+  # Four providers make a spinner line wider than a narrow pane. Without auto-wrap off, the
+  # line wraps, every tick starts a new row, and the growing stack scrolls the images away.
+  printf 'openai\tquerying\t\t\t\nxai\tquerying\t\t\t\ngemini\tquerying\t\t\t\nopenrouter\tquerying\t\t\t\n' > "$wd/status"
+  ( sleep 1; touch "$wd/.done" ) &
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *$'\033[?7l'*generating*$'\033[?7h'* ]] || {
+    echo "spinner line is not bracketed by auto-wrap off and on:"
+    echo "$output"
+    return 1
+  }
+  local off on
+  off=$(printf '%s' "$output" | grep -oF -e $'\033[?7l' | wc -l | tr -d ' ')
+  on=$(printf '%s' "$output" | grep -oF -e $'\033[?7h' | wc -l | tr -d ' ')
+  [[ "$off" -eq "$on" ]] || { echo "auto-wrap turned off $off times but on $on times"; return 1; }
+  rm -rf "$mock"
+}
+
 # Watcher dir with an xai error already drawn, and a retry-offer naming xai.
 make_offer_watcher() {
   mock="${BATS_TMPDIR}/watcher_offer_$$"
@@ -599,5 +633,25 @@ STUB
   (printf '\033'; sleep 2) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
      timeout 10 bash "$wd/watcher.sh" "$wd" >/dev/null 2>&1 || true
   [[ ! -d "$wd" ]] || { echo "watcher directory still exists after Esc"; return 1; }
+  rm -rf "$mock"
+}
+
+@test "the retry offer line turns auto-wrap off while it draws and back on after" {
+  local wd mock
+  make_offer_watcher
+  printf '%s\n' 2 xai > "$wd/retry-offer"
+  ( sleep 4; touch "$wd/.done" ) &
+  local output
+  output=$( (sleep 5) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 20 bash "$wd/watcher.sh" "$wd" 2>&1)
+  [[ "$output" == *$'\033[?7l'*'[r] retry failed (xai)'*$'\033[?7h'* ]] || {
+    echo "offer line is not bracketed by auto-wrap off and on:"
+    echo "$output"
+    return 1
+  }
+  local off on
+  off=$(printf '%s' "$output" | grep -oF -e $'\033[?7l' | wc -l | tr -d ' ')
+  on=$(printf '%s' "$output" | grep -oF -e $'\033[?7h' | wc -l | tr -d ' ')
+  [[ "$off" -eq "$on" ]] || { echo "auto-wrap turned off $off times but on $on times"; return 1; }
   rm -rf "$mock"
 }

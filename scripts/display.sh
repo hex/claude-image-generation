@@ -745,7 +745,9 @@ draw_loading() {
     done
 
     provider_palette _bg _fg _accent _spinner "${pending[0]}"
-    printf '\r\033[K   \033[1;38;2;%sm%s\033[0m   \033[3mgenerating\033[0m   %s' \
+    # A line wider than the pane would wrap and every tick would start a new row; the growing
+    # stack scrolls the images off. With auto-wrap off the terminal truncates at the edge instead.
+    printf '\033[?7l\r\033[K   \033[1;38;2;%sm%s\033[0m   \033[3mgenerating\033[0m   %s\033[?7h' \
         "$_spinner" "$frame" "$list"
 }
 
@@ -894,7 +896,7 @@ retry_offer_prompt() {
     # grid and erases inline images, which live as overlays outside it; a countdown is only safe
     # to animate while no image is shown yet.
     if [[ -n "$any_image_rendered" ]]; then
-        printf '\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  (up to %ds)\033[0m ' "$names" "$seconds"
+        printf '\033[?7l\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  (up to %ds)\033[0m \033[?7h' "$names" "$seconds"
     fi
     while [[ -f "$WATCH/retry-offer" && ! -f "$WATCH/.done" ]]; do
         remaining=$((deadline - SECONDS))
@@ -903,7 +905,7 @@ retry_offer_prompt() {
             break
         fi
         [[ -z "$any_image_rendered" ]] && \
-            printf '\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  %ds\033[0m ' "$names" "$remaining"
+            printf '\033[?7l\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  %ds\033[0m \033[?7h' "$names" "$remaining"
         read_key __k
         case $? in
             0)
