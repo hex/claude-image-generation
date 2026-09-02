@@ -51,7 +51,9 @@ bats tests/openai.bats
 |-----------|-------------------|----------------|
 | `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 14 input images rejected |
 | `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 16 input images rejected, multiple images with `dall-e-2` rejected |
-| `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 3 input images rejected |
+| `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 5 input images rejected, `--quality` validation |
+| `tests/openrouter.bats` | `scripts/openrouter.sh` | Argument validation, missing API key, model override, chat-completions payload shape, image and text-only responses |
+| `tests/retry.bats` | `scripts/retry.sh` | `curl_with_retry` on 429/5xx/network failures, delay doubling, `IMAGE_MAX_RETRIES` / `IMAGE_RETRY_DELAY`, attempt count handoff |
 | `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
 | `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), fixed 30% image sizing + DPI normalization, empty-timing parse, spinner silencing after the first image |
 | `tests/shared_pane.bats` | `scripts/display.sh`, `scripts/run-all.sh` | One pane per batch: registry attach, create-race wait, abandoned-claim takeover, stale/dismissed entries, token refcount, run-all attach + ownership |
@@ -88,7 +90,7 @@ bash scripts/gemini.sh --nonexistent value
 # Expected: exits 1, "Unknown option: --nonexistent"
 ```
 
-Repeat the same checks for `scripts/openai.sh` and `scripts/xai.sh`.
+Repeat the same checks for `scripts/openai.sh`, `scripts/xai.sh` and `scripts/openrouter.sh`.
 
 ### Environment Variable Checks
 
@@ -143,11 +145,11 @@ bash scripts/openai.sh --mode edit --prompt "test" --output /tmp/test.png \
   --model dall-e-2 --input-image /tmp/x.png --input-image /tmp/y.png
 # Expected: exits 1, "Error: at most 1 input image for dall-e-2"
 
-# xAI: 4 images (cap 3)
+# xAI: 6 images (cap 5)
 bash scripts/xai.sh --mode edit --prompt "test" --output /tmp/test.png \
-  --input-image /tmp/x.png --input-image /tmp/x.png \
-  --input-image /tmp/x.png --input-image /tmp/x.png
-# Expected: exits 1, "Error: at most 3 input images supported for xai"
+  --input-image /tmp/x.png --input-image /tmp/x.png --input-image /tmp/x.png \
+  --input-image /tmp/x.png --input-image /tmp/x.png --input-image /tmp/x.png
+# Expected: exits 1, "Error: at most 5 input images supported for xai"
 ```
 
 ### Multi-Image Smoke Tests (Real API Calls)
@@ -332,7 +334,7 @@ wait
 | Single-provider editing | Feature | Edited image created, original untouched |
 | Multi-image edit payloads | Automated | gemini inlineData count, openai `image[]` fields, xai `images` array length |
 | Gemini generate with references | Automated / Manual | inlineData parts present in generate-mode payload |
-| Input-image caps | Automated / Manual | Exit 1 over cap: 14 gemini / 16 openai / 3 xai / 1 dall-e-2 |
+| Input-image caps | Automated / Manual | Exit 1 over cap: 14 gemini / 16 openai / 5 xai / 1 dall-e-2 |
 | run-all `--input-image` forwarding | Automated | Every repeated flag reaches each provider (edit mode) |
 | All-providers parallel | Feature | One task tracking the parallel run, three output files, all completed |
 | Output directory creation | Feature | Nonexistent directory is created |

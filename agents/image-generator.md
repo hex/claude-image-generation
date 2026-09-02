@@ -166,6 +166,8 @@ Gemini (`gemini.sh`):
 
 OpenAI (`openai.sh`):
 - `--quality high` (default) or `--quality low` for fast drafts
+- `--size 1536x1024` (landscape) or `--size 1024x1536` (portrait); `auto` lets the model pick
+- `--moderation low` — less restrictive content filtering
 - `--output-format jpeg` for faster generation, `--output-format webp` for smaller files
 - `--output-compression 80` — compression level for jpeg/webp
 - `--background transparent` — transparent background (supported on gpt-image-2 and gpt-image-1.5)

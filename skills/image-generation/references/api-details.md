@@ -273,7 +273,7 @@ Batch API (available since 2026-02-10) does NOT count against IPM limits.
 - Generation: `POST https://api.x.ai/v1/images/generations`
 - Editing: `POST https://api.x.ai/v1/images/edits` (dedicated edit endpoint, added 2026-01-28)
 
-The plugin posts generation to `/v1/images/generations` and editing to `/v1/images/edits` (edit mode previously went through the generations endpoint with a single `image_url` — that legacy form still works). The edit endpoint supports multi-image editing (up to 5 images; the plugin's scripts cap at 3).
+The plugin posts generation to `/v1/images/generations` and editing to `/v1/images/edits` (edit mode previously went through the generations endpoint with a single `image_url` — that legacy form still works). The edit endpoint supports multi-image editing (up to 5 images on grok-imagine-image-2.0, which the plugin allows).
 
 ### Authentication
 Header: `Authorization: Bearer YOUR_API_KEY`
@@ -333,7 +333,7 @@ The plugin always sends the `images` array form — even for a single input imag
 ### Optional Parameters
 | Parameter | Values | Notes |
 |-----------|--------|-------|
-| `aspect_ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `auto` | `auto` lets model pick |
+| `aspect_ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` | `auto` lets model pick; `21:9` and `5:2` added 2026-08-28 |
 | `resolution` | `1k`, `2k` | **LOWERCASE required** — opposite of Gemini! Same price at both resolutions. |
 | `n` | 1-10 | Images per request |
 | `response_format` | `url`, `b64_json` | Default: `url` |

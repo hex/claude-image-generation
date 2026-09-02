@@ -1,7 +1,7 @@
 ---
 name: image-generation
 description: Generates and edits images using Google Gemini, OpenAI GPT Image, xAI Grok Image, and OpenRouter APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "generate with openrouter", "gpt image", "gemini image", "grok image", or "openrouter image".
-version: 2026.8.1
+version: 2026.9.0
 ---
 
 # Image Generation with Gemini, OpenAI, xAI, and OpenRouter
@@ -163,7 +163,7 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 ### Editing
 - Describe what to change, not the whole image
 - Be specific about which elements to preserve vs modify
-- `--input-image` is repeatable on all providers, but the modes differ: Gemini accepts up to 14 images in both `--mode generate` (references for a fresh composition) and `--mode edit`; OpenAI (up to 16) and xAI (up to 3) accept input images in `--mode edit` only — their generation endpoints take no images
+- `--input-image` is repeatable on all providers, but the modes differ: Gemini accepts up to 14 images in both `--mode generate` (references for a fresh composition) and `--mode edit`; OpenAI (up to 16) and xAI (up to 5) accept input images in `--mode edit` only — their generation endpoints take no images
 - For Gemini: supports iterative multi-turn refinement; compose the flat 14-image budget as up to 6 object + 5 character-consistency + 3 style-reference images. There is no API field to tag an image's role — the model infers it from the prompt, so state which images are objects, characters, or style references
 - For xAI: prompts are revised by a chat model before generation
 

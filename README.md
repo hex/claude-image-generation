@@ -116,7 +116,7 @@ OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any 
 | `google/gemini-3.1-flash-image` | Fast Gemini image model, generation + editing (default) |
 | `google/gemini-3-pro-image` | Pro-tier Gemini image model, premium quality |
 | `x-ai/grok-imagine-image-2.0` | xAI's flagship image model via OpenRouter |
-| `openai/gpt-5-image` | OpenAI GPT image model via OpenRouter (also `openai/gpt-5-image-mini`) |
+| `openai/gpt-image-2` | OpenAI's flagship image model via OpenRouter (`openai/gpt-5-image` and `openai/gpt-5-image-mini` are the older chat-image models) |
 
 Browse the full list at [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
 
@@ -273,12 +273,12 @@ bash scripts/xai.sh \
   --output ./cat.png \
   --resolution 2k
 
-# Use the pro model
+# Use the May 2026 quality-mode model instead of the 2.0 default
 bash scripts/xai.sh \
   --mode generate \
   --prompt "a cat in a tree" \
   --output ./cat.png \
-  --model grok-imagine-image-2.0
+  --model grok-imagine-image-quality
 ```
 
 **Flags:**
@@ -344,7 +344,7 @@ bash scripts/openrouter.sh \
 |----------|------------|-------|
 | Gemini | 14 | `generate` (references for a fresh composition) and `edit` |
 | OpenAI | 16 | `edit` only (its generation endpoint takes no images) |
-| xAI | 3 | `edit` only |
+| xAI | 5 | `edit` only |
 | OpenRouter | model-dependent | `edit` only (input images attached as chat image parts) |
 
 ```bash
@@ -402,9 +402,9 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | Max resolution | 4K (via `--image-size`) | 1536x1024 | 2K (via `--resolution`) | Model-dependent |
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
 | Transparent BG | No | Yes | No | Model-dependent |
-| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | 3 fixed sizes | 14 options (incl. 20:9, auto) | Prompt-driven |
-| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 3 images | Chat image parts (edit) |
-| Quality tiers | N/A | auto / low / medium / high | N/A | Model-dependent |
+| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | 3 fixed sizes | 16 options (incl. 21:9, 5:2, auto) | Prompt-driven |
+| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts (edit) |
+| Quality tiers | N/A | auto / low / medium / high | low / medium / auto (2.0 only) | Model-dependent |
 | Thinking mode | Yes (`--thinking-level`) | No | No | Model-dependent |
 | Search grounding | Yes (Google Search) | No | No | Model-dependent |
 | Pricing | Token-based | Token-based | Flat per-image | Per OpenRouter model |
@@ -426,6 +426,7 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |
 | Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
+| Skill evals | `skills/image-generation/evals/evals.json` | Trigger prompts for the skill's eval suite |
 | Automated tests | `tests/` | bats test suite for all scripts |
 
 ## Development
@@ -475,7 +476,7 @@ When running inside **tmux** (including Claude Code sessions), provider images s
 
 For parallel generation, use `scripts/run-all.sh` — a single shell that joins the streaming pane, exports `DISPLAY_PANE_DIR`, forks all providers with `&`, waits, and releases the pane.
 
-Providers find that pane through a registry entry under `$TMPDIR` keyed by tmux session and window, so a provider launched on its own joins whatever is already streaming instead of splitting a pane of its own. The entry is a directory, making `mkdir` the atomic create-once lock: the winner opens the pane and publishes it, and callers that lose the claim wait briefly for that publication. Each participant holds a token under `active/`, and whoever drops the last one retires the entry and writes `.done`, so the pane closes once — after the last provider sharing it has finished. Sequential runs each get a fresh pane; concurrency is what makes providers share one. The watcher renders per-provider colored banners (blue/gray/red/indigo) with model + timing, plus a bottom `waiting on` line naming the pending providers, clipped to the pane width. It animates until the first image renders; after that it is written once under each new block and never rewritten, since a repeated redraw erases the accumulated inline images in tmux control mode. Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
+Providers find that pane through a registry entry under `$TMPDIR` keyed by tmux session and window, so a provider launched on its own joins whatever is already streaming instead of splitting a pane of its own. The entry is a directory, making `mkdir` the atomic create-once lock: the winner opens the pane and publishes it, and callers that lose the claim wait briefly for that publication. Each participant holds a token under `active/`, and whoever drops the last one retires the entry and writes `.done`, so the pane closes once — after the last provider sharing it has finished. Sequential runs each get a fresh pane; concurrency is what makes providers share one. The watcher renders per-provider colored banners (blue/gray/red/indigo) with model + timing, plus a bottom `waiting on` line naming the pending providers, clipped to the pane width. It animates until the first image renders; after that it is written once under each new block and never rewritten, since a repeated redraw erases the accumulated inline images in tmux control mode. A resize wipes those images too, so once a new pane width has held for about half a second the watcher clears the pane and replays every image and error block in the order they were drawn. Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
 
 ## Requirements
 

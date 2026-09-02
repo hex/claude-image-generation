@@ -26,7 +26,8 @@ Options:
   --output-compression  Compression 0-100 (for jpeg/webp only)
   --moderation        Moderation: auto, low (default: auto)
   --input-fidelity    Edit mode only: low, high (default: low)
-                      'high' preserves faces/logos/textures — only the first image gets it
+                      'high' preserves faces/logos/textures on the first 5 images (gpt-image-2 and 1.5;
+                      first image only on gpt-image-1 and mini)
   --model             OpenAI model (default: gpt-image-2)
                       Alternatives: gpt-image-1.5, gpt-image-1-mini (3-4x cheaper), gpt-image-1
 

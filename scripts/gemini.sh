@@ -28,7 +28,7 @@ Options:
   --image-only        Return only image, no text description (responseModalities: IMAGE)
   --search-grounding  Enable Google Search grounding (tools: google_search)
   --model             Gemini model (default: gemini-3-pro-image)
-                      For extreme aspect ratios (1:4, 4:1, 1:8, 8:1) or 4K @ 512px,
+                      For extreme aspect ratios (1:4, 4:1, 1:8, 8:1) or 512px output,
                       use gemini-3.1-flash-image instead.
 
 Environment:
