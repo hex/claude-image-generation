@@ -556,6 +556,43 @@ STUB
   rm -rf "$mock"
 }
 
+@test "the retry offer does not tick once an image is on the pane" {
+  local wd mock
+  make_offer_watcher
+  # A completed provider ahead of the error puts an image on the pane before the offer shows.
+  # Every rewrite of the offer line would erase that image, so the line must print once,
+  # with the time budget in place of a countdown.
+  printf 'gemini\tcomplete\t900\tgemini\t%s\nxai\terror\t\tgrok\t\n' "$OVERSIZED_FIXTURE" > "$wd/status"
+  printf '%s\n' 4 xai > "$wd/retry-offer"
+  ( sleep 7; touch "$wd/.done" ) &
+  local output n
+  output=$( (sleep 9) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 20 bash "$wd/watcher.sh" "$wd" 2>&1)
+  [[ "$output" == *"DISPLAYED:"* ]] || { echo "image never drew:"; echo "$output"; return 1; }
+  n=$(printf '%s' "$output" | grep -oF '[r] retry failed (xai)' | wc -l | tr -d ' ')
+  [[ "$n" -eq 1 ]] || { echo "offer line printed $n times, want 1:"; echo "$output"; return 1; }
+  [[ "$output" == *"(up to 4s)"* ]] || { echo "offer line lacks the time budget:"; echo "$output"; return 1; }
+  rm -rf "$mock"
+}
+
+@test "the retry offer counts down while no image is on the pane" {
+  local wd mock
+  make_offer_watcher
+  printf '%s\n' 4 xai > "$wd/retry-offer"
+  ( sleep 7; touch "$wd/.done" ) &
+  local output n distinct
+  output=$( (sleep 9) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 20 bash "$wd/watcher.sh" "$wd" 2>&1)
+  n=$(printf '%s' "$output" | grep -oF '[r] retry failed (xai)' | wc -l | tr -d ' ')
+  [[ "$n" -ge 3 ]] || { echo "offer line printed $n times, want at least 3:"; echo "$output"; return 1; }
+  # A tick can land just past a second boundary and skip one value, so the check is for
+  # distinct remaining values rather than specific ones.
+  distinct=$(printf '%s' "$output" | grep -oE 'close  [0-9]+s' | sort -u | wc -l | tr -d ' ')
+  [[ "$distinct" -ge 2 ]] || { echo "countdown never moved ($distinct distinct values):"; echo "$output"; return 1; }
+  [[ "$output" != *"(up to"* ]] || { echo "time budget shown instead of a countdown:"; echo "$output"; return 1; }
+  rm -rf "$mock"
+}
+
 @test "the watcher exits on Esc at the retry offer, taking its directory with it" {
   local wd mock
   make_offer_watcher

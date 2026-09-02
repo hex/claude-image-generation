@@ -879,23 +879,31 @@ read_key() {
 }
 
 # retry_offer_prompt — shows the producer's offer (retry-offer: seconds it stays open, then one
-# failed provider per line) with a countdown, and answers it. r renames the file to .retry, which
-# run-all reads as "yes"; Esc or end of input closes the pane; running out of time removes the
-# offer, which run-all reads as "no". The failed providers' rendered flags are reset on r so
-# their next complete or error draws a fresh block.
+# failed provider per line) with a countdown or its time budget, and answers it. r renames the
+# file to .retry, which run-all reads as "yes"; Esc or end of input closes the pane; running out
+# of time removes the offer, which run-all reads as "no". The failed providers' rendered flags
+# are reset on r so their next complete or error draws a fresh block.
 retry_offer_prompt() {
     local seconds names="" line remaining deadline __k p
     { read -r seconds; while IFS= read -r line || [[ -n "$line" ]]; do
         names="${names:+$names, }$line"; done; } < "$WATCH/retry-offer" 2>/dev/null || return 0
     [[ "$seconds" =~ ^[0-9]+$ ]] || seconds=45
     deadline=$((SECONDS + seconds))
+    # Once any image is on the pane, the offer line is drawn once with its time budget instead
+    # of ticking. In tmux control mode every rewrite of the line resyncs the pane to tmux's text
+    # grid and erases inline images, which live as overlays outside it; a countdown is only safe
+    # to animate while no image is shown yet.
+    if [[ -n "$any_image_rendered" ]]; then
+        printf '\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  (up to %ds)\033[0m ' "$names" "$seconds"
+    fi
     while [[ -f "$WATCH/retry-offer" && ! -f "$WATCH/.done" ]]; do
         remaining=$((deadline - SECONDS))
         if [[ $remaining -le 0 ]]; then
             rm -f "$WATCH/retry-offer"
             break
         fi
-        printf '\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  %ds\033[0m ' "$names" "$remaining"
+        [[ -z "$any_image_rendered" ]] && \
+            printf '\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  %ds\033[0m ' "$names" "$remaining"
         read_key __k
         case $? in
             0)

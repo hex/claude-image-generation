@@ -144,6 +144,8 @@ otherwise.
 If any provider failed, the pane offers a retry (`[r] retry failed (xai) · [esc/ctrl-d] close 45s`)
 before run-all.sh exits; pressing `r` re-runs just the failed providers in the same call, and
 letting the offer expire or pressing Esc closes the pane and returns the run's existing result.
+The offer counts down until the first image is on the pane; after that it shows the time budget
+once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 
 ## Prompting Tips
 
