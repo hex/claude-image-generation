@@ -492,11 +492,22 @@ STUB
   make_offer_watcher
   printf '%s\n' 1 xai > "$wd/retry-offer"
   ( sleep 3; touch "$wd/.done" ) &
+  # run-all reads a missing retry-offer as "no": confirm the watcher actually removes it on
+  # timeout, not just that the close prompt eventually shows for some other reason. Polls
+  # while the watch dir is still there so a removal after the watcher has already exited
+  # doesn't count.
+  ( for i in $(seq 1 60); do
+      [[ -d "$wd" ]] || break
+      [[ -f "$wd/retry-offer" ]] || { echo yes > "$mock/offer_removed"; break; }
+      sleep 0.1
+    done ) &
   local output
   output=$( (sleep 6) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
            timeout 20 bash "$wd/watcher.sh" "$wd" 2>&1)
   [[ "$output" == *"[r] retry failed (xai)"* ]] || { echo "offer prompt missing:"; echo "$output"; return 1; }
   [[ "$output" == *"[f]inder [p]review"* ]] || { echo "close prompt never shown after expiry:"; echo "$output"; return 1; }
+  wait
+  [[ -f "$mock/offer_removed" ]] || { echo "retry-offer was not removed on expiry"; return 1; }
   rm -rf "$mock"
 }
 
