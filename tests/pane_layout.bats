@@ -171,6 +171,78 @@ STUB
   rm -rf "$mock"
 }
 
+@test "the waiting line stops ticking at the first image and is written once after it" {
+  local mock="${BATS_TMPDIR}/watcher_transition_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+  local wd
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+
+  # An error block first puts nothing on the pane a rewrite could erase, so the line keeps
+  # ticking under it. The first image, half a second in, is the moment the line has to go
+  # static: written once under that block and never again.
+  mkdir -p "$wd/errors"
+  printf '%s' "xAI API returned HTTP 503" > "$wd/errors/xai.txt"
+  printf 'xai\terror\t\tgrok\t\nopenai\tquerying\t\t\t\n' > "$wd/status"
+  ( sleep 0.5; printf 'gemini\tcomplete\t900\tgemini\t%s\n' "$OVERSIZED_FIXTURE" >> "$wd/status"
+    sleep 1; touch "$wd/.done" ) &
+  local output before after
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"DISPLAYED:"* ]] || { echo "image never rendered:"; echo "$output"; return 1; }
+  before=$(printf '%s' "${output%%DISPLAYED:*}" | grep -oF 'waiting on' | wc -l | tr -d ' ')
+  after=$(printf '%s' "${output#*DISPLAYED:}" | grep -oF 'waiting on' | wc -l | tr -d ' ')
+  [[ "$before" -gt 1 ]] || { echo "line ticked $before times before the image, want several:"; echo "$output"; return 1; }
+  [[ "$after" -eq 1 ]] || { echo "line written $after times after the image, want 1:"; echo "$output"; return 1; }
+  rm -rf "$mock"
+}
+
+@test "two blocks landing in one tick share a single waiting line" {
+  local mock="${BATS_TMPDIR}/watcher_batch_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+  local wd
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+
+  # An image and an error are both waiting in the status file when the watcher starts, so
+  # one tick draws two blocks. The pending provider is named once, under the second.
+  mkdir -p "$wd/errors"
+  printf '%s' "xAI API returned HTTP 503" > "$wd/errors/xai.txt"
+  {
+    printf 'gemini\tcomplete\t900\tgemini\t%s\n' "$OVERSIZED_FIXTURE"
+    printf 'xai\terror\t\tgrok\t\n'
+    printf 'openai\tquerying\t\t\t\n'
+  } > "$wd/status"
+  ( sleep 1; touch "$wd/.done" ) &
+  local output n
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"DISPLAYED:"*"xai error"*"waiting on"* ]] || {
+    echo "no waiting line under the second block:"
+    echo "$output"
+    return 1
+  }
+  n=$(printf '%s' "$output" | grep -oF 'waiting on' | wc -l | tr -d ' ')
+  [[ "$n" -eq 1 ]] || { echo "waiting line written $n times for one batch, want 1:"; echo "$output"; return 1; }
+  rm -rf "$mock"
+}
+
 @test "normalize_for_display shrinks an oversized image to the display box" {
   command -v sips >/dev/null || skip "sips is a macOS built-in; not available here"
   source "$DISPLAY_SH"
