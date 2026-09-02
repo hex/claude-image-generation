@@ -308,6 +308,66 @@ STUB
   rm -rf "$mock"
 }
 
+@test "banner and error lines turn auto-wrap off around their text" {
+  local mock="${BATS_TMPDIR}/watcher_autowrap_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+
+  local wd
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+
+  # A banner or error line wider than the pane would wrap onto a second row, shifting
+  # everything below and losing the images already drawn.
+  mkdir -p "$wd/errors"
+  printf '%s' "xAI API returned HTTP 429: rate limited" > "$wd/errors/xai.txt"
+  {
+    printf 'gemini\tcomplete\t\tgemini\t%s\n' "$OVERSIZED_FIXTURE"
+    printf 'xai\terror\t\tgrok-imagine-image-pro\t\n'
+  } > "$wd/status"
+  touch "$wd/.done"
+
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+
+  local esc=$'\033'
+  [[ "$output" == *"${esc}[?7l${esc}[1;38;2;"* ]] || {
+    echo "banner text was never wrapped in an auto-wrap-off guard:"
+    echo "$output"
+    return 1
+  }
+  [[ "$output" == *"${esc}[?7l"*"✗ xai error"* ]] || {
+    echo "error heading was never wrapped in an auto-wrap-off guard:"
+    echo "$output"
+    return 1
+  }
+
+  local opens closes
+  opens=$(grep -oF "${esc}[?7l" <<<"$output" | wc -l | tr -d ' ')
+  closes=$(grep -oF "${esc}[?7h" <<<"$output" | wc -l | tr -d ' ')
+  [[ "$opens" == "$closes" ]] || {
+    echo "mismatched auto-wrap guards: $opens opens vs $closes closes:"
+    echo "$output"
+    return 1
+  }
+
+  [[ "$output" == *"DISPLAYED:"* ]] || { echo "image never rendered: $output"; return 1; }
+  [[ "$output" == *"rate limited"* ]] || {
+    echo "error text never reached the pane:"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
 # Builds a watcher dir with the standard stubs and a scripted `stty` whose `size` output is
 # taken from $mock/widths, one line per call, repeating the last line once exhausted.
 # Sets $wd and $mock for the caller.

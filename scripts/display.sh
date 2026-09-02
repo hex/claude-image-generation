@@ -774,7 +774,10 @@ draw_complete() {
     build_banner_line banner_line "$p"
     # One blank line above each banner separates providers; one below sets the banner
     # off from its image so the two don't crowd.
-    printf '\n%s\n\n' "$banner_line"
+    # A banner line wider than the pane would wrap onto a second row, shifting everything
+    # below and losing the images already drawn; with auto-wrap off the terminal truncates
+    # at the edge instead.
+    printf '\n\033[?7l%s\033[?7h\n\n' "$banner_line"
     map_get ppath provider_path "$p"
     if [[ -n "$ppath" && -f "$ppath" ]]; then
         "$WATCH/render.sh" "$ppath"
@@ -786,10 +789,13 @@ draw_complete() {
 # draw_error <provider> — the red block plus whatever the provider left in errors/.
 draw_error() {
     local p="$1" err_line
-    printf '\n\033[1;38;2;185;28;28m✗ %s error\033[0m\n' "$p"
+    # An error line wider than the pane would wrap onto a second row, shifting everything
+    # below and losing the images already drawn; with auto-wrap off the terminal truncates
+    # at the edge instead, and the full error text is still in logs/<provider>.err.
+    printf '\n\033[?7l\033[1;38;2;185;28;28m✗ %s error\033[0m\033[?7h\n' "$p"
     if [[ -f "$WATCH/errors/${p}.txt" ]]; then
         while IFS= read -r err_line || [[ -n "$err_line" ]]; do
-            printf '   \033[2;38;2;252;165;165m%s\033[0m\n' "$err_line"
+            printf '   \033[?7l\033[2;38;2;252;165;165m%s\033[0m\033[?7h\n' "$err_line"
         done < "$WATCH/errors/${p}.txt"
     fi
     echo
