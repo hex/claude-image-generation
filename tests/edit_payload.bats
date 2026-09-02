@@ -23,31 +23,40 @@ teardown() {
   rm -f "$OUT" 2>/dev/null || true
 }
 
-# Installs a curl that captures the request body into $MOCK_DIR/request.txt for inspection,
-# then prints a canned body followed by the HTTP status on the last line, matching the
-# `-w "\n%{http_code}"` the scripts rely on. curl_with_retry rewrites a streamed `--data-binary
-# @-` body to `@<tempfile>` so a retry can resend it, so the body arrives either way: as stdin
-# (the un-retried shape) or as a file curl was pointed at (the retried shape). The openai
-# scripts pass neither (-d or -F instead), so the fallback drains stdin as before. The canned
-# image data is base64 for "fake", so a fully working pipeline writes exactly "fake" to the
-# output.
-stub_curl() {
-  printf '%s\n200\n' "$1" > "$MOCK_DIR/response.txt"
-  cat > "$MOCK_DIR/curl" <<STUB
+# Writes the request-capturing prelude shared by every curl stub in this file, overwriting
+# $MOCK_DIR/curl with a shebang and the argv walk. curl_with_retry rewrites a streamed
+# `--data-binary @-` body to `@<tempfile>` before every real curl invocation, so a stub never
+# actually sees `@-` from a provider script -- what it sees is `@<path>` from curl_with_retry,
+# or (openai's -d/-F calls, which pass no --data-binary at all) nothing, in which case it falls
+# back to draining stdin. Callers append their own response-serving lines after this and chmod
+# the result themselves.
+__stub_curl_prelude() {
+  cat > "$MOCK_DIR/curl" <<'STUB'
 #!/bin/bash
-d="\$(dirname "\$0")"
+d="$(dirname "$0")"
 body_arg=""
 prev=""
-for a in "\$@"; do
-  [ "\$prev" = "--data-binary" ] && body_arg="\$a"
-  prev="\$a"
+for a in "$@"; do
+  [ "$prev" = "--data-binary" ] && body_arg="$a"
+  prev="$a"
 done
-case "\$body_arg" in
-  @-) cat > "\${d}/request.txt" 2>/dev/null ;;
-  @*) cp "\${body_arg#@}" "\${d}/request.txt" 2>/dev/null ;;
-  *)  cat > "\${d}/request.txt" 2>/dev/null ;;
+case "$body_arg" in
+  @-) cat > "${d}/request.txt" 2>/dev/null ;;
+  @*) cp "${body_arg#@}" "${d}/request.txt" 2>/dev/null ;;
+  *)  cat > "${d}/request.txt" 2>/dev/null ;;
 esac
-cat "\${d}/response.txt"
+STUB
+}
+
+# Installs a curl that captures the request body (see __stub_curl_prelude) then prints a canned
+# body followed by the HTTP status on the last line, matching the `-w "\n%{http_code}"` the
+# scripts rely on. The canned image data is base64 for "fake", so a fully working pipeline
+# writes exactly "fake" to the output.
+stub_curl() {
+  printf '%s\n200\n' "$1" > "$MOCK_DIR/response.txt"
+  __stub_curl_prelude
+  cat >> "$MOCK_DIR/curl" <<'STUB'
+cat "${d}/response.txt"
 STUB
   chmod +x "$MOCK_DIR/curl"
   export PATH="$MOCK_DIR:$PATH"
@@ -200,26 +209,14 @@ STUB
 }
 
 # stub_curl_once_503 <body> — first call answers 503 with an error body, later calls the
-# canned body with 200. Records the request bodies like stub_curl.
+# canned body with 200. Captures the request body the same way stub_curl does.
 stub_curl_once_503() {
   printf '%s\n200\n' "$1" > "$MOCK_DIR/response.txt"
-  cat > "$MOCK_DIR/curl" <<STUB
-#!/bin/bash
-d="\$(dirname "\$0")"
-body_arg=""
-prev=""
-for a in "\$@"; do
-  [ "\$prev" = "--data-binary" ] && body_arg="\$a"
-  prev="\$a"
-done
-case "\$body_arg" in
-  @-) cat > "\${d}/request.txt" 2>/dev/null ;;
-  @*) cp "\${body_arg#@}" "\${d}/request.txt" 2>/dev/null ;;
-  *)  cat > "\${d}/request.txt" 2>/dev/null ;;
-esac
-n=\$(cat "\$d/calls" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$d/calls"
-if [ "\$n" -eq 1 ]; then printf '{"error":{"message":"overloaded"}}\n503\n'; exit 0; fi
-cat "\$d/response.txt"
+  __stub_curl_prelude
+  cat >> "$MOCK_DIR/curl" <<'STUB'
+n=$(cat "${d}/calls" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "${d}/calls"
+if [ "$n" -eq 1 ]; then printf '{"error":{"message":"overloaded"}}\n503\n'; exit 0; fi
+cat "${d}/response.txt"
 STUB
   chmod +x "$MOCK_DIR/curl"
   export PATH="$MOCK_DIR:$PATH"
