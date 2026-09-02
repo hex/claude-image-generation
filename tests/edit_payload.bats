@@ -182,6 +182,18 @@ STUB
   }
 }
 
+@test "xai: the reported format follows the bytes the API returned" {
+  # grok-imagine-image-2.0 answers with JPEG data even though the file keeps the caller's
+  # name, so the format line has to come from the saved bytes, not a constant.
+  stub_curl '{"data":[{"b64_json":"/9j/4EpGSUZmYWtl"}]}'
+
+  XAI_API_KEY="$DUMMY_XAI_KEY" run bash "${PLUGIN_ROOT}/scripts/xai.sh" \
+    --mode generate --prompt "a cat" --output "$OUT"
+
+  assert_status 0
+  assert_output_contains "Format: jpeg"
+}
+
 @test "openrouter: edit mode builds a payload for a multi-megabyte image" {
   [[ -f "$BIG_IMAGE" ]] || skip "test-input.png not present"
   stub_curl '{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}'

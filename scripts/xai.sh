@@ -182,8 +182,11 @@ fi
 
 REVISED_PROMPT=$(echo "$BODY" | jq -r '.data[0].revised_prompt // empty')
 
+# The API picks the encoding (grok-imagine-image-2.0 answers with JPEG), and the file keeps
+# the caller's name, so the format is read from the saved bytes.
+SAVED_FORMAT=$(file --mime-type -b "$OUTPUT" 2>/dev/null || echo "unknown")
 echo "Image saved to: ${OUTPUT}" >&2
-echo "Format: png" >&2
+echo "Format: ${SAVED_FORMAT#image/}" >&2
 if [[ -n "$REVISED_PROMPT" ]]; then
   echo "Revised prompt: ${REVISED_PROMPT}" >&2
 fi
