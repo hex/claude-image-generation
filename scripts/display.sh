@@ -659,6 +659,18 @@ spinner_frame=0
 any_image_rendered=""
 SPINNERS=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 
+# Width tracking for the resize redraw. A resize in tmux control mode resyncs the pane to the
+# text grid and the inline images vanish, and images are sized as a fraction of the width, so
+# the pane is replayed from state once a new width has held still.
+previous_cols=0
+stable_ticks=0
+rendered_cols=0
+# How many consecutive equal readings mean the resize has finished. tmux moves panes in whole
+# cells, so a drag can report the same width on two 120ms polls; four ticks is about half a
+# second, which a drag never holds and a finished resize always does.
+WIDTH_SETTLE_TICKS=4
+PANE_TTY="${DISPLAY_PANE_TTY:-/dev/tty}"
+
 # map_set <map> <provider> <value> — store one attribute for a provider.
 map_set() {
     local __key="${2//[^A-Za-z0-9_]/_}"
@@ -756,6 +768,48 @@ draw_error() {
     echo
 }
 
+# pane_cols — prints the pane's current column count, or returns 1 when it cannot be read.
+pane_cols() {
+    local size
+    size=$(stty size < "$PANE_TTY" 2>/dev/null) || return 1
+    size="${size##* }"
+    [[ "$size" =~ ^[0-9]+$ && "$size" -gt 0 ]] || return 1
+    printf '%s' "$size"
+}
+
+# redraw_all — clear screen and scrollback, then replay every provider block from state.
+redraw_all() {
+    local p __state
+    printf '\033[2J\033[3J\033[H'
+    for p in $seen_providers; do
+        map_get __state provider_state "$p"
+        case "$__state" in
+            complete) draw_complete "$p" ;;
+            error)    draw_error "$p" ;;
+        esac
+    done
+}
+
+# reflow_to <cols> — redraw at cols once it has held WIDTH_SETTLE_TICKS readings and differs
+# from the width the pane was last drawn at. The first reading only records the width.
+# Returns 0 only when something was redrawn.
+reflow_to() {
+    local cols="$1"
+    if [[ $cols -eq $previous_cols ]]; then
+        stable_ticks=$((stable_ticks + 1))
+    else
+        stable_ticks=1
+    fi
+    previous_cols=$cols
+    if [[ $rendered_cols -eq 0 ]]; then
+        rendered_cols=$cols
+        return 1
+    fi
+    [[ $cols -ne $rendered_cols && $stable_ticks -ge $WIDTH_SETTLE_TICKS ]] || return 1
+    rendered_cols=$cols
+    redraw_all
+}
+
 build_banner_line() {
     local out_var="$1" name="$2"
     local state ms model
@@ -842,6 +896,10 @@ while true; do
             any_image_rendered=1
             echo
         done
+    fi
+
+    if __cols=$(pane_cols); then
+        reflow_to "$__cols" || true
     fi
 
     spinner_frame=$((spinner_frame + 1))

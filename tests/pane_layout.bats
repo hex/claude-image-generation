@@ -307,3 +307,78 @@ STUB
   }
   rm -rf "$mock"
 }
+
+# Builds a watcher dir with the standard stubs and a scripted `stty` whose `size` output is
+# taken from $mock/widths, one line per call, repeating the last line once exhausted.
+# Sets $wd and $mock for the caller.
+make_resize_watcher() {
+  mock="${BATS_TMPDIR}/watcher_resize_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  cat > "$mock/stty" <<'STUB'
+#!/bin/bash
+d="$(dirname "$0")"
+n=$(cat "$d/stty.calls" 2>/dev/null || echo 0)
+echo $((n + 1)) > "$d/stty.calls"
+total=$(wc -l < "$d/widths" | tr -d ' ')
+[ "$n" -ge "$total" ] && n=$((total - 1))
+sed -n "$((n + 1))p" "$d/widths"
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux" "$mock/stty"
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+}
+
+@test "the watcher redraws every rendered image once a new width has held for four ticks" {
+  local wd mock
+  make_resize_watcher
+  # Width 200 for six reads (the pane opens and renders at it), then 120 for good. The
+  # watcher must redraw exactly once: the image count goes from one to two, not more.
+  printf '50 200\n50 200\n50 200\n50 200\n50 200\n50 200\n50 120\n' > "$mock/widths"
+  printf 'xai\tcomplete\t4210\tmascot-xai\t%s\n' "$OVERSIZED_FIXTURE" > "$wd/status"
+
+  # .done is written after the watcher has had time to see the new width settle.
+  ( sleep 3; touch "$wd/.done" ) &
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 15 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  local n
+  n=$(printf '%s' "$output" | grep -c 'DISPLAYED:')
+  [[ "$n" -eq 2 ]] || {
+    echo "expected the image drawn twice (once, then once after the resize), got $n:"
+    echo "$output"
+    return 1
+  }
+  # The redraw starts from a cleared screen and scrollback.
+  [[ "$output" == *$'\033[2J\033[3J\033[H'* ]] || { echo "redraw did not clear the pane"; return 1; }
+  rm -rf "$mock"
+}
+
+@test "a width that changes on every tick never triggers a redraw" {
+  local wd mock
+  make_resize_watcher
+  printf '50 200\n50 120\n' > "$mock/widths"
+  # Alternate 200/120 forever: the stub repeats its last line, so write the alternation out.
+  local i
+  for i in $(seq 1 40); do printf '50 200\n50 120\n'; done > "$mock/widths"
+  printf 'xai\tcomplete\t4210\tmascot-xai\t%s\n' "$OVERSIZED_FIXTURE" > "$wd/status"
+  ( sleep 3; touch "$wd/.done" ) &
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 15 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  local n
+  n=$(printf '%s' "$output" | grep -c 'DISPLAYED:')
+  [[ "$n" -eq 1 ]] || {
+    echo "a drag in progress must not redraw; image drawn $n times:"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}
