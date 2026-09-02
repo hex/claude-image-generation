@@ -44,7 +44,7 @@ claude --plugin-dir /path/to/claude-image-generation
 
 ### API Keys
 
-Set one or both as environment variables:
+Set any of these as environment variables:
 
 | Variable | Provider | Get a key |
 |----------|----------|-----------|
