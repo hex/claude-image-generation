@@ -344,11 +344,13 @@ STUB
   printf '50 200\n50 200\n50 200\n50 200\n50 200\n50 200\n50 120\n' > "$mock/widths"
   printf 'xai\tcomplete\t4210\tmascot-xai\t%s\n' "$OVERSIZED_FIXTURE" > "$wd/status"
 
-  # .done is written after the watcher has had time to see the new width settle.
-  ( sleep 3; touch "$wd/.done" ) &
+  # .done is written after the watcher has had time to see the new width settle. Seven ticks
+  # (a fork for stty plus a status parse each) can run slower than 3s on a loaded machine, so
+  # the margin here covers that rather than the couple hundred ms this normally takes.
+  ( sleep 6; touch "$wd/.done" ) &
   local output
   output=$(HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
-           timeout 15 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+           timeout 20 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
   local n
   n=$(printf '%s' "$output" | grep -c 'DISPLAYED:')
   [[ "$n" -eq 2 ]] || {
