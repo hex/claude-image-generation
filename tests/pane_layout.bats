@@ -368,8 +368,23 @@ STUB
   rm -rf "$mock"
 }
 
-# Builds a watcher dir with the standard stubs and a scripted `stty` whose `size` output is
-# taken from $mock/widths, one line per call, repeating the last line once exhausted.
+# Writes and chmods a scripted `stty` under $1 whose `size` output is taken from
+# $1/widths, one line per call, repeating the last line once exhausted.
+make_stty_stub() {
+  local mock="$1"
+  cat > "$mock/stty" <<'STUB'
+#!/bin/bash
+d="$(dirname "$0")"
+n=$(cat "$d/stty.calls" 2>/dev/null || echo 0)
+echo $((n + 1)) > "$d/stty.calls"
+total=$(wc -l < "$d/widths" | tr -d ' ')
+[ "$n" -ge "$total" ] && n=$((total - 1))
+sed -n "$((n + 1))p" "$d/widths"
+STUB
+  chmod +x "$mock/stty"
+}
+
+# Builds a watcher dir with the standard stubs and a scripted `stty` (see make_stty_stub).
 # Sets $wd and $mock for the caller.
 make_resize_watcher() {
   mock="${BATS_TMPDIR}/watcher_resize_$$"
@@ -380,16 +395,8 @@ make_resize_watcher() {
 [ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
 exit 0
 STUB
-  cat > "$mock/stty" <<'STUB'
-#!/bin/bash
-d="$(dirname "$0")"
-n=$(cat "$d/stty.calls" 2>/dev/null || echo 0)
-echo $((n + 1)) > "$d/stty.calls"
-total=$(wc -l < "$d/widths" | tr -d ' ')
-[ "$n" -ge "$total" ] && n=$((total - 1))
-sed -n "$((n + 1))p" "$d/widths"
-STUB
-  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux" "$mock/stty"
+  make_stty_stub "$mock"
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
   wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
        LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
        bash -c "source '$DISPLAY_SH'; display_pane_open")
@@ -575,16 +582,8 @@ make_offer_watcher() {
 [ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
 exit 0
 STUB
-  cat > "$mock/stty" <<'STUB'
-#!/bin/bash
-d="$(dirname "$0")"
-n=$(cat "$d/stty.calls" 2>/dev/null || echo 0)
-echo $((n + 1)) > "$d/stty.calls"
-total=$(wc -l < "$d/widths" | tr -d ' ')
-[ "$n" -ge "$total" ] && n=$((total - 1))
-sed -n "$((n + 1))p" "$d/widths"
-STUB
-  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux" "$mock/stty"
+  make_stty_stub "$mock"
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
   wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
        LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
        bash -c "source '$DISPLAY_SH'; display_pane_open")
