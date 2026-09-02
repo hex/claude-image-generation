@@ -475,6 +475,49 @@ STUB
   rm -rf "$mock"
 }
 
+@test "the watcher resets rendered for every provider named in a multi-provider retry offer" {
+  local wd mock
+  mock="${BATS_TMPDIR}/watcher_offer_multi_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+  mkdir -p "$wd/errors"
+  printf '%s' "xAI API returned HTTP 503" > "$wd/errors/xai.txt"
+  printf '%s' "OpenAI API returned HTTP 503" > "$wd/errors/openai.txt"
+  printf 'xai\terror\t\tgrok\t\nopenai\terror\t\tgpt-image-1\t\n' > "$wd/status"
+  printf '%s\n' 5 xai openai > "$wd/retry-offer"
+
+  # Both retried providers complete and must draw again: neither one's earlier error block
+  # counts as rendered any more, not just the first name in the offer.
+  ( sleep 2
+    printf 'xai\tquerying\t\tgrok\t\n' >> "$wd/status"
+    printf 'openai\tquerying\t\tgpt-image-1\t\n' >> "$wd/status"
+    printf 'xai\tcomplete\t900\tgrok\t%s\n' "$OVERSIZED_FIXTURE" >> "$wd/status"
+    printf 'openai\tcomplete\t900\tgpt-image-1\t%s\n' "$OVERSIZED_FIXTURE" >> "$wd/status"
+    sleep 1; touch "$wd/.done" ) &
+  local output
+  output=$( (printf 'r'; sleep 5) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 20 bash "$wd/watcher.sh" "$wd" 2>&1)
+  [[ "$output" == *"[r] retry failed (xai, openai)"* ]] || { echo "offer prompt missing both providers:"; echo "$output"; return 1; }
+  local n
+  n=$(printf '%s' "$output" | grep -c 'DISPLAYED:')
+  [[ "$n" -eq 2 ]] || {
+    echo "expected both retried providers to draw, got $n:"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
 @test "the watcher answers r by renaming the offer before anything else" {
   local wd mock
   make_offer_watcher
