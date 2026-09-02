@@ -88,8 +88,8 @@ spawn_provider() {
   shift 2
   if [[ -n "${DISPLAY_PANE_DIR:-}" ]]; then
     bash "$script" "$@" \
-      >"$DISPLAY_PANE_DIR/logs/${name}.out" \
-      2>"$DISPLAY_PANE_DIR/logs/${name}.err" &
+      >>"$DISPLAY_PANE_DIR/logs/${name}.out" \
+      2>>"$DISPLAY_PANE_DIR/logs/${name}.err" &
   else
     bash "$script" "$@" &
   fi

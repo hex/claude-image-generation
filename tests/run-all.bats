@@ -118,6 +118,12 @@ fake_pane() {
   [[ "$(grep -c '^--prompt$' "$WORK_DIR/gemini.argv")" -eq 1 ]] || { echo "gemini must not be re-run"; return 1; }
   # The retried call got the same arguments as the first.
   [[ "$(grep -c '^--prompt$' "$WORK_DIR/xai.argv")" -eq 2 ]] || { echo "retry lacked --prompt"; cat "$WORK_DIR/xai.argv"; return 1; }
+  # The first round's error survives the retry: the log is appended to, not truncated. The
+  # stub prints nothing on its second (successful) call, so a second "xai: boom" would mean
+  # the file was truncated and happened to be rewritten identically, not appended to.
+  [[ "$(grep -c "xai: boom" "$PANE/logs/xai.err")" -eq 1 ]] || {
+    echo "expected the first round's error preserved exactly once in the log:"
+    cat "$PANE/logs/xai.err"; return 1; }
 }
 
 @test "run-all treats a pane that closed during the offer as no retry" {
