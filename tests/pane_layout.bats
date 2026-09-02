@@ -382,3 +382,29 @@ STUB
   }
   rm -rf "$mock"
 }
+
+@test "the dismiss prompt reflows on a resize and still closes on end of input" {
+  local wd mock
+  make_resize_watcher
+  # Same width for the single live tick and the first prompt second; then 120 for good. The
+  # prompt polls once a second, so the four-tick settle lands around the fourth second, well
+  # before the pipe closes at six.
+  printf '50 200\n50 200\n50 120\n' > "$mock/widths"
+  printf 'xai\tcomplete\t4210\tmascot-xai\t%s\n' "$OVERSIZED_FIXTURE" > "$wd/status"
+  touch "$wd/.done"
+
+  # A pipe that stays open for six seconds with no data: read -t 1 times out at the prompt
+  # (a real tick, so the width is checked), then end of input arrives and the prompt must exit.
+  local output
+  output=$( (sleep 6) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 20 bash "$wd/watcher.sh" "$wd" 2>&1)
+  local n
+  n=$(printf '%s' "$output" | grep -c 'DISPLAYED:')
+  [[ "$n" -eq 2 ]] || {
+    echo "expected a redraw at the prompt, image drawn $n times:"
+    echo "$output"
+    return 1
+  }
+  [[ ! -d "$wd" ]] || { echo "watcher did not exit on end of input"; return 1; }
+  rm -rf "$mock"
+}

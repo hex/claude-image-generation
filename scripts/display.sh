@@ -912,9 +912,38 @@ done
 clear_loading
 
 _esc=$(printf '\033')
-printf '[f]inder [p]review [esc/ctrl-d] close '
+
+# prompt_line — the close prompt, drawn on a cleared bottom line so a redraw can reprint it.
+prompt_line() {
+    printf '\r\033[K[f]inder [p]review [esc/ctrl-d] close '
+}
+
+# read_key <var> — one keypress with a one-second timeout. Returns 0 with a key, 1 on a
+# timeout (a real tick: safe to check the width), 2 when input is gone. bash 3.2 reports a
+# timeout and end of input both as status 1, so they are told apart by cost: a timeout burns
+# the full second and $SECONDS moves on, end of input returns at once.
+read_key() {
+    local __before=$SECONDS
+    if read -t 1 -n1 -s -r "$1"; then
+        return 0
+    fi
+    [[ $SECONDS -gt $__before ]] && return 1
+    return 2
+}
+
+prompt_line
 while true; do
-    read -n1 -s -r _key || break
+    read_key _key
+    case $? in
+        0) ;;
+        1)
+            if __cols=$(pane_cols) && reflow_to "$__cols"; then
+                prompt_line
+            fi
+            continue
+            ;;
+        *) break ;;
+    esac
     if [ "$_key" = "$_esc" ]; then break; fi
     if [ "$_key" = "f" ] || [ "$_key" = "F" ]; then
         { awk -F'\t' '$5!=""{print $5}' "$WATCH/status" 2>/dev/null;
