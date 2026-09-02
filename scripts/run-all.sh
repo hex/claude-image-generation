@@ -157,7 +157,16 @@ offer_retry() {
       rm -f "$dir/.retry"
       return 0
     fi
-    [[ -f "$dir/retry-offer" ]] || return 1
+    if [[ ! -f "$dir/retry-offer" ]]; then
+      # mv is atomic: the watcher can rename retry-offer to .retry between the two checks
+      # above and this one, so retry-offer missing does not yet mean the offer was
+      # withdrawn. Re-check .retry once before concluding no answer came.
+      if [[ -f "$dir/.retry" ]]; then
+        rm -f "$dir/.retry"
+        return 0
+      fi
+      return 1
+    fi
     sleep 0.2
   done
   rm -f "$dir/retry-offer" 2>/dev/null
