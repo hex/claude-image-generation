@@ -75,7 +75,7 @@ fi
 # Join this tmux window's streaming pane, opening it when nothing is streaming yet. run-all
 # holds a token for the whole batch and releases it once every provider has been waited on, so
 # the pane outlives any single provider and closes on the same last-one-out rule everyone uses.
-if pane_dir=$(display_pane_attach_or_open 2>/dev/null); then
+if [[ -z "${DISPLAY_PANE_DIR:-}" ]] && pane_dir=$(display_pane_attach_or_open 2>/dev/null); then
   export DISPLAY_PANE_DIR="$pane_dir"
   mkdir -p "$DISPLAY_PANE_DIR/logs"
   __pane_acquire run-all
@@ -95,11 +95,10 @@ spawn_provider() {
   fi
 }
 
-declare -a pids=()
-
-IFS=',' read -ra provider_list <<< "$PROVIDERS"
-for p in "${provider_list[@]}"; do
-  p="${p// /}"
+# spawn_named <provider> — forks one provider with this batch's arguments. Used for the first
+# round and again for a retry, so both rounds are built the same way.
+spawn_named() {
+  local p="$1" extra args img
   # macOS ships bash 3.2, which has neither ${p^^} nor associative arrays, so the
   # per-provider extras are selected by name rather than an uppercased indirect lookup.
   case "$p" in
@@ -107,7 +106,7 @@ for p in "${provider_list[@]}"; do
     openai)     extra="$OPENAI_EXTRA" ;;
     xai)        extra="$XAI_EXTRA" ;;
     openrouter) extra="$OPENROUTER_EXTRA" ;;
-    *) echo "Warning: unknown provider '$p' (skipping)" >&2; continue ;;
+    *) echo "Warning: unknown provider '$p' (skipping)" >&2; return 1 ;;
   esac
   args=(--mode "$MODE" --prompt "$PROMPT" --output "${OUTPUT_BASE}-${p}.png")
   if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -gt 0 ]]; then
@@ -119,15 +118,69 @@ for p in "${provider_list[@]}"; do
   # otherwise reports as an unbound variable under `set -u`.
   [[ -n "$extra" ]] && read -ra extra_arr <<<"$extra" && args+=(${extra_arr[@]+"${extra_arr[@]}"})
   spawn_provider "$p" "${SCRIPT_DIR}/${p}.sh" "${args[@]}"
-  pids+=($!)
+}
+
+# run_round <provider>... — forks the named providers, waits for all, and leaves the names of
+# those that exited non-zero in FAILED. Returns 1 when any failed.
+run_round() {
+  local -a names=() pids=()
+  local p pid i
+  FAILED=()
+  for p in "$@"; do
+    spawn_named "$p" || continue
+    names+=("$p")
+    pids+=($!)
+  done
+  i=0
+  for pid in ${pids[@]+"${pids[@]}"}; do
+    wait "$pid" || FAILED+=("${names[$i]}")
+    i=$((i + 1))
+  done
+  [[ ${#FAILED[@]} -eq 0 ]]
+}
+
+# offer_retry — when a provider failed and the pane is live, writes retry-offer (seconds, then
+# one failed name per line) and waits for the watcher to answer. Returns 0 only when the pane
+# asked for a retry (.retry appeared). The offer expiring, the file vanishing, or the whole
+# directory going away (the pane was closed) all mean no retry and must not be errors.
+offer_retry() {
+  local wait="${DISPLAY_PANE_RETRY_WAIT:-45}" dir="${DISPLAY_PANE_DIR:-}"
+  [[ ${#FAILED[@]} -gt 0 ]] || return 1
+  [[ "$wait" =~ ^[0-9]+$ && $wait -gt 0 ]] || return 1
+  [[ -n "$dir" && -d "$dir" ]] || return 1
+  { printf '%s\n' "$wait"; printf '%s\n' "${FAILED[@]}"; } > "$dir/.retry-offer.tmp" 2>/dev/null || return 1
+  mv -f "$dir/.retry-offer.tmp" "$dir/retry-offer" 2>/dev/null || return 1
+  local deadline=$((SECONDS + wait))
+  while [[ $SECONDS -lt $deadline ]]; do
+    [[ -d "$dir" ]] || return 1
+    if [[ -f "$dir/.retry" ]]; then
+      rm -f "$dir/.retry"
+      return 0
+    fi
+    [[ -f "$dir/retry-offer" ]] || return 1
+    sleep 0.2
+  done
+  rm -f "$dir/retry-offer" 2>/dev/null
+  return 1
+}
+
+IFS=',' read -ra provider_list <<< "$PROVIDERS"
+for i in "${!provider_list[@]}"; do
+  provider_list[$i]="${provider_list[$i]// /}"
 done
 
+declare -a FAILED=()
 overall_status=0
-for pid in ${pids[@]+"${pids[@]}"}; do
-  wait "$pid" || overall_status=1
-done
+run_round "${provider_list[@]}" || overall_status=1
 
-if [[ -n "${DISPLAY_PANE_DIR:-}" ]]; then
+# One offer per run: a provider that fails its retry simply shows its error.
+if [[ $overall_status -eq 1 ]] && offer_retry; then
+  overall_status=0
+  run_round "${FAILED[@]}" || overall_status=1
+fi
+
+# A pane closed at the retry offer has already removed its directory; there is nothing left to release.
+if [[ -n "${DISPLAY_PANE_DIR:-}" && -d "$DISPLAY_PANE_DIR" ]]; then
   __pane_release run-all
 fi
 
