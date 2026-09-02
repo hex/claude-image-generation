@@ -119,3 +119,15 @@ calls() { cat "$MOCK_DIR/calls"; }
   assert_output_contains "first=1"
   assert_output_contains "second=0"
 }
+
+@test "retry: is_retryable_status classifies HTTP codes" {
+  local code
+  for code in 429 500 502 503 504; do
+    run bash -c "source '$RETRY_SH'; is_retryable_status \"$code\""
+    assert_status 0
+  done
+  for code in 200 400 401 404 000 ""; do
+    run bash -c "source '$RETRY_SH'; is_retryable_status \"$code\""
+    assert_status 1
+  done
+}
