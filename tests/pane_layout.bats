@@ -273,3 +273,37 @@ STUB
   }
   rm -rf "$mock" "$wd"
 }
+
+@test "the watcher shows an error message written without a trailing newline" {
+  local mock="${BATS_TMPDIR}/watcher_err_nl_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+
+  local wd
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+
+  # display_pane_error writes with printf '%s': no trailing newline. A plain `read` loop
+  # drops the last unterminated line, which for a one-line message is the whole message.
+  mkdir -p "$wd/errors"
+  printf '%s' "xAI API returned HTTP 429: rate limited" > "$wd/errors/xai.txt"
+  printf 'xai\terror\t\tgrok-imagine-image-pro\t\n' > "$wd/status"
+  touch "$wd/.done"
+
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"rate limited"* ]] || {
+    echo "error text never reached the pane:"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}
