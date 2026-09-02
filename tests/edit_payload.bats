@@ -223,7 +223,8 @@ STUB
 }
 
 @test "every provider retries a 503 and reports the attempt to the pane" {
-  [[ -f "$BIG_IMAGE" ]] || skip "test-input.png not present"
+  local input_file="$MOCK_DIR/big-input.png"
+  head -c 3000000 /dev/urandom > "$input_file"
   local p body
   for p in gemini openai xai openrouter; do
     rm -f "$MOCK_DIR/calls" "$DISPLAY_PANE_DIR/status"
@@ -236,7 +237,7 @@ STUB
     IMAGE_RETRY_DELAY=0 GEMINI_API_KEY="$DUMMY_GEMINI_KEY" OPENAI_API_KEY="$DUMMY_OPENAI_KEY" \
       XAI_API_KEY="$DUMMY_XAI_KEY" OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY" \
       run bash "${PLUGIN_ROOT}/scripts/${p}.sh" --mode edit --prompt "add a rainbow" \
-      --input-image "$BIG_IMAGE" --output "$OUT"
+      --input-image "$input_file" --output "$OUT"
     assert_edit_succeeds
     [[ "$(cat "$MOCK_DIR/calls")" -eq 2 ]] || { echo "$p: expected 2 curl calls, got $(cat "$MOCK_DIR/calls")"; return 1; }
     grep -q "$(printf '^%s\tretrying\t1/3\t' "$p")" "$DISPLAY_PANE_DIR/status" || {

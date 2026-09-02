@@ -5,7 +5,6 @@
 load test_helper
 
 RETRY_SH="${PLUGIN_ROOT}/scripts/retry.sh"
-BIG_IMAGE="${PLUGIN_ROOT}/test-input.png"
 
 setup() {
   MOCK_DIR="${BATS_TMPDIR}/retry_mocks_$$"
@@ -95,10 +94,11 @@ calls() { cat "$MOCK_DIR/calls"; }
 }
 
 @test "retry: a multi-megabyte stdin body is resent identically on every attempt" {
-  [[ -f "$BIG_IMAGE" ]] || skip "test-input.png not present"
   stub_curl_sequence 503 200
+  local input_file="$MOCK_DIR/big-input.png"
+  head -c 3000000 /dev/urandom > "$input_file"
   local body_file="$MOCK_DIR/request.json"
-  jq -n --rawfile d <(base64 < "$BIG_IMAGE" | tr -d '\n') '{image:$d}' > "$body_file"
+  jq -n --rawfile d <(base64 < "$input_file" | tr -d '\n') '{image:$d}' > "$body_file"
   run bash -c "source '$RETRY_SH'; curl_with_retry -s -w '\n%{http_code}' https://x --data-binary @- < '$body_file'"
   assert_status 0
   [[ "$(calls)" -eq 2 ]] || { echo "expected 2 calls, got $(calls)"; return 1; }
