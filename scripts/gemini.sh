@@ -23,13 +23,13 @@ Options:
                       Standard: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
                       Extreme (3.1 Flash only): 1:4, 4:1, 1:8, 8:1
   --image-size        Output resolution: 512, 1K, 2K, 4K (UPPERCASE required)
-                      512 requires gemini-3.1-flash-image-preview (Pro supports 1K/2K/4K)
+                      512 requires gemini-3.1-flash-image (Pro supports 1K/2K/4K)
   --thinking-level    Thinking level: minimal, High (default: minimal)
   --image-only        Return only image, no text description (responseModalities: IMAGE)
   --search-grounding  Enable Google Search grounding (tools: google_search)
-  --model             Gemini model (default: gemini-3-pro-image-preview)
+  --model             Gemini model (default: gemini-3-pro-image)
                       For extreme aspect ratios (1:4, 4:1, 1:8, 8:1) or 4K @ 512px,
-                      use gemini-3.1-flash-image-preview instead.
+                      use gemini-3.1-flash-image instead.
 
 Environment:
   GEMINI_API_KEY          Google AI API key (required)
@@ -47,7 +47,7 @@ IMAGE_SIZE=""
 THINKING_LEVEL=""
 IMAGE_ONLY=""
 SEARCH_GROUNDING=""
-MODEL="${GEMINI_IMAGE_MODEL:-gemini-3-pro-image-preview}"
+MODEL="${GEMINI_IMAGE_MODEL:-gemini-3-pro-image}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

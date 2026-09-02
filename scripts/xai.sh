@@ -18,14 +18,17 @@ Options:
   --mode          generate or edit (required)
   --prompt        Text prompt describing the image (required)
   --output        Output file path (required)
-  --input-image   Input image path for edit mode (required for edit, repeatable, max 3)
+  --input-image   Input image path for edit mode (required for edit, repeatable, max 5)
   --aspect-ratio  Aspect ratio (default: none — model picks)
                   1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2,
-                  19.5:9, 9:19.5, 20:9, 9:20, auto
+                  19.5:9, 9:19.5, 20:9, 9:20, 21:9, 5:2, auto
                   Note: single-image edits ignore aspect_ratio (output matches input)
   --resolution    Output resolution: 1k or 2k (LOWERCASE required)
-  --model         xAI model (default: grok-imagine-image-pro)
-                  Alternatives: grok-imagine-image (standard, 10x higher RPM)
+  --quality       low, medium or auto (grok-imagine-image-2.0 only; omitted means auto,
+                  which the API serves as low for generation and medium for edits)
+  --model         xAI model (default: grok-imagine-image-2.0)
+                  Alternatives: grok-imagine-image-quality (May 2026 quality mode, also
+                  answers grok-imagine-image-pro), grok-imagine-image (standard)
 
 Environment:
   XAI_API_KEY         xAI API key (or GROK_API_KEY)
@@ -40,7 +43,8 @@ OUTPUT=""
 INPUT_IMAGES=()
 ASPECT_RATIO=""
 RESOLUTION=""
-MODEL="${XAI_IMAGE_MODEL:-grok-imagine-image-pro}"
+QUALITY=""
+MODEL="${XAI_IMAGE_MODEL:-grok-imagine-image-2.0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
     --resolution) RESOLUTION="$2"; shift 2 ;;
+    --quality) QUALITY="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
@@ -59,6 +64,13 @@ if [[ -n "$RESOLUTION" ]]; then
   case "$RESOLUTION" in
     1k|2k) ;;
     *) echo "Error: --resolution must be '1k' or '2k' (lowercase required)" >&2; exit 1 ;;
+  esac
+fi
+
+if [[ -n "$QUALITY" ]]; then
+  case "$QUALITY" in
+    low|medium|auto) ;;
+    *) echo "Error: --quality must be 'low', 'medium' or 'auto'" >&2; exit 1 ;;
   esac
 fi
 
@@ -72,8 +84,8 @@ if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   usage
 fi
 
-if [[ ${#INPUT_IMAGES[@]} -gt 3 ]]; then
-  echo "Error: at most 3 input images supported for xai" >&2
+if [[ ${#INPUT_IMAGES[@]} -gt 5 ]]; then
+  echo "Error: at most 5 input images supported for xai" >&2
   exit 1
 fi
 
@@ -109,6 +121,10 @@ fi
 
 if [[ -n "$RESOLUTION" ]]; then
   REQUEST_BODY=$(echo "$REQUEST_BODY" | jq --arg res "$RESOLUTION" '. + {"resolution": $res}')
+fi
+
+if [[ -n "$QUALITY" ]]; then
+  REQUEST_BODY=$(echo "$REQUEST_BODY" | jq --arg q "$QUALITY" '. + {"quality": $q}')
 fi
 
 API_URL="https://api.x.ai/v1/images/generations"

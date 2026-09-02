@@ -66,10 +66,10 @@ setup() {
   assert_output_contains "Usage:"
 }
 
-@test "xai: default model is grok-imagine-image-pro" {
+@test "xai: default model is grok-imagine-image-2.0" {
   export XAI_API_KEY="$DUMMY_XAI_KEY"
   run "$XAI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-xai-out.png"
-  assert_output_contains "model: grok-imagine-image-pro"
+  assert_output_contains "model: grok-imagine-image-2.0,"
 }
 
 @test "xai: XAI_IMAGE_MODEL env var overrides default model" {
@@ -86,13 +86,31 @@ setup() {
   assert_output_contains "model: custom-xai-model"
 }
 
-@test "xai: more than 3 input images is rejected" {
+@test "xai: more than 5 input images is rejected" {
   export XAI_API_KEY="$DUMMY_XAI_KEY"
   run "$XAI_SH" --mode edit --prompt "combine these" --output "/tmp/out.png" \
-    --input-image "/tmp/x.png" --input-image "/tmp/x.png" \
-    --input-image "/tmp/x.png" --input-image "/tmp/x.png"
+    --input-image "/tmp/x.png" --input-image "/tmp/x.png" --input-image "/tmp/x.png" \
+    --input-image "/tmp/x.png" --input-image "/tmp/x.png" --input-image "/tmp/x.png"
   assert_status 1
-  assert_output_contains "at most 3"
+  assert_output_contains "at most 5"
+}
+
+@test "xai: five input images pass the cap" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  local img="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
+  # grok-imagine-image-2.0 edits take up to five reference images. The dummy key fails at
+  # the API call, which is past the cap check.
+  run "$XAI_SH" --mode edit --prompt "combine these" --output "/tmp/out.png" \
+    --input-image "$img" --input-image "$img" --input-image "$img" \
+    --input-image "$img" --input-image "$img"
+  [[ "$output" != *"at most"* ]] || { echo "five images were rejected by the cap:"; echo "$output"; return 1; }
+}
+
+@test "xai: --quality rejects a value the API does not know" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  run "$XAI_SH" --mode generate --prompt "a cat" --output "/tmp/out.png" --quality high
+  assert_status 1
+  assert_output_contains "--quality must be 'low', 'medium' or 'auto'"
 }
 
 @test "xai: usage text includes all documented options" {
@@ -103,6 +121,7 @@ setup() {
   assert_output_contains "--output"
   assert_output_contains "--input-image"
   assert_output_contains "--aspect-ratio"
+  assert_output_contains "--quality"
   assert_output_contains "--model"
   assert_output_contains "XAI_API_KEY"
 }

@@ -164,6 +164,24 @@ STUB
   }
 }
 
+@test "xai: --quality lands in the request body" {
+  stub_curl '{"data":[{"b64_json":"ZmFrZQ=="}]}'
+
+  # grok-imagine-image-2.0 bills at the quality served; omitting the field means auto,
+  # which is low for generation, so a caller who wants medium has to be able to say so.
+  XAI_API_KEY="$DUMMY_XAI_KEY" run bash "${PLUGIN_ROOT}/scripts/xai.sh" \
+    --mode generate --prompt "a cat" --quality medium --output "$OUT"
+
+  assert_edit_succeeds
+  local quality
+  quality=$(jq -r '.quality' "$MOCK_DIR/request.txt")
+  [[ "$quality" == "medium" ]] || {
+    echo "Expected quality 'medium' in the request body, got: $quality"
+    cat "$MOCK_DIR/request.txt"
+    return 1
+  }
+}
+
 @test "openrouter: edit mode builds a payload for a multi-megabyte image" {
   [[ -f "$BIG_IMAGE" ]] || skip "test-input.png not present"
   stub_curl '{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}'

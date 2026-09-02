@@ -61,9 +61,9 @@ Override the default model per provider via environment variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image-preview` | Gemini model used for generation and editing |
+| `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image` | Gemini model used for generation and editing |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2` | OpenAI model used for generation and editing |
-| `XAI_IMAGE_MODEL` | `grok-imagine-image-pro` | xAI model used for generation and editing |
+| `XAI_IMAGE_MODEL` | `grok-imagine-image-2.0` | xAI model used for generation and editing |
 | `OPENROUTER_IMAGE_MODEL` | `google/gemini-3.1-flash-image` | OpenRouter model slug used for generation and editing |
 
 Command-line `--model` flag on the scripts takes precedence over environment variables.
@@ -83,9 +83,12 @@ These apply to inline display (iTerm2, Sixel) and tmux pane display.
 
 | Model | Characteristics |
 |-------|-----------------|
-| `gemini-3-pro-image-preview` | Pro tier, premium quality, 10 aspect ratios, up to 14 reference images (default, "Nano Banana Pro") |
-| `gemini-3.1-flash-image-preview` | 14 aspect ratios (incl. extreme 1:4, 8:1), 512-4K resolution, thinking, Google Search grounding ("Nano Banana 2") |
+| `gemini-3-pro-image` | Pro tier, premium quality, 10 aspect ratios, up to 14 reference images (default, "Nano Banana Pro", GA since 2026-05-28) |
+| `gemini-3.1-flash-image` | 14 aspect ratios (incl. extreme 1:4, 8:1), 512-4K resolution, thinking, Google Search grounding ("Nano Banana 2", GA since 2026-05-28) |
+| `gemini-3.1-flash-lite-image` | Cheapest tier ("Nano Banana 2 Lite") |
 | `gemini-2.5-flash-image` | Previous generation, 1K only (scheduled shutdown 2026-10-02) |
+
+The `-preview` IDs of the two GA models still answer but passed Google's earliest shutdown date (2026-06-25) and are gone from its model tables; pass the GA IDs.
 
 ### Available OpenAI Models
 
@@ -100,7 +103,8 @@ These apply to inline display (iTerm2, Sixel) and tmux pane display.
 
 | Model | Characteristics |
 |-------|-----------------|
-| `grok-imagine-image-pro` | Premium tier, higher quality, 30 RPM (default) |
+| `grok-imagine-image-2.0` | Flagship since 2026-08-07: `--quality` low/medium/auto, up to 5 reference images, `21:9` and `5:2` ratios (default) |
+| `grok-imagine-image-quality` | Quality mode from 2026-05-06; `grok-imagine-image-pro` has redirected here since its 2026-05-15 retirement |
 | `grok-imagine-image` | Standard tier, 1K/2K resolution, 300 RPM, same endpoint and parameters |
 
 ### Available OpenRouter Models
@@ -110,7 +114,8 @@ OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any 
 | Model | Characteristics |
 |-------|-----------------|
 | `google/gemini-3.1-flash-image` | Fast Gemini image model, generation + editing (default) |
-| `google/gemini-3-pro-image-preview` | Pro-tier Gemini image model, premium quality |
+| `google/gemini-3-pro-image` | Pro-tier Gemini image model, premium quality |
+| `x-ai/grok-imagine-image-2.0` | xAI's flagship image model via OpenRouter |
 | `openai/gpt-5-image` | OpenAI GPT image model via OpenRouter (also `openai/gpt-5-image-mini`) |
 
 Browse the full list at [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
@@ -177,7 +182,7 @@ bash scripts/gemini.sh \
   --mode generate \
   --prompt "quick sketch" \
   --output ./sketch.png \
-  --model gemini-3-pro-image-preview
+  --model gemini-3-pro-image
 ```
 
 **Flags:**
@@ -188,12 +193,12 @@ bash scripts/gemini.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path, repeatable (max 14) | -- | Edit mode; optional in generate mode as references |
-| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9` on Pro (default); add `1:4`, `4:1`, `1:8`, `8:1` on `gemini-3.1-flash-image-preview` | `1:1` | No |
-| `--image-size` | `512`, `1K`, `2K`, `4K` (UPPERCASE); `512` requires `gemini-3.1-flash-image-preview` | (API default `1K`) | No |
+| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9` on Pro (default); add `1:4`, `4:1`, `1:8`, `8:1` on `gemini-3.1-flash-image` | `1:1` | No |
+| `--image-size` | `512`, `1K`, `2K`, `4K` (UPPERCASE); `512` requires `gemini-3.1-flash-image` | (API default `1K`) | No |
 | `--thinking-level` | `minimal`, `High` | unset (API default `minimal`) | No |
 | `--image-only` | (flag, no value) | off | No |
 | `--search-grounding` | (flag, no value) | off | No |
-| `--model` | Gemini model name | `gemini-3-pro-image-preview` | No |
+| `--model` | Gemini model name | `gemini-3-pro-image` | No |
 
 #### openai.sh
 
@@ -273,7 +278,7 @@ bash scripts/xai.sh \
   --mode generate \
   --prompt "a cat in a tree" \
   --output ./cat.png \
-  --model grok-imagine-image-pro
+  --model grok-imagine-image-2.0
 ```
 
 **Flags:**
@@ -283,12 +288,13 @@ bash scripts/xai.sh \
 | `--mode` | `generate`, `edit` | -- | Yes |
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
-| `--input-image` | file path, repeatable (max 3) | -- | Edit mode only |
-| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `auto` | (none) | No |
+| `--input-image` | file path, repeatable (max 5) | -- | Edit mode only |
+| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` | (none) | No |
 | `--resolution` | `1k`, `2k` (LOWERCASE) | (API default) | No |
-| `--model` | xAI model name | `grok-imagine-image-pro` | No |
+| `--quality` | `low`, `medium`, `auto` (`grok-imagine-image-2.0` only) | unset (API `auto`: low for generation, medium for edits; billed as served) | No |
+| `--model` | xAI model name | `grok-imagine-image-2.0` | No |
 
-**Note**: For single-image edits, xAI ignores `--aspect-ratio` and uses the input image's ratio. Multi-image edits allow aspect ratio override (the script accepts up to 3 images; the API itself supports up to 5).
+**Note**: For single-image edits, xAI ignores `--aspect-ratio` and uses the input image's ratio. Multi-image edits allow aspect ratio override (up to 5 images).
 
 #### openrouter.sh
 
@@ -392,7 +398,7 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 
 | Feature | Gemini | OpenAI | xAI | OpenRouter |
 |---------|--------|--------|-----|------------|
-| Default model | gemini-3-pro-image-preview | gpt-image-2 | grok-imagine-image-pro | google/gemini-3.1-flash-image |
+| Default model | gemini-3-pro-image | gpt-image-2 | grok-imagine-image-2.0 | google/gemini-3.1-flash-image |
 | Max resolution | 4K (via `--image-size`) | 1536x1024 | 2K (via `--resolution`) | Model-dependent |
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
 | Transparent BG | No | Yes | No | Model-dependent |

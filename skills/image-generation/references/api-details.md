@@ -49,7 +49,7 @@ The Gemini API uses a unified `generateContent` endpoint. Images are passed as `
 |-----------|--------|-------|
 | `responseModalities` | `["TEXT", "IMAGE"]` or `["IMAGE"]` | Default is both; `["IMAGE"]` suppresses text response |
 | `imageConfig.aspectRatio` | 14 ratios (see below) | Default `1:1` |
-| `imageConfig.imageSize` | `512`, `1K`, `2K`, `4K` | **UPPERCASE required** — lowercase is a hard API rejection. Default `1K`. `512` exclusive to `gemini-3.1-flash-image-preview`; Pro supports `1K`/`2K`/`4K`. |
+| `imageConfig.imageSize` | `512`, `1K`, `2K`, `4K` | **UPPERCASE required** — lowercase is a hard API rejection. Default `1K`. `512` exclusive to `gemini-3.1-flash-image`; Pro supports `1K`/`2K`/`4K`. |
 | `thinkingConfig.thinkingLevel` | `minimal` (default) or `High` | Capital H. Higher levels improve complex compositions, increase latency. |
 | `thinkingConfig.includeThoughts` | boolean | Controls whether thought images/text appear in response |
 
@@ -96,11 +96,13 @@ Pricing: 5,000 grounding prompts/month free across Gemini 3 models, then $14 per
 ```
 
 ### Models
-- `gemini-3-pro-image-preview` (default): "Nano Banana Pro". Premium tier, professional asset production, 10 aspect ratios, up to 14 reference images.
-- `gemini-3.1-flash-image-preview`: "Nano Banana 2". 4K output, 14 aspect ratios (incl. extreme 1:4, 4:1, 1:8, 8:1), thinking, search grounding. Also supports `512` resolution.
-- `gemini-2.5-flash-image`: Previous generation, 1K only. **Scheduled shutdown 2026-10-02** — replacement is `gemini-3.1-flash-image-preview`.
+- `gemini-3-pro-image` (default): "Nano Banana Pro", GA 2026-05-28. Premium tier, professional asset production, 10 aspect ratios, up to 14 reference images.
+- `gemini-3.1-flash-image`: "Nano Banana 2", GA 2026-05-28. 4K output, 14 aspect ratios (incl. extreme 1:4, 4:1, 1:8, 8:1), thinking, search grounding. Also supports `512` resolution.
+- `gemini-3.1-flash-lite-image`: "Nano Banana 2 Lite". Cheapest tier, about $0.034 per 1K image.
+- `gemini-3-pro-image-preview` and `gemini-3.1-flash-image-preview`: the pre-GA IDs. Still answer as of 2026-09-02 but passed their earliest shutdown date (2026-06-25) and are gone from the model tables.
+- `gemini-2.5-flash-image`: Previous generation, 1K only. **Scheduled shutdown 2026-10-02** — replacement is `gemini-3.1-flash-image`.
 
-### Pricing (gemini-3.1-flash-image-preview, Standard tier)
+### Pricing (gemini-3.1-flash-image, Standard tier)
 | Resolution | Cost per image | Output tokens |
 |------------|----------------|---------------|
 | 512        | $0.045         | 747           |
@@ -219,10 +221,10 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 
 ### Models
 - `gpt-image-2` (default): Current flagship. Snapshot: `gpt-image-2-2026-04-21`
-- `gpt-image-1.5`: Previous flagship. Snapshot: `gpt-image-1.5-2025-12-16`
-- `gpt-image-1-mini`: 3-4x cheaper, same API surface, only first image gets high fidelity on edits
-- `gpt-image-1`: Older generation
-- `chatgpt-image-latest`: GA alias — current target unverified post-2.0 launch; see OpenAI docs for live mapping
+- `gpt-image-1.5`: Previous flagship. Snapshot: `gpt-image-1.5-2025-12-16`. **Shutdown 2026-12-01**
+- `gpt-image-1-mini`: 3-4x cheaper, same API surface, only first image gets high fidelity on edits. **Shutdown 2026-12-01**
+- `gpt-image-1`: Older generation. **Shutdown 2026-10-23**
+- `chatgpt-image-latest`: GA alias. **Shutdown 2026-12-01**; replacement for all four is `gpt-image-2`
 
 ### Pricing
 
@@ -279,7 +281,7 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 ### Generation Request
 ```json
 {
-  "model": "grok-imagine-image-pro",
+  "model": "grok-imagine-image-2.0",
   "prompt": "description",
   "n": 1,
   "response_format": "b64_json",
@@ -293,7 +295,7 @@ Substitute `grok-imagine-image` for the standard-tier model — parameter schema
 ### Edit Request — legacy `image_url` via generations endpoint
 ```json
 {
-  "model": "grok-imagine-image-pro",
+  "model": "grok-imagine-image-2.0",
   "prompt": "edit instruction",
   "n": 1,
   "response_format": "b64_json",
@@ -305,7 +307,7 @@ Substitute `grok-imagine-image` for the standard-tier model — parameter schema
 Single image:
 ```json
 {
-  "model": "grok-imagine-image-pro",
+  "model": "grok-imagine-image-2.0",
   "prompt": "edit instruction",
   "image": {"type": "image_url", "url": "https://..."}
 }
@@ -314,7 +316,7 @@ Single image:
 Multi-image (up to 5):
 ```json
 {
-  "model": "grok-imagine-image-pro",
+  "model": "grok-imagine-image-2.0",
   "prompt": "...",
   "images": [
     {"type": "image_url", "url": "..."},
@@ -351,22 +353,24 @@ The plugin always sends the `images` array form — even for a single input imag
 When `response_format` is `"url"`, the response contains `url` instead of `b64_json`. URLs are temporary.
 
 ### Models
-- `grok-imagine-image-pro` (default): Premium tier. Higher quality output, 30 RPM. Same endpoint and parameters as standard.
-- `grok-imagine-image`: Standard tier. Versioned as `grok-imagine-image-2026-03-02`. 1K/2K resolution, 14 aspect ratios, 300 RPM.
+- `grok-imagine-image-2.0` (default): Flagship since 2026-08-07. Adds `quality` (`low`, `medium`, `auto`; omitted means `auto`, served as `low` for generation and `medium` for edits, billed as served), up to 5 reference images on edits (was 3), and the `21:9` and `5:2` ratios (2026-08-28 release notes).
+- `grok-imagine-image-quality`: Quality mode launched 2026-05-06. Aliases `grok-imagine-image-quality-20260403`, `grok-imagine-image-quality-latest` and `grok-imagine-image-pro` (the pro slug was retired 2026-05-15 and redirects here).
+- `grok-imagine-image`: Standard tier. Versioned as `grok-imagine-image-2026-03-02`. 1K/2K resolution, 300 RPM.
 - `grok-2-image-1212` (aka `grok-2-image`): **Deprecated 2026-02-28**. Migration target is `grok-imagine-image`.
 
 ### Pricing
-| Model | Output (1K or 2K) | Image input | RPM |
-|-------|-------------------|-------------|-----|
-| `grok-imagine-image` | $0.02 | $0.002 | 300 |
-| `grok-imagine-image-pro` | $0.07 | $0.002 | 30 |
+| Model | Output per image | Image input |
+|-------|------------------|-------------|
+| `grok-imagine-image-2.0` | $0.04 (1K, low) to $0.08 by resolution and quality | $0.01 |
+| `grok-imagine-image-quality` | $0.05 (1K) | $0.01 |
+| `grok-imagine-image` | $0.02 | $0.002 |
 
-Multi-image edit example: 5 images on pro = `5 × $0.002 + $0.07 = $0.08`.
+Multi-image edit example: 5 images on 2.0 at 1K low = `5 × $0.01 + $0.04 = $0.09`.
 
 ### Rate Limits
 - **Free tier removed 2026-03-19** — API requires billing
 - `grok-imagine-image`: 300 RPM
-- `grok-imagine-image-pro`: 30 RPM
+- `grok-imagine-image-2.0` and `grok-imagine-image-quality`: see the model pages on docs.x.ai for the current limits
 - Increased limits available by request form
 
 ### Batch API (2026-03-15)
@@ -436,7 +440,7 @@ The generated image is returned as a base64 data URL inside the assistant messag
 The plugin reads `.choices[0].message.images[0].image_url.url`, strips the `data:<mime>;base64,` prefix, and decodes the remainder. If no image is present it falls back to reporting `.choices[0].message.content` (a refusal or text-only reply). Errors come back as `.error.message`.
 
 ### Models
-`--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-3.1-flash-image`. Others include `google/gemini-3-pro-image-preview` and `openai/gpt-5-image`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
+`--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-3.1-flash-image`. Others include `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0` and `openai/gpt-image-2`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
 
 ### Constraints
 - Aspect ratio, resolution, and quality are model-dependent and driven by the prompt — there are no dedicated flags for them
