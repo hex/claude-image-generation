@@ -92,7 +92,7 @@ STUB
   rm -rf "$mock"
 }
 
-@test "the spinner goes silent once an image renders so it can't wipe accumulated images" {
+@test "the waiting line is written once per block while an image is up, never per tick" {
   local mock="${BATS_TMPDIR}/watcher_spinner_$$"
   mkdir -p "$mock/.iterm2"
   printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
@@ -110,20 +110,61 @@ STUB
   [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
 
   # One provider has finished (its image is on the pane); another is still generating. In tmux
-  # control mode every spinner redraw resyncs the pane to tmux's text grid and erases inline
-  # images, which live as overlays outside it. So the animated spinner must stay silent for the
-  # rest of the run once any image has rendered -- otherwise it wipes the images it sits beneath.
+  # control mode every rewrite of the spinner line resyncs the pane to tmux's text grid and
+  # erases inline images, which live as overlays outside it. So once an image is up the
+  # "waiting on" line is written once, under the block just drawn, and never ticks again:
+  # .done lands a second later, so a per-tick spinner would show up about eight times.
   {
     printf 'xai\tcomplete\t\tmascot-xai\t%s\n' "$OVERSIZED_FIXTURE"
     printf 'openai\tquerying\t\t\t\n'
   } > "$wd/status"
-  touch "$wd/.done"
+  ( sleep 1; touch "$wd/.done" ) &
 
+  local output n
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"DISPLAYED:"*"waiting on"*"openai"* ]] || {
+    echo "no waiting line under the image:"
+    echo "$output"
+    return 1
+  }
+  n=$(printf '%s' "$output" | grep -oF 'waiting on' | wc -l | tr -d ' ')
+  [[ "$n" -eq 1 ]] || {
+    echo "waiting line written $n times with an image up (each rewrite erases it), want 1:"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
+@test "no waiting line follows an image when nothing is still pending" {
+  local mock="${BATS_TMPDIR}/watcher_nopending_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+  local wd
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+
+  # Both providers have landed: one image, one error. There is nobody to wait on.
+  mkdir -p "$wd/errors"
+  printf '%s' "xAI API returned HTTP 503" > "$wd/errors/xai.txt"
+  {
+    printf 'gemini\tcomplete\t900\tgemini\t%s\n' "$OVERSIZED_FIXTURE"
+    printf 'xai\terror\t\tgrok\t\n'
+  } > "$wd/status"
+  ( sleep 1; touch "$wd/.done" ) &
   local output
   output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
   [[ "$output" == *"DISPLAYED:"* ]] || { echo "image never rendered: $output"; return 1; }
-  [[ "$output" != *"generating"* ]] || {
-    echo "spinner drew while an image was displayed (would erase it in control mode):"
+  [[ "$output" != *"waiting on"* ]] || {
+    echo "waiting line drawn with nothing pending:"
     echo "$output"
     return 1
   }
@@ -508,6 +549,59 @@ STUB
   rm -rf "$mock"
 }
 
+@test "the waiting list is clipped with an ellipsis to fit a narrow pane" {
+  local wd mock
+  make_resize_watcher
+  # A 40-column pane leaves 19 columns for names after the "   ⠋   waiting on   " prefix:
+  # "openai, xai" fits, "gemini" would not, so the list ends there with an ellipsis.
+  printf '50 40\n' > "$mock/widths"
+  printf 'openai\tquerying\t\t\t\nxai\tquerying\t\t\t\ngemini\tquerying\t\t\t\nopenrouter\tquerying\t\t\t\n' > "$wd/status"
+  ( sleep 1; touch "$wd/.done" ) &
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"waiting on"*"openai"*"xai"*"…"* ]] || {
+    echo "waiting list is not clipped with an ellipsis:"
+    echo "$output"
+    return 1
+  }
+  [[ "$output" != *"gemini"* ]] || {
+    echo "a name past the pane width was still written:"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
+@test "the static waiting line comes back after a resize redraw" {
+  local wd mock
+  make_resize_watcher
+  # An image is up and one provider is still pending, so the waiting line was written once
+  # under the image. The resize redraw starts from a cleared screen and replays the blocks;
+  # the waiting line has to be written again under them, once.
+  printf '50 200\n50 200\n50 200\n50 200\n50 200\n50 200\n50 120\n' > "$mock/widths"
+  {
+    printf 'xai\tcomplete\t900\tgrok\t%s\n' "$OVERSIZED_FIXTURE"
+    printf 'openai\tquerying\t\t\t\n'
+  } > "$wd/status"
+  ( sleep 6; touch "$wd/.done" ) &
+  local output n
+  output=$(HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 20 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *$'\033[2J\033[3J\033[H'*"DISPLAYED:"*"waiting on"* ]] || {
+    echo "no waiting line after the redraw:"
+    echo "$output"
+    return 1
+  }
+  n=$(printf '%s' "$output" | grep -oF 'waiting on' | wc -l | tr -d ' ')
+  [[ "$n" -eq 2 ]] || {
+    echo "waiting line written $n times, want 2 (under the image, then after the redraw):"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
 @test "the spinner labels a retrying provider with its attempt count" {
   local mock="${BATS_TMPDIR}/watcher_retrying_$$"
   mkdir -p "$mock/.iterm2"
@@ -558,11 +652,15 @@ STUB
   ( sleep 1; touch "$wd/.done" ) &
   local output
   output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
-  [[ "$output" == *$'\033[?7l'*generating*$'\033[?7h'* ]] || {
+  [[ "$output" == *$'\033[?7l'*"waiting on"*$'\033[?7h'* ]] || {
     echo "spinner line is not bracketed by auto-wrap off and on:"
     echo "$output"
     return 1
   }
+  # With no image on the pane there is nothing a rewrite could erase, so the line animates.
+  local ticks
+  ticks=$(printf '%s' "$output" | grep -oF 'waiting on' | wc -l | tr -d ' ')
+  [[ "$ticks" -gt 1 ]] || { echo "spinner drew $ticks times in a second, want several:"; echo "$output"; return 1; }
   local off on
   off=$(printf '%s' "$output" | grep -oF -e $'\033[?7l' | wc -l | tr -d ' ')
   on=$(printf '%s' "$output" | grep -oF -e $'\033[?7h' | wc -l | tr -d ' ')

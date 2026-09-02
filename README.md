@@ -8,7 +8,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **OpenRouter gateway** — reach any OpenRouter image model (Gemini, GPT Image, and more) through one key via the chat-completions API
 - **Image editing** with text instructions (all providers)
 - **Multi-image input** — repeatable `--input-image` for multi-image edits (all providers) and Gemini reference-based generation
-- **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners, and a pending-provider spinner shown until the first image renders
+- **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners, and a `waiting on` line naming the pending providers (animated until the first image renders, then written once under each block)
 - **Interactive provider selection** via AskUserQuestion at runtime
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
 - **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code). Providers running at the same time share one pane, however they were launched
@@ -384,7 +384,7 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 
 ### Retries
 
-Each provider script retries a transient API error (429 or a 5xx status, or a network failure) up to three times, with a delay that doubles each attempt (1 second, 2 seconds, 4 seconds). `IMAGE_MAX_RETRIES` and `IMAGE_RETRY_DELAY` tune the count and the starting delay. Inside a streaming pane, a retry shows on the spinner line as `(retry 2/3)` until the first image renders; after that the spinner goes silent, so a later retry shows only in the final banner or error text.
+Each provider script retries a transient API error (429 or a 5xx status, or a network failure) up to three times, with a delay that doubles each attempt (1 second, 2 seconds, 4 seconds). `IMAGE_MAX_RETRIES` and `IMAGE_RETRY_DELAY` tune the count and the starting delay. Inside a streaming pane, a retry shows on the `waiting on` line as `(retry 2/3)`; once an image is on the pane that line is only written when the next block lands, so a retry that starts between blocks shows only in the final banner or error text.
 
 When a provider run through `run-all.sh` fails outright, its error shows under a red `✗ provider error` heading, and if any provider failed the pane offers `[r] retry failed (xai) · [esc/ctrl-d] close 45s`. The offer counts down until the first image is on the pane; after that it shows the time budget once, as `[r] retry failed (xai) · [esc/ctrl-d] close (up to 45s)`, because a rewritten line erases the pane's images. Pressing `r` re-runs only the failed providers inside the same run; Esc closes the pane and the run returns with what it has. `DISPLAY_PANE_RETRY_WAIT` sets how long the offer stays open (default 45 seconds; 0 disables it), and a run with a failure can take that much longer plus one more provider round.
 
@@ -418,7 +418,7 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
 | Retry helper | `scripts/retry.sh` | `curl_with_retry` for transient API failures |
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |
-| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider spinner) |
+| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 | Automated tests | `tests/` | bats test suite for all scripts |
 
@@ -469,7 +469,7 @@ When running inside **tmux** (including Claude Code sessions), provider images s
 
 For parallel generation, use `scripts/run-all.sh` — a single shell that joins the streaming pane, exports `DISPLAY_PANE_DIR`, forks all providers with `&`, waits, and releases the pane.
 
-Providers find that pane through a registry entry under `$TMPDIR` keyed by tmux session and window, so a provider launched on its own joins whatever is already streaming instead of splitting a pane of its own. The entry is a directory, making `mkdir` the atomic create-once lock: the winner opens the pane and publishes it, and callers that lose the claim wait briefly for that publication. Each participant holds a token under `active/`, and whoever drops the last one retires the entry and writes `.done`, so the pane closes once — after the last provider sharing it has finished. Sequential runs each get a fresh pane; concurrency is what makes providers share one. The watcher renders per-provider colored banners (blue/gray/red/indigo) with model + timing, plus an animated bottom spinner of pending providers shown until the first image renders (after which it stays silent, since further redraws would erase the accumulated inline images in tmux control mode). Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
+Providers find that pane through a registry entry under `$TMPDIR` keyed by tmux session and window, so a provider launched on its own joins whatever is already streaming instead of splitting a pane of its own. The entry is a directory, making `mkdir` the atomic create-once lock: the winner opens the pane and publishes it, and callers that lose the claim wait briefly for that publication. Each participant holds a token under `active/`, and whoever drops the last one retires the entry and writes `.done`, so the pane closes once — after the last provider sharing it has finished. Sequential runs each get a fresh pane; concurrency is what makes providers share one. The watcher renders per-provider colored banners (blue/gray/red/indigo) with model + timing, plus a bottom `waiting on` line naming the pending providers, clipped to the pane width. It animates until the first image renders; after that it is written once under each new block and never rewritten, since a repeated redraw erases the accumulated inline images in tmux control mode. Provider scripts emit status events (`querying` / `complete` / `error`) via `display_pane_status` when running under `DISPLAY_PANE_DIR`; otherwise they fall back to `display_image` for direct terminal rendering.
 
 ## Requirements
 

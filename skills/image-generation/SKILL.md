@@ -108,10 +108,10 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter.sh" \
 
 Use `scripts/run-all.sh` — a single Bash call that forks all providers in parallel into one
 shared streaming pane. The watcher renders per-provider colored banners (gemini
-blue / openai gray / xai red / openrouter indigo) with model + timing, plus an animated bottom spinner of
-pending providers shown until the first image renders. Once the first image appears the
-spinner goes silent so the inline images accumulate (further redraws would erase them in
-tmux control mode).
+blue / openai gray / xai red / openrouter indigo) with model + timing, plus a bottom `waiting on`
+line naming the pending providers. It animates until the first image renders; after that it is
+written once under each new block and never rewritten, so the inline images accumulate (a
+repeated redraw would erase them in tmux control mode).
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \

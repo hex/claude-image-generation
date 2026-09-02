@@ -725,11 +725,20 @@ provider_palette() {
     esac
 }
 
+# draw_loading — the animated spinner, called every tick while no image is on the pane.
+# Once any image is up it stays silent: in tmux control mode every redraw resyncs the pane
+# to tmux's text grid and erases inline images, which live as overlays outside it. After that
+# the waiting line is written once under each block instead (see draw_waiting_line).
 draw_loading() {
-    # Once any image is on the pane, stop the animated spinner. In tmux control mode every
-    # redraw resyncs the pane to tmux's text grid and erases inline images, which live as
-    # overlays outside it; the spinner is only safe to animate while no image is shown yet.
     [[ -n "$any_image_rendered" ]] && return 0
+    draw_waiting_line
+}
+
+# draw_waiting_line — one write of "<glyph>   waiting on   <names>" for the providers still
+# querying or retrying; nothing when none are. The glyph is whatever frame the spinner is on,
+# so a line written once simply keeps it. The list is clipped to the pane width with an
+# ellipsis, the way claude-council does, so a narrow pane shows the first names whole.
+draw_waiting_line() {
     local pending=() p __state
     for p in $seen_providers; do
         map_get __state provider_state "$p"
@@ -738,28 +747,42 @@ draw_loading() {
     [[ ${#pending[@]} -eq 0 ]] && return 0
     local frame="${SPINNERS[$((spinner_frame % ${#SPINNERS[@]}))]}"
 
-    local list="" first=1 _bg _fg _accent _spinner chunk __label __attempt
-    for p in "${pending[@]}"; do
-        provider_palette _bg _fg _accent _spinner "$p"
-        if [[ $first -eq 1 ]]; then
-            first=0
-        else
-            list+=$'\033[2m, \033[0m'
-        fi
+    # The prefix "   <glyph>   waiting on   " is 20 visible columns; reserve one more so the
+    # line never reaches the right margin. previous_cols is the last width reading, 0 before
+    # the first one (or when the pane tty cannot be read), so fall back to 80 then.
+    local cols=$previous_cols
+    [[ $cols -gt 0 ]] || cols=80
+    local budget=$((cols - 21))
+    [[ $budget -ge 8 ]] || budget=8
+
+    local list="" visible=0 i=0 n=${#pending[@]} sep reserve
+    local _bg _fg _accent _spinner chunk __label __attempt
+    while [[ $i -lt $n ]]; do
+        p="${pending[$i]}"
         map_get __state provider_state "$p"
-        local __label="$p"
+        __label="$p"
         if [[ "$__state" == "retrying" ]]; then
             map_get __attempt provider_timing "$p"
             __label="$p (retry ${__attempt})"
         fi
+        sep=0; [[ $i -gt 0 ]] && sep=2                # width of ", "
+        reserve=0; [[ $i -lt $((n - 1)) ]] && reserve=2   # room for ", …" after this one
+        if [[ $((visible + sep + ${#__label} + reserve)) -gt $budget ]]; then
+            if [[ $i -gt 0 ]]; then list+=$'\033[2m, …\033[0m'; else list+=$'\033[2m…\033[0m'; fi
+            break
+        fi
+        [[ $i -gt 0 ]] && list+=$'\033[2m, \033[0m'
+        provider_palette _bg _fg _accent _spinner "$p"
         printf -v chunk '\033[1;38;2;%sm%s\033[0m' "$_spinner" "$__label"
         list+="$chunk"
+        visible=$((visible + sep + ${#__label}))
+        i=$((i + 1))
     done
 
     provider_palette _bg _fg _accent _spinner "${pending[0]}"
     # A line wider than the pane would wrap and every tick would start a new row; the growing
     # stack scrolls the images off. With auto-wrap off the terminal truncates at the edge instead.
-    printf '\033[?7l\r\033[K   \033[1;38;2;%sm%s\033[0m   \033[3mgenerating\033[0m   %s\033[?7h' \
+    printf '\033[?7l\r\033[K   \033[1;38;2;%sm%s\033[0m   \033[2mwaiting on\033[0m   %s\033[?7h' \
         "$_spinner" "$frame" "$list"
 }
 
@@ -960,6 +983,7 @@ while true; do
         while IFS= read -r __line || [[ -n "$__line" ]]; do
             status_lines+=("$__line")
         done < "$WATCH/status" 2>/dev/null
+        blocks_drawn=0
         while [[ $status_lines_processed -lt ${#status_lines[@]} ]]; do
             line="${status_lines[$status_lines_processed]}"
             status_lines_processed=$((status_lines_processed + 1))
@@ -978,14 +1002,19 @@ while true; do
                 note_drawn "$provider"
                 clear_loading
                 draw_complete "$provider"
+                blocks_drawn=$((blocks_drawn + 1))
             elif [[ "$state" == "error" ]]; then
                 [[ -n "$already_rendered" ]] && continue
                 map_set rendered "$provider" 1
                 note_drawn "$provider"
                 clear_loading
                 draw_error "$provider"
+                blocks_drawn=$((blocks_drawn + 1))
             fi
         done
+        # With an image up the spinner no longer ticks, so the providers still pending are
+        # named once under the block just drawn; the next block's clear_loading removes it.
+        [[ -n "$any_image_rendered" && $blocks_drawn -gt 0 ]] && draw_waiting_line
     fi
 
     # Manifest entries lack provider attribution — render with a plain header.
@@ -1009,8 +1038,10 @@ while true; do
 
     [[ -f "$WATCH/retry-offer" && ! -f "$WATCH/.done" ]] && retry_offer_prompt
 
-    if __cols=$(pane_cols); then
-        reflow_to "$__cols" || true
+    # A redraw replays the blocks from a cleared screen, so the static waiting line under
+    # them is written again, the way the offer prompt reprints its own line after a reflow.
+    if __cols=$(pane_cols) && reflow_to "$__cols"; then
+        [[ -n "$any_image_rendered" ]] && draw_waiting_line
     fi
 
     spinner_frame=$((spinner_frame + 1))
