@@ -387,16 +387,16 @@ STUB
   local wd mock
   make_resize_watcher
   # Same width for the single live tick and the first prompt second; then 120 for good. The
-  # prompt polls once a second, so the four-tick settle lands around the fourth second, well
-  # before the pipe closes at six.
+  # prompt polls once a second, so the four-tick settle lands around the fifth second, well
+  # before the pipe closes at nine.
   printf '50 200\n50 200\n50 120\n' > "$mock/widths"
   printf 'xai\tcomplete\t4210\tmascot-xai\t%s\n' "$OVERSIZED_FIXTURE" > "$wd/status"
   touch "$wd/.done"
 
-  # A pipe that stays open for six seconds with no data: read -t 1 times out at the prompt
+  # A pipe that stays open for nine seconds with no data: read -t 1 times out at the prompt
   # (a real tick, so the width is checked), then end of input arrives and the prompt must exit.
   local output
-  output=$( (sleep 6) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+  output=$( (sleep 9) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
            timeout 20 bash "$wd/watcher.sh" "$wd" 2>&1)
   local n
   n=$(printf '%s' "$output" | grep -c 'DISPLAYED:')
