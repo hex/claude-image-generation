@@ -436,3 +436,75 @@ STUB
   }
   rm -rf "$mock"
 }
+
+# Watcher dir with an xai error already drawn, and a retry-offer naming xai.
+make_offer_watcher() {
+  mock="${BATS_TMPDIR}/watcher_offer_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+  mkdir -p "$wd/errors"
+  printf '%s' "xAI API returned HTTP 503" > "$wd/errors/xai.txt"
+  printf 'xai\terror\t\tgrok\t\n' > "$wd/status"
+  printf '%s\n' 5 xai > "$wd/retry-offer"
+}
+
+@test "the watcher shows the retry offer and answers r by renaming it to .retry" {
+  local wd mock
+  make_offer_watcher
+  # After the answer, the retried provider completes and must draw again: its earlier error
+  # block does not count as rendered any more.
+  ( sleep 2
+    printf 'xai\tquerying\t\tgrok\t\n' >> "$wd/status"
+    printf 'xai\tcomplete\t900\tgrok\t%s\n' "$OVERSIZED_FIXTURE" >> "$wd/status"
+    sleep 1; touch "$wd/.done" ) &
+  local output
+  output=$( (printf 'r'; sleep 5) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 20 bash "$wd/watcher.sh" "$wd" 2>&1)
+  [[ "$output" == *"[r] retry failed (xai)"* ]] || { echo "offer prompt missing:"; echo "$output"; return 1; }
+  [[ "$output" == *"DISPLAYED:"* ]] || { echo "retried provider's image never drew:"; echo "$output"; return 1; }
+  rm -rf "$mock"
+}
+
+@test "the watcher answers r by renaming the offer before anything else" {
+  local wd mock
+  make_offer_watcher
+  # No .done: the watcher is killed by timeout after the check; the poller records .retry.
+  ( for i in $(seq 1 40); do [[ -f "$wd/.retry" ]] && { echo yes > "$mock/seen"; break; }; sleep 0.1; done ) &
+  (printf 'r'; sleep 3) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+     timeout 4 bash "$wd/watcher.sh" "$wd" >/dev/null 2>&1 || true
+  wait
+  [[ -f "$mock/seen" ]] || { echo "r did not produce .retry"; return 1; }
+  rm -rf "$mock" "$wd"
+}
+
+@test "the watcher lets the offer expire and carries on to the close prompt" {
+  local wd mock
+  make_offer_watcher
+  printf '%s\n' 1 xai > "$wd/retry-offer"
+  ( sleep 3; touch "$wd/.done" ) &
+  local output
+  output=$( (sleep 6) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 20 bash "$wd/watcher.sh" "$wd" 2>&1)
+  [[ "$output" == *"[r] retry failed (xai)"* ]] || { echo "offer prompt missing:"; echo "$output"; return 1; }
+  [[ "$output" == *"[f]inder [p]review"* ]] || { echo "close prompt never shown after expiry:"; echo "$output"; return 1; }
+  rm -rf "$mock"
+}
+
+@test "the watcher exits on Esc at the retry offer, taking its directory with it" {
+  local wd mock
+  make_offer_watcher
+  (printf '\033'; sleep 2) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+     timeout 10 bash "$wd/watcher.sh" "$wd" >/dev/null 2>&1 || true
+  [[ ! -d "$wd" ]] || { echo "watcher directory still exists after Esc"; return 1; }
+  rm -rf "$mock"
+}

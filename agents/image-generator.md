@@ -122,6 +122,9 @@ You are an image generation agent that creates and edits images using Google Gem
    three separate sequential Bash calls gives three panes, one per call — so reach for
    `run-all.sh` whenever more than one provider is wanted.
 
+   When a provider fails, the pane offers a retry for up to 45 seconds, so `run-all.sh`
+   can return later than the slowest provider.
+
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
      --mode generate \

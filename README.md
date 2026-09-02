@@ -386,6 +386,8 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 
 Each provider script retries a transient API error (429 or a 5xx status, or a network failure) up to three times, with a delay that doubles each attempt (1 second, 2 seconds, 4 seconds). `IMAGE_MAX_RETRIES` and `IMAGE_RETRY_DELAY` tune the count and the starting delay. Inside a streaming pane, a retry shows on the spinner line as `(retry 2/3)`.
 
+When a provider run through `run-all.sh` fails outright, its error shows under a red `✗ provider error` heading, and if any provider failed the pane offers `[r] retry failed (xai) · [esc/ctrl-d] close 45s`. Pressing `r` re-runs only the failed providers inside the same run; Esc closes the pane and the run returns with what it has. `DISPLAY_PANE_RETRY_WAIT` sets how long the offer stays open (default 45 seconds; 0 disables it), and a run with a failure can take that much longer plus one more provider round.
+
 ## Provider Comparison
 
 | Feature | Gemini | OpenAI | xAI | OpenRouter |

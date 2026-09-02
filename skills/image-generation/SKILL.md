@@ -141,6 +141,10 @@ while the pane is open. Errors render as a red error banner inline. After all pr
 finish, run-all.sh closes the pane and exits with status 0 if every provider succeeded, 1
 otherwise.
 
+If any provider failed, the pane offers a retry (`[r] retry failed (xai) · [esc/ctrl-d] close 45s`)
+before run-all.sh exits; pressing `r` re-runs just the failed providers in the same call, and
+letting the offer expire or pressing Esc closes the pane and returns the run's existing result.
+
 ## Prompting Tips
 
 ### General
@@ -173,6 +177,7 @@ otherwise.
 |---------|---------|---------|
 | `IMAGE_MAX_RETRIES` | 3 | Retry attempts for a transient API failure before the script gives up |
 | `IMAGE_RETRY_DELAY` | 1 | Starting retry delay in seconds; doubles on each attempt |
+| `DISPLAY_PANE_RETRY_WAIT` | 45 | Seconds the pane's retry offer stays open after a run-all.sh failure; 0 disables the offer |
 
 ## Script Options Reference
 

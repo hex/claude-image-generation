@@ -64,6 +64,8 @@ Generate or edit an image based on the user's request.
    d. Mark the task completed when run-all.sh exits. Its exit status reports whether any
       provider failed; per-provider error details are in `$DISPLAY_PANE_DIR/logs/<provider>.err`
       and shown inline in the streaming pane as a red error banner.
+      When a provider fails, the pane offers a retry for up to 45 seconds, so the call can
+      return later than the slowest provider.
 
 5. After generation completes, confirm the output path(s) to the user.
    If multiple were generated, let the user know all files are available so they can compare.

@@ -858,6 +858,67 @@ build_banner_line() {
         "$fg" "$bg" "$upper" "$model_inline" "$status_inline"
 }
 
+_esc=$(printf '\033')
+
+# prompt_line — the close prompt, drawn on a cleared bottom line so a redraw can reprint it.
+prompt_line() {
+    printf '\r\033[K[f]inder [p]review [esc/ctrl-d] close '
+}
+
+# read_key <var> — one keypress with a one-second timeout. Returns 0 with a key, 1 on a
+# timeout (a real tick: safe to check the width), 2 when input is gone. bash 3.2 reports a
+# timeout and end of input both as status 1, so they are told apart by cost: a timeout burns
+# the full second and $SECONDS moves on, end of input returns at once.
+read_key() {
+    local __before=$SECONDS
+    if read -t 1 -n1 -s -r "$1"; then
+        return 0
+    fi
+    [[ $SECONDS -gt $__before ]] && return 1
+    return 2
+}
+
+# retry_offer_prompt — shows the producer's offer (retry-offer: seconds it stays open, then one
+# failed provider per line) with a countdown, and answers it. r renames the file to .retry, which
+# run-all reads as "yes"; Esc or end of input closes the pane; running out of time removes the
+# offer, which run-all reads as "no". The failed providers' rendered flags are reset on r so
+# their next complete or error draws a fresh block.
+retry_offer_prompt() {
+    local seconds names="" line remaining deadline __k p
+    { read -r seconds; while IFS= read -r line || [[ -n "$line" ]]; do
+        names="${names:+$names, }$line"; done; } < "$WATCH/retry-offer" 2>/dev/null || return 0
+    [[ "$seconds" =~ ^[0-9]+$ ]] || seconds=45
+    deadline=$((SECONDS + seconds))
+    while [[ -f "$WATCH/retry-offer" && ! -f "$WATCH/.done" ]]; do
+        remaining=$((deadline - SECONDS))
+        if [[ $remaining -le 0 ]]; then
+            rm -f "$WATCH/retry-offer"
+            break
+        fi
+        printf '\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  %ds\033[0m ' "$names" "$remaining"
+        read_key __k
+        case $? in
+            0)
+                if [ "$__k" = "r" ] || [ "$__k" = "R" ]; then
+                    if mv -f "$WATCH/retry-offer" "$WATCH/.retry" 2>/dev/null; then
+                        for p in $names; do
+                            map_set rendered "${p%,}" ""
+                        done
+                        break
+                    fi
+                elif [ "$__k" = "$_esc" ]; then
+                    exit 0
+                fi
+                ;;
+            1)
+                if __cols=$(pane_cols) && reflow_to "$__cols"; then :; fi
+                ;;
+            *) exit 0 ;;
+        esac
+    done
+    printf '\r\033[K'
+}
+
 while true; do
     if [[ -f "$WATCH/status" ]]; then
         # The status file holds at most a handful of rows, so re-reading it each tick
@@ -911,6 +972,8 @@ while true; do
         done
     fi
 
+    [[ -f "$WATCH/retry-offer" && ! -f "$WATCH/.done" ]] && retry_offer_prompt
+
     if __cols=$(pane_cols); then
         reflow_to "$__cols" || true
     fi
@@ -923,26 +986,6 @@ while true; do
 done
 
 clear_loading
-
-_esc=$(printf '\033')
-
-# prompt_line — the close prompt, drawn on a cleared bottom line so a redraw can reprint it.
-prompt_line() {
-    printf '\r\033[K[f]inder [p]review [esc/ctrl-d] close '
-}
-
-# read_key <var> — one keypress with a one-second timeout. Returns 0 with a key, 1 on a
-# timeout (a real tick: safe to check the width), 2 when input is gone. bash 3.2 reports a
-# timeout and end of input both as status 1, so they are told apart by cost: a timeout burns
-# the full second and $SECONDS moves on, end of input returns at once.
-read_key() {
-    local __before=$SECONDS
-    if read -t 1 -n1 -s -r "$1"; then
-        return 0
-    fi
-    [[ $SECONDS -gt $__before ]] && return 1
-    return 2
-}
 
 prompt_line
 while true; do
