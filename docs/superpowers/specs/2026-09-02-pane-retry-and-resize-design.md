@@ -127,8 +127,7 @@ longer, plus one provider round if retried. `agents/image-generator.md`,
 
 Tests:
 
-- `tests/run_all.bats` (existing run-all tests live in `tests/shared_pane.bats`
-  and `tests/display.bats`; put these beside them): with a stub provider script
+- `tests/run-all.bats` (where the existing run-all tests live): with a stub provider script
   that exits 1 on its first call and 0 on its second, and a stub pane dir,
   assert run-all writes `retry-offer` with that name, then when the test moves
   it to `.retry`, run-all re-forks it once and exits 0; with no `.retry` and
