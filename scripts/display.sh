@@ -515,7 +515,11 @@ display_pane_fail() {
 # provider_finish emits the complete event and falls back to direct terminal
 # display when running outside a streaming pane.
 provider_die() {
-  local msg="$*"
+  local msg="$*" retries=0
+  declare -F retry_attempts >/dev/null && retries=$(retry_attempts)
+  if [[ "$retries" -gt 0 ]]; then
+    msg="${msg} (after ${retries} retries)"
+  fi
   echo "$msg" >&2
   display_pane_fail "${PROVIDER_NAME:-unknown}" "${MODEL:-}" "$msg"
   exit 1
@@ -523,6 +527,9 @@ provider_die() {
 
 provider_finish() {
   local output="$1"
+  # A run that retried and then succeeded must not leave its count file behind for the next
+  # curl_with_retry call under this PID to find and misreport.
+  declare -F retry_attempts >/dev/null && retry_attempts >/dev/null
   display_pane_finish "${PROVIDER_NAME:-unknown}" "${MODEL:-}" "$output"
   # The image is already saved; inline display is best-effort. When no streaming pane is
   # active, show it directly, but swallow any failure (e.g. tmux 'no space for new pane' in a
@@ -714,12 +721,12 @@ draw_loading() {
     local pending=() p __state
     for p in $seen_providers; do
         map_get __state provider_state "$p"
-        [[ "$__state" == "querying" ]] && pending+=("$p")
+        [[ "$__state" == "querying" || "$__state" == "retrying" ]] && pending+=("$p")
     done
     [[ ${#pending[@]} -eq 0 ]] && return 0
     local frame="${SPINNERS[$((spinner_frame % ${#SPINNERS[@]}))]}"
 
-    local list="" first=1 _bg _fg _accent _spinner chunk
+    local list="" first=1 _bg _fg _accent _spinner chunk __label __attempt
     for p in "${pending[@]}"; do
         provider_palette _bg _fg _accent _spinner "$p"
         if [[ $first -eq 1 ]]; then
@@ -727,7 +734,13 @@ draw_loading() {
         else
             list+=$'\033[2m, \033[0m'
         fi
-        printf -v chunk '\033[1;38;2;%sm%s\033[0m' "$_spinner" "$p"
+        map_get __state provider_state "$p"
+        local __label="$p"
+        if [[ "$__state" == "retrying" ]]; then
+            map_get __attempt provider_timing "$p"
+            __label="$p (retry ${__attempt})"
+        fi
+        printf -v chunk '\033[1;38;2;%sm%s\033[0m' "$_spinner" "$__label"
         list+="$chunk"
     done
 

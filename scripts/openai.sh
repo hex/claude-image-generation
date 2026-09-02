@@ -6,6 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
+source "${SCRIPT_DIR}/retry.sh"
 
 readonly PROVIDER_NAME="openai"
 
@@ -147,7 +148,7 @@ if [[ "$MODE" == "generate" ]]; then
       --argjson c "$OUTPUT_COMPRESSION" '. + {"output_compression": $c}')
   fi
 
-  RESPONSE=$(curl -s -w "\n%{http_code}" \
+  RESPONSE=$(curl_with_retry -s -w "\n%{http_code}" \
     -X POST "https://api.openai.com/v1/images/generations" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${OPENAI_API_KEY}" \
@@ -173,7 +174,7 @@ elif [[ "$MODE" == "edit" ]]; then
     EDIT_ARGS+=(-F "input_fidelity=${INPUT_FIDELITY}")
   fi
 
-  RESPONSE=$(curl -s -w "\n%{http_code}" \
+  RESPONSE=$(curl_with_retry -s -w "\n%{http_code}" \
     -X POST "https://api.openai.com/v1/images/edits" \
     -H "Authorization: Bearer ${OPENAI_API_KEY}" \
     "${EDIT_ARGS[@]}")

@@ -382,6 +382,10 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 - `run-all.sh` forwards every `--input-image` to each selected provider, but only in `--mode edit`. Gemini's generate-mode reference images are not forwarded through run-all — call `scripts/gemini.sh` directly for generate-with-references.
 - `dall-e-2` edits are a known limitation: the script rejects multiple images for `dall-e-2`, but single-image `dall-e-2` edits also do not work — the script sends form fields only the gpt-image models accept.
 
+### Retries
+
+Each provider script retries a transient API error (429 or a 5xx status, or a network failure) up to three times, with a delay that doubles each attempt (1 second, 2 seconds, 4 seconds). `IMAGE_MAX_RETRIES` and `IMAGE_RETRY_DELAY` tune the count and the starting delay. Inside a streaming pane, a retry shows on the spinner line as `(retry 2/3)`.
+
 ## Provider Comparison
 
 | Feature | Gemini | OpenAI | xAI | OpenRouter |
@@ -410,6 +414,7 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
 | OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
+| Retry helper | `scripts/retry.sh` | `curl_with_retry` for transient API failures |
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |
 | Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider spinner) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |

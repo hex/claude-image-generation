@@ -56,7 +56,7 @@ calls() { cat "$MOCK_DIR/calls"; }
 
 @test "retry: a 503 followed by a 200 succeeds on the second call" {
   stub_curl_sequence 503 200
-  run bash -c "source '$RETRY_SH'; curl_with_retry -s -w '\n%{http_code}' -X POST https://x -d '{}' 2>/dev/null; echo \"attempts=\$RETRY_ATTEMPTS\""
+  run bash -c "source '$RETRY_SH'; curl_with_retry -s -w '\n%{http_code}' -X POST https://x -d '{}' 2>/dev/null; echo \"attempts=\$(retry_attempts)\""
   assert_status 0
   [[ "$(calls)" -eq 2 ]] || { echo "expected 2 calls, got $(calls)"; return 1; }
   assert_output_contains '{"seen":2}'
@@ -73,7 +73,7 @@ calls() { cat "$MOCK_DIR/calls"; }
 
 @test "retry: three 503s exhaust the retries and return the last body" {
   stub_curl_sequence 503 503 503 503 200
-  run bash -c "source '$RETRY_SH'; curl_with_retry -s -w '\n%{http_code}' https://x -d '{}' 2>/dev/null; echo \"attempts=\$RETRY_ATTEMPTS\""
+  run bash -c "source '$RETRY_SH'; curl_with_retry -s -w '\n%{http_code}' https://x -d '{}' 2>/dev/null; echo \"attempts=\$(retry_attempts)\""
   [[ "$(calls)" -eq 4 ]] || { echo "expected 1 + 3 retries = 4 calls, got $(calls)"; return 1; }
   assert_output_contains '{"seen":4}'
   assert_output_contains "attempts=3"
@@ -111,4 +111,11 @@ calls() { cat "$MOCK_DIR/calls"; }
   run bash -c "source '$RETRY_SH'; curl_with_retry -s -w '\n%{http_code}' https://x -d '{}' 2>&1 >/dev/null"
   assert_output_contains "retry 1/3"
   assert_output_contains "retry 2/3"
+}
+
+@test "retry: retry_attempts reports the count once, then forgets it" {
+  stub_curl_sequence 503 200
+  run bash -c "source '$RETRY_SH'; curl_with_retry -s -w '\n%{http_code}' https://x -d '{}' >/dev/null 2>/dev/null; echo \"first=\$(retry_attempts)\"; echo \"second=\$(retry_attempts)\""
+  assert_output_contains "first=1"
+  assert_output_contains "second=0"
 }

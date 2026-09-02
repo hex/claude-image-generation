@@ -408,3 +408,31 @@ STUB
   [[ ! -d "$wd" ]] || { echo "watcher did not exit on end of input"; return 1; }
   rm -rf "$mock"
 }
+
+@test "the spinner labels a retrying provider with its attempt count" {
+  local mock="${BATS_TMPDIR}/watcher_retrying_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+  local wd
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+
+  printf 'xai\tquerying\t\tgrok\t\nxai\tretrying\t2/3\tgrok\t\n' > "$wd/status"
+  ( sleep 1; touch "$wd/.done" ) &
+  local output
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"xai"*"(retry 2/3)"* ]] || {
+    echo "spinner line lacks the retry label:"
+    echo "$output"
+    return 1
+  }
+  rm -rf "$mock"
+}

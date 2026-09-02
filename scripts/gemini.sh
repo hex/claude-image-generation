@@ -6,6 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
+source "${SCRIPT_DIR}/retry.sh"
 
 readonly PROVIDER_NAME="gemini"
 
@@ -172,7 +173,7 @@ display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
 # The body embeds the base64 image in edit mode, so it is streamed to curl on stdin
 # (--data-binary @-) instead of passed as -d, which would exceed ARG_MAX.
-RESPONSE=$(printf '%s' "$REQUEST_BODY" | curl -s -w "\n%{http_code}" \
+RESPONSE=$(printf '%s' "$REQUEST_BODY" | curl_with_retry -s -w "\n%{http_code}" \
   -X POST "${API_URL}" \
   -H "Content-Type: application/json" \
   -H "x-goog-api-key: ${GEMINI_API_KEY}" \

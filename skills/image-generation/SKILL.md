@@ -167,6 +167,12 @@ otherwise.
 - HTTP errors include the status code and API error message
 - If multiple providers are used in parallel and one fails, report the error and present the successful results
 - Rate limit errors (HTTP 429) mean the provider's quota is exhausted - try again later or use the other provider
+- The script automatically retries a 429 or 5xx status, or a network failure, up to three times with a doubling delay before giving up
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `IMAGE_MAX_RETRIES` | 3 | Retry attempts for a transient API failure before the script gives up |
+| `IMAGE_RETRY_DELAY` | 1 | Starting retry delay in seconds; doubles on each attempt |
 
 ## Script Options Reference
 

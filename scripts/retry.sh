@@ -6,9 +6,20 @@
 IMAGE_MAX_RETRIES="${IMAGE_MAX_RETRIES:-3}"
 IMAGE_RETRY_DELAY="${IMAGE_RETRY_DELAY:-1}"
 
-# How many retries the last curl_with_retry made, for the error message of a provider that
-# still failed afterwards.
-RETRY_ATTEMPTS=0
+# The count has to survive the command substitution the providers capture curl's output with:
+# a variable set inside that subshell dies with it, so the count is left in a file keyed by the
+# provider's PID ($$ is the same inside the substitution) and read back by retry_attempts.
+__retry_count_file() {
+  printf '%s/image-retry.%s' "${TMPDIR:-/tmp}" "$$"
+}
+
+# retry_attempts — prints how many retries the last curl_with_retry made, then forgets it.
+retry_attempts() {
+  local f
+  f=$(__retry_count_file)
+  if [[ -s "$f" ]]; then cat "$f"; else printf '0'; fi
+  rm -f "$f"
+}
 
 # is_retryable_status <http code> — rate limits and server-side failures are worth another try.
 # Everything else in 4xx is a bad request that a retry would only repeat.
@@ -46,7 +57,7 @@ curl_with_retry() {
 
   local max="$IMAGE_MAX_RETRIES" delay="$IMAGE_RETRY_DELAY" attempt=0
   local response="" curl_exit=0 code=""
-  RETRY_ATTEMPTS=0
+  rm -f "$(__retry_count_file)"
   while :; do
     response=$(curl "${args[@]}") && curl_exit=0 || curl_exit=$?
     code="${response##*$'\n'}"
@@ -55,7 +66,7 @@ curl_with_retry() {
     fi
     [[ $attempt -lt $max ]] || break
     attempt=$((attempt + 1))
-    RETRY_ATTEMPTS=$attempt
+    printf '%s' "$attempt" > "$(__retry_count_file)"
     retry_notice "$attempt" "$max"
     sleep "$delay"
     delay=$((delay * 2))
