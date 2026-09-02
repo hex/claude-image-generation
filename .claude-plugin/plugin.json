@@ -1,12 +1,12 @@
 {
   "name": "claude-image-generation",
   "version": "2026.8.1",
-  "description": "Generate and edit images using Google Gemini, OpenAI GPT Image, and xAI Grok Image APIs",
+  "description": "Generate and edit images using Google Gemini, OpenAI GPT Image, xAI Grok Image, and OpenRouter APIs",
   "author": {
     "name": "hex",
     "url": "https://github.com/hex"
   },
   "repository": "https://github.com/hex/claude-image-generation",
   "license": "MIT",
-  "keywords": ["image-generation", "gemini", "openai", "gpt-image", "xai", "grok-image", "text-to-image", "image-editing"]
+  "keywords": ["image-generation", "gemini", "openai", "gpt-image", "xai", "grok-image", "openrouter", "text-to-image", "image-editing"]
 }

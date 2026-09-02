@@ -382,3 +382,63 @@ Image generation and editing supported via `/v1/batches`. Batch URLs expire afte
 - **JPEG output quirk**: `response_format: "b64_json"` returns JPEG-encoded data regardless of filename. Files saved as `.png` contain JPEG content. Confirmed in official docs (examples save output with `.jpg` extension).
 - **Content moderation tightened 2026-01**: two-layer guard (prompt + post-gen classifier). Expect `content_policy_violation` errors on prompts with real identifiable people in altered contexts.
 - Quality/Speed generation modes are **consumer UI only** (grok.com/imagine), NOT API parameters
+
+## OpenRouter (gateway)
+
+OpenRouter is not a first-party image API — it is a gateway that fronts many providers' models behind one key and one endpoint. Image generation is exposed through the **chat-completions** API, not a dedicated images endpoint.
+
+### Endpoint
+- Generation and editing: `POST https://openrouter.ai/api/v1/chat/completions`
+
+There is no separate edit endpoint; editing is generation with input images attached to the user message.
+
+### Authentication
+- Header: `Authorization: Bearer $OPENROUTER_API_KEY`
+- Optional attribution headers: `HTTP-Referer: <site-url>` and `X-Title: <site-name>` (the plugin sends these from `--site-url` / `--site-name` or `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME`)
+
+### Request Format
+The prompt is a normal chat message; image output is opted into with `modalities`. In generate mode `content` is a plain string:
+```json
+{
+  "model": "google/gemini-2.5-flash-image",
+  "modalities": ["image", "text"],
+  "messages": [{"role": "user", "content": "a serene mountain landscape at sunset"}]
+}
+```
+In edit mode `content` is an array whose first part is the text prompt, followed by one `image_url` part per input image. Each image is a base64 data URL (the plugin streams these via `jq --rawfile` and posts with `curl --data-binary @-` to stay under ARG_MAX, mirroring gemini.sh):
+```json
+{
+  "model": "google/gemini-2.5-flash-image",
+  "modalities": ["image", "text"],
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "change the sky to a starry night"},
+      {"type": "image_url", "image_url": {"url": "data:image/png;base64,<...>"}}
+    ]
+  }]
+}
+```
+
+### Response Format
+The generated image is returned as a base64 data URL inside the assistant message's `images` array (not the OpenAI `data[].b64_json` shape):
+```json
+{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": "",
+      "images": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,<...>"}}]
+    }
+  }]
+}
+```
+The plugin reads `.choices[0].message.images[0].image_url.url`, strips the `data:<mime>;base64,` prefix, and decodes the remainder. If no image is present it falls back to reporting `.choices[0].message.content` (a refusal or text-only reply). Errors come back as `.error.message`.
+
+### Models
+`--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-2.5-flash-image`. Others include `google/gemini-3-pro-image-preview` and `openai/gpt-5-image`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
+
+### Constraints
+- Aspect ratio, resolution, and quality are model-dependent and driven by the prompt — there are no dedicated flags for them
+- Per-image cost, rate limits, and max input images depend on the underlying model, not OpenRouter itself
+- Pricing/billing is per OpenRouter account and the selected model
