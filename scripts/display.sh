@@ -899,7 +899,7 @@ read_key() {
 # of time removes the offer, which run-all reads as "no". The failed providers' rendered flags
 # are reset on r so their next complete or error draws a fresh block.
 retry_offer_prompt() {
-    local seconds names="" line remaining deadline __k p
+    local seconds names="" line remaining deadline __k p offer_line
     { read -r seconds; while IFS= read -r line || [[ -n "$line" ]]; do
         names="${names:+$names, }$line"; done; } < "$WATCH/retry-offer" 2>/dev/null || return 0
     [[ "$seconds" =~ ^[0-9]+$ ]] || seconds=45
@@ -907,9 +907,11 @@ retry_offer_prompt() {
     # Once any image is on the pane, the offer line is drawn once with its time budget instead
     # of ticking. In tmux control mode every rewrite of the line resyncs the pane to tmux's text
     # grid and erases inline images, which live as overlays outside it; a countdown is only safe
-    # to animate while no image is shown yet.
+    # to animate while no image is shown yet. A resize redraw clears the line, so it is written
+    # again after one.
+    printf -v offer_line '\033[?7l\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  (up to %ds)\033[0m \033[?7h' "$names" "$seconds"
     if [[ -n "$any_image_rendered" ]]; then
-        printf '\033[?7l\r\033[K\033[2m[r] retry failed (%s) · [esc/ctrl-d] close  (up to %ds)\033[0m \033[?7h' "$names" "$seconds"
+        printf '%s' "$offer_line"
     fi
     while [[ -f "$WATCH/retry-offer" && ! -f "$WATCH/.done" ]]; do
         remaining=$((deadline - SECONDS))
@@ -934,7 +936,9 @@ retry_offer_prompt() {
                 fi
                 ;;
             1)
-                if __cols=$(pane_cols) && reflow_to "$__cols"; then :; fi
+                if __cols=$(pane_cols) && reflow_to "$__cols"; then
+                    [[ -n "$any_image_rendered" ]] && printf '%s' "$offer_line"
+                fi
                 ;;
             *) exit 0 ;;
         esac

@@ -503,7 +503,9 @@ STUB
   rm -rf "$mock"
 }
 
-# Watcher dir with an xai error already drawn, and a retry-offer naming xai.
+# Watcher dir with an xai error already drawn, and a retry-offer naming xai. The stty stub
+# reads widths like make_resize_watcher's; with no $mock/widths file it fails and the watcher
+# never sees a width, so tests that don't resize are unaffected.
 make_offer_watcher() {
   mock="${BATS_TMPDIR}/watcher_offer_$$"
   mkdir -p "$mock/.iterm2"
@@ -513,7 +515,16 @@ make_offer_watcher() {
 [ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
 exit 0
 STUB
-  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux"
+  cat > "$mock/stty" <<'STUB'
+#!/bin/bash
+d="$(dirname "$0")"
+n=$(cat "$d/stty.calls" 2>/dev/null || echo 0)
+echo $((n + 1)) > "$d/stty.calls"
+total=$(wc -l < "$d/widths" | tr -d ' ')
+[ "$n" -ge "$total" ] && n=$((total - 1))
+sed -n "$((n + 1))p" "$d/widths"
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/tmux" "$mock/stty"
   wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
        LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
        bash -c "source '$DISPLAY_SH'; display_pane_open")
@@ -636,6 +647,29 @@ STUB
   n=$(printf '%s' "$output" | grep -oF '[r] retry failed (xai)' | wc -l | tr -d ' ')
   [[ "$n" -eq 1 ]] || { echo "offer line printed $n times, want 1:"; echo "$output"; return 1; }
   [[ "$output" == *"(up to 4s)"* ]] || { echo "offer line lacks the time budget:"; echo "$output"; return 1; }
+  rm -rf "$mock"
+}
+
+@test "the static retry offer is reprinted after a resize redraw" {
+  local wd mock
+  make_offer_watcher
+  # An image is up before the offer shows, so the offer line prints once and stays static. A
+  # resize during the offer clears the pane; the line has to come back after the redraw.
+  printf 'gemini\tcomplete\t900\tgemini\t%s\nxai\terror\t\tgrok\t\n' "$OVERSIZED_FIXTURE" > "$wd/status"
+  printf '%s\n' 10 xai > "$wd/retry-offer"
+  # Two prompt seconds at 200 (the first only records the width), then 120 for good: the
+  # four-tick settle lands on the sixth tick. A tick runs a little over a second on a loaded
+  # machine and $SECONDS moves in whole seconds, so the offer is given four spare ticks; were
+  # it to expire first, the settle would land in the main loop with no offer line to reprint.
+  printf '50 200\n50 200\n50 120\n' > "$mock/widths"
+  ( sleep 12; touch "$wd/.done" ) &
+  local output n clears
+  output=$( (sleep 13) | HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
+           timeout 30 bash "$wd/watcher.sh" "$wd" 2>&1)
+  clears=$(printf '%s' "$output" | grep -oF -e $'\033[2J\033[3J\033[H' | wc -l | tr -d ' ')
+  [[ "$clears" -eq 1 ]] || { echo "expected one redraw, got $clears:"; echo "$output"; return 1; }
+  n=$(printf '%s' "$output" | grep -oF '[r] retry failed (xai)' | wc -l | tr -d ' ')
+  [[ "$n" -eq 2 ]] || { echo "offer line printed $n times, want 2 (before and after the redraw):"; echo "$output"; return 1; }
   rm -rf "$mock"
 }
 
