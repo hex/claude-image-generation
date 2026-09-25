@@ -25,9 +25,9 @@ Options:
   --output-format     Format: png, jpeg, webp (default: png; jpeg is faster)
   --output-compression  Compression 0-100 (for jpeg/webp only)
   --moderation        Moderation: auto, low (default: auto)
-  --input-fidelity    Edit mode only: low, high (default: low)
-                      'high' preserves faces/logos/textures on the first 5 images (gpt-image-2 and 1.5;
-                      first image only on gpt-image-1 and mini)
+  --input-fidelity    Edit mode only: low, high (default: low); refused with gpt-image-2, which
+                      always uses high fidelity. 'high' preserves faces/logos/textures on the first
+                      5 images on gpt-image-1.5, the first image only on gpt-image-1 and mini
   --model             OpenAI model (default: gpt-image-2)
                       Alternatives: gpt-image-1.5, gpt-image-1-mini (3-4x cheaper), gpt-image-1
 
@@ -83,6 +83,13 @@ if [[ -n "$INPUT_FIDELITY" ]]; then
   case "$INPUT_FIDELITY" in
     low|high) ;;
     *) echo "Error: --input-fidelity must be 'low' or 'high'" >&2; exit 1 ;;
+  esac
+  # gpt-image-2 edits every input image at high fidelity and the API does not take the
+  # parameter for it; its dated snapshots behave the same.
+  case "$MODEL" in
+    gpt-image-2|gpt-image-2-*)
+      echo "Error: --input-fidelity is not accepted by gpt-image-2, which always uses high fidelity; drop the flag or pass --model gpt-image-1.5" >&2
+      exit 1 ;;
   esac
 fi
 

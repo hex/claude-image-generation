@@ -90,6 +90,22 @@ setup() {
   assert_output_contains "at most 16"
 }
 
+@test "openai: --input-fidelity is refused on gpt-image-2, which always edits at high fidelity" {
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "/tmp/out.png" \
+    --input-image "/tmp/x.png" --input-fidelity high
+  assert_status 1
+  assert_output_contains "Error: --input-fidelity is not accepted by gpt-image-2"
+}
+
+@test "openai: --input-fidelity still reaches the API on gpt-image-1.5" {
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "/tmp/out.png" \
+    --input-image "/tmp/x.png" --input-fidelity high --model gpt-image-1.5
+  assert_output_contains "Calling OpenAI API (model: gpt-image-1.5, mode: edit)"
+  [[ "$output" != *"not accepted by gpt-image-2"* ]] || { echo "refused a model that takes the flag: $output"; return 1; }
+}
+
 @test "openai: dall-e-2 with multiple images rejected" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
   run "$OPENAI_SH" --mode edit --prompt "combine these" --output "/tmp/out.png" \

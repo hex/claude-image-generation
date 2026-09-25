@@ -15,7 +15,7 @@ Each provider saves <outputBase>-<provider>.png; the result lists the files that
 Omit providers and outputBase to use the person's /config defaults. \
 Providers: gemini (gemini-3-pro-image, professional assets, many reference images), \
 openai (gpt-image-2, text rendering, transparent backgrounds), \
-xai (grok-imagine-image-2.0, quality tiers), \
+xai (grok-imagine-image-2.0, prompt revision, flat per-image pricing), \
 openrouter (google/gemini-3.1-flash-image by default, opt-in). \
 Pass inputImages to edit instead of generate. aspectRatio (W:H) applies to gemini and xai only.`
 
