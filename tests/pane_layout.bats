@@ -497,6 +497,19 @@ STUB
   chmod +x "$mock/stty"
 }
 
+# done_after_width_reads <count> — writes .done once the watcher has read the width <count>
+# times, so a test ends on the watcher's progress rather than on a wall-clock guess that a
+# loaded machine outruns. Gives up after about 20s, the watcher's own timeout, and writes
+# .done then too. Run it in the background; it reads $mock and $wd from the caller.
+done_after_width_reads() {
+  local reads="$1" i
+  for i in $(seq 1 200); do
+    [ "$(cat "$mock/stty.calls" 2>/dev/null || echo 0)" -ge "$reads" ] && break
+    sleep 0.1
+  done
+  touch "$wd/.done"
+}
+
 # Builds a watcher dir with the standard stubs and a scripted `stty` (see make_stty_stub).
 # Sets $wd and $mock for the caller.
 make_resize_watcher() {
@@ -524,10 +537,9 @@ STUB
   printf '50 200\n50 200\n50 200\n50 200\n50 200\n50 200\n50 120\n' > "$mock/widths"
   printf 'xai\tcomplete\t4210\tmascot-xai\t%s\n' "$OVERSIZED_FIXTURE" > "$wd/status"
 
-  # .done is written after the watcher has had time to see the new width settle. Seven ticks
-  # (a fork for stty plus a status parse each) can run slower than 3s on a loaded machine, so
-  # the margin here covers that rather than the couple hundred ms this normally takes.
-  ( sleep 6; touch "$wd/.done" ) &
+  # The seventh read is the first at 120 and the tenth is its fourth, when the redraw runs;
+  # .done waits for the eleventh, so the tick that redrew has finished.
+  ( done_after_width_reads 11 ) &
   local output
   output=$(HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
            timeout 20 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
@@ -577,7 +589,7 @@ STUB
     printf 'xai\tcomplete\t900\tgrok\t%s\n' "$OVERSIZED_FIXTURE"
     printf 'openai\tcomplete\t900\tgpt-image-1\t%s\n' "$OVERSIZED_FIXTURE"
   } > "$wd/status"
-  ( sleep 6; touch "$wd/.done" ) &
+  ( done_after_width_reads 11 ) &
   local output
   output=$(HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
            timeout 20 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
@@ -656,7 +668,7 @@ STUB
     printf 'xai\tcomplete\t900\tgrok\t%s\n' "$OVERSIZED_FIXTURE"
     printf 'openai\tquerying\t\t\t\n'
   } > "$wd/status"
-  ( sleep 6; touch "$wd/.done" ) &
+  ( done_after_width_reads 11 ) &
   local output n
   output=$(HOME="$mock" PATH="$mock:$PATH" DISPLAY_PANE_TTY=/dev/null \
            timeout 20 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
