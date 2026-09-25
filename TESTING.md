@@ -61,8 +61,11 @@ bats tests/openai.bats
 | `tests/run-all.bats` | `scripts/run-all.sh` | `--input-image` forwarding — every repeated flag reaches each provider (provider scripts stubbed) |
 | `tests/bash32_compat.bats` | provider + display scripts | bash 3.2 array / associative-array safety |
 | `tests/frontmatter.bats` | skill / agent / command | YAML frontmatter validation |
+| `tests/argv.test.ts` | `hooks/argv.ts` | The generate tool's input rules: blank prompt, unknown provider, wrong field types, `outputBase` with an extension, malformed aspect ratio, config defaults vs. call overrides, edit mode, prompt kept as one argv element |
 
 Tests do not make real API calls. They validate argument parsing, error messages, exit codes, and terminal protocol output.
+
+`tests/argv.test.ts` runs under `claude plugin test .`, not bats. `tsc -p .` type-checks the hooks module once `/plugin-types` has written `.claude/types`. To try the tool itself, start `claude --plugin-dir .` with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`. Saving a hooks file reloads the module, but the tool is registered at `session.start`, so a change to its name, description or schema needs a fresh session.
 
 ## 2. Script-Level Tests
 
