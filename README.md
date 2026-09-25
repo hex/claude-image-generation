@@ -135,6 +135,29 @@ The command prompts you to select a provider (Gemini, OpenAI, xAI, OpenRouter, o
 
 The `image-generator` agent triggers automatically when conversation context involves image creation. It handles provider selection, parallel generation, and result delivery without requiring the slash command.
 
+### Generate Tool (function hooks, early access)
+
+On Claude Code builds with function hooks, the plugin also registers a tool, `mcp__claude-image-generation__generate`. The model calls it with a typed input instead of writing a `bash scripts/run-all.sh ...` line:
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `prompt` | yes | What to draw, or how to change the input images |
+| `providers` | no | Any of `gemini`, `openai`, `xai`, `openrouter`; omitted, the `Default providers` setting |
+| `outputBase` | no | Path without extension; each provider saves `<outputBase>-<provider>.png`. Omitted, `<Output directory>/image-<timestamp>` |
+| `inputImages` | no | Images to edit; any entry switches to edit mode |
+| `aspectRatio` | no | `W:H` such as `16:9`; passed to gemini and xai only |
+
+The tool runs `scripts/run-all.sh`, so the streaming pane and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check (blank prompt, unknown provider, an `outputBase` ending in `.png`, a malformed aspect ratio) before anything runs.
+
+Two rows in `/config` set its defaults:
+
+| Setting | Values | Default |
+|---------|--------|---------|
+| Default providers | `all` (gemini, openai, xai), `gemini`, `openai`, `xai`, `openrouter` | `all` |
+| Output directory | any path, relative to the session's working directory | `.` |
+
+The slash command and the agent don't use the tool yet; they still run the scripts through Bash.
+
 ### Direct Script Usage
 
 Scripts are located in `scripts/` and can be invoked directly.
@@ -427,7 +450,9 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 | Skill evals | `skills/image-generation/evals/evals.json` | Trigger prompts for the skill's eval suite |
-| Automated tests | `tests/` | bats test suite for all scripts |
+| Hooks module | `hooks/index.ts` | Registers the `generate` tool and serves its calls through `run-all.sh` |
+| Tool input rules | `hooks/argv.ts` | Checks a `generate` call's input and builds `run-all.sh`'s argv |
+| Automated tests | `tests/` | bats test suite for all scripts; `argv.test.ts` for the tool's input rules |
 
 ## Development
 
@@ -443,6 +468,14 @@ This plugin uses calendar versioning in `YYYY.M.PATCH` format (e.g., `2026.7.1`)
 
 # Or run bats directly
 bats tests/
+```
+
+The hooks module has its own checks. Run `/plugin-types` in a Claude Code session in this directory once, to write `.claude/types`, then:
+
+```bash
+tsc -p .                 # type-check hooks/ and tests/argv.test.ts
+claude plugin test .     # run tests/argv.test.ts
+claude plugin validate . # what the engine sees the module hook and call
 ```
 
 See [TESTING.md](TESTING.md) for the full testing guide, including manual test procedures.
