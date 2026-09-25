@@ -1,7 +1,7 @@
 ---
 name: image-generation
 description: Generates and edits images using Google Gemini, OpenAI GPT Image, xAI Grok Image, and OpenRouter APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "generate with openrouter", "gpt image", "gemini image", "grok image", or "openrouter image".
-version: 2026.9.0
+version: 2026.9.1
 ---
 
 # Image Generation with Gemini, OpenAI, xAI, and OpenRouter
@@ -20,7 +20,7 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 ### OpenAI GPT Image 2
 - **Model**: `gpt-image-2` (default, snapshot `gpt-image-2-2026-04-21`); `gpt-image-1.5` available as previous flagship via `--model`
 - **Strengths**: Superior text rendering, transparent backgrounds, up to 16 input images for editing, quality tiers
-- **Sizes**: 1024x1024, 1536x1024 (landscape), 1024x1536 (portrait)
+- **Sizes**: on `gpt-image-2`, any `WxH` with both edges multiples of 16, longest edge up to 3840 and ratio at most 3:1 (such as 2048x1152, 3840x2160); older models take 1024x1024, 1536x1024 (landscape), 1024x1536 (portrait)
 - **Quality**: low (fast/cheap), medium, high (best fidelity)
 - **Env var**: `OPENAI_API_KEY`
 
@@ -48,7 +48,7 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 When `mcp__claude-image-generation__generate` is available (Claude Code builds with function
 hooks), prefer it over the scripts below. It takes `prompt`, and optionally `providers`,
 `outputBase` (a path without extension), `inputImages` (switches to edit mode) and
-`aspectRatio` (gemini and xai only). Leave `providers` and `outputBase` out unless the request
+`aspectRatio` (whole-number `W:H`, gemini and xai only). Leave `providers` and `outputBase` out unless the request
 gives them: the tool uses the person's `/config` defaults. It runs `run-all.sh`, so the pane
 and the retry offer behave as described under Parallel Generation, and it answers with each
 expected file marked `saved` or `missing`. Use the scripts instead when the request needs an
@@ -141,7 +141,7 @@ Optional flags:
 - `--gemini-extra "--image-size 4K --aspect-ratio 16:9"` — pass-through args to gemini.sh
 - `--openai-extra "--quality high"` — pass-through args to openai.sh
 - `--xai-extra "--resolution 2k"` — pass-through args to xai.sh
-- `--openrouter-extra "--model openai/gpt-5-image"` — pass-through args to openrouter.sh
+- `--openrouter-extra "--model openai/gpt-image-2"` — pass-through args to openrouter.sh
 
 Providers share a pane only while they overlap in time: each finds this tmux window's pane
 through a registry entry and joins it, and the pane closes once the last provider sharing it
@@ -184,7 +184,7 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 - If an API key is missing, the script exits immediately with a clear message
 - HTTP errors include the status code and API error message
 - If multiple providers are used in parallel and one fails, report the error and present the successful results
-- Rate limit errors (HTTP 429) mean the provider's quota is exhausted - try again later or use the other provider
+- Rate limit errors (HTTP 429) mean the provider's quota is exhausted. The script retries a 429 up to three times first; if it still fails, try again later or use another provider
 - The script automatically retries a 429 or 5xx status, or a network failure, up to three times with a doubling delay before giving up
 
 | Env var | Default | Purpose |
@@ -216,13 +216,13 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
 | `--input-image` | file path, repeatable (max 16) | (edit only) |
-| `--size` | auto, 1024x1024, 1536x1024, 1024x1536 | 1024x1024 |
+| `--size` | auto or WxH (gpt-image-2: edges multiples of 16, max edge 3840, ratio up to 3:1); older models: 1024x1024, 1536x1024, 1024x1536 | 1024x1024 |
 | `--quality` | auto, low, medium, high | high |
 | `--background` | auto, transparent, opaque | auto |
 | `--output-format` | png, jpeg, webp | png |
 | `--output-compression` | 0-100 (jpeg/webp only) | -- |
 | `--moderation` | auto, low | auto |
-| `--input-fidelity` | low, high (edit only) | unset (API `low`) |
+| `--input-fidelity` | low, high (edit only); not accepted with gpt-image-2 (that model always uses high fidelity; openai.sh refuses the flag) | unset (API `low`) |
 | `--model` | OpenAI model name | gpt-image-2 |
 
 ### xai.sh

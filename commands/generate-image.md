@@ -72,10 +72,11 @@ Generate or edit an image based on the user's request.
       is `gemini,openai,xai`; add `openrouter` explicitly to include it. To run a subset, pass
       `--providers gemini,openai`. To pass per-provider tuning, use `--gemini-extra "..."`,
       `--openai-extra "..."`, `--xai-extra "..."`, `--openrouter-extra "..."` (e.g.
-      `--openrouter-extra "--model openai/gpt-5-image"`).
+      `--openrouter-extra "--model openai/gpt-image-2"`).
    d. Mark the task completed when run-all.sh exits. Its exit status reports whether any
-      provider failed; per-provider error details are in `$DISPLAY_PANE_DIR/logs/<provider>.err`
-      and shown inline in the streaming pane as a red error banner.
+      provider failed, and each provider's error shows inline in the streaming pane as a red
+      banner. The per-provider logs under `$DISPLAY_PANE_DIR/logs/` exist only while the pane
+      is open: the pane deletes them when it closes.
       When a provider fails, the pane offers a retry for up to 45 seconds, so the call can
       return later than the slowest provider.
 

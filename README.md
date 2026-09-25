@@ -95,9 +95,9 @@ The `-preview` IDs of the two GA models still answer but passed Google's earlies
 | Model | Characteristics |
 |-------|-----------------|
 | `gpt-image-2` | Latest flagship, snapshot `gpt-image-2-2026-04-21` (default) |
-| `gpt-image-1.5` | Previous flagship, superior text rendering, transparent backgrounds, quality tiers |
-| `gpt-image-1-mini` | 3-4x cheaper, cost-efficient for drafts and previews |
-| `gpt-image-1` | Older generation |
+| `gpt-image-1.5` | Previous flagship, superior text rendering, transparent backgrounds, quality tiers (shutdown 2026-12-01) |
+| `gpt-image-1-mini` | 3-4x cheaper, cost-efficient for drafts and previews (shutdown 2026-12-01) |
+| `gpt-image-1` | Older generation (shutdown 2026-10-23) |
 
 ### Available xAI Models
 
@@ -145,9 +145,13 @@ On Claude Code builds with function hooks, the plugin also registers a tool, `mc
 | `providers` | no | Any of `gemini`, `openai`, `xai`, `openrouter`; omitted, the `Default providers` setting |
 | `outputBase` | no | Path without extension; each provider saves `<outputBase>-<provider>.png`. Omitted, `<Output directory>/image-<timestamp>` |
 | `inputImages` | no | Images to edit; any entry switches to edit mode |
-| `aspectRatio` | no | `W:H` such as `16:9`; passed to gemini and xai only |
+| `aspectRatio` | no | Whole-number `W:H` such as `16:9`; passed to gemini and xai only |
 
-The tool runs `scripts/run-all.sh`, so the streaming pane and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check (blank prompt, unknown provider, an `outputBase` ending in `.png`, a malformed aspect ratio) before anything runs.
+The tool runs `scripts/run-all.sh`, so the streaming pane and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check before anything runs: a blank prompt, a field of the wrong type, an unknown provider, an `outputBase` ending in `.png`, `.jpg`, `.jpeg` or `.webp` (any case), or an aspect ratio that is not whole-number `W:H` (so xAI's `auto`, `19.5:9` and `9:19.5` need the scripts).
+
+A call runs for at most ten minutes, the most the engine allows a process. That covers the slowest provider plus the 45-second retry offer.
+
+Outside tmux the tool shows no inline preview: it sends the providers' terminal image output to `/dev/null` (through `DISPLAY_IMAGE_TARGET`), so the images do not land on Claude Code's own screen. Inside tmux they stream into the pane as usual.
 
 Two rows in `/config` set its defaults:
 
@@ -257,13 +261,13 @@ bash scripts/openai.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path, repeatable (max 16; `dall-e-2` allows 1) | -- | Edit mode only |
-| `--size` | `auto`, `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` | No |
+| `--size` | `auto` or `WxH`. On `gpt-image-2`, any size with both edges multiples of 16, longest edge up to 3840, ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`); older models take `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` | No |
 | `--quality` | `auto`, `low`, `medium`, `high` | `high` | No |
 | `--background` | `auto`, `transparent`, `opaque` | `auto` | No |
 | `--output-format` | `png`, `jpeg`, `webp` | `png` | No |
 | `--output-compression` | integer 0-100 (jpeg/webp only) | -- | No |
 | `--moderation` | `auto`, `low` | `auto` | No |
-| `--input-fidelity` | `low`, `high` (edit only) | unset (API default `low`) | No |
+| `--input-fidelity` | `low`, `high` (edit only); not accepted with `gpt-image-2` (that model always uses high fidelity; `openai.sh` refuses the flag) | unset (API default `low`) | No |
 | `--model` | OpenAI model name | `gpt-image-2` | No |
 
 #### xai.sh
@@ -311,7 +315,7 @@ bash scripts/xai.sh \
 | `--mode` | `generate`, `edit` | -- | Yes |
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
-| `--input-image` | file path, repeatable (max 5) | -- | Edit mode only |
+| `--input-image` | file path, repeatable (max 5 on `grok-imagine-image-2.0`; older models take 3) | -- | Edit mode only |
 | `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` | (none) | No |
 | `--resolution` | `1k`, `2k` (LOWERCASE) | (API default) | No |
 | `--quality` | `low`, `medium`, `auto` (`grok-imagine-image-2.0` only) | unset (API `auto`: low for generation, medium for edits; billed as served) | No |
@@ -335,7 +339,7 @@ bash scripts/openrouter.sh \
   --mode generate \
   --prompt "a cat in a tree" \
   --output ./cat.png \
-  --model openai/gpt-5-image
+  --model openai/gpt-image-2
 
 # Edit (single or multiple --input-image)
 bash scripts/openrouter.sh \
@@ -367,7 +371,7 @@ bash scripts/openrouter.sh \
 |----------|------------|-------|
 | Gemini | 14 | `generate` (references for a fresh composition) and `edit` |
 | OpenAI | 16 | `edit` only (its generation endpoint takes no images) |
-| xAI | 5 | `edit` only |
+| xAI | 5 on `grok-imagine-image-2.0` (older models take 3) | `edit` only |
 | OpenRouter | model-dependent | `edit` only (input images attached as chat image parts) |
 
 ```bash
@@ -422,10 +426,10 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | Feature | Gemini | OpenAI | xAI | OpenRouter |
 |---------|--------|--------|-----|------------|
 | Default model | gemini-3-pro-image | gpt-image-2 | grok-imagine-image-2.0 | google/gemini-3.1-flash-image |
-| Max resolution | 4K (via `--image-size`) | 1536x1024 | 2K (via `--resolution`) | Model-dependent |
+| Max resolution | 4K (via `--image-size`) | 3840 px long edge on gpt-image-2 (via `--size`); 1536x1024 on older models | 2K (via `--resolution`) | Model-dependent |
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
-| Transparent BG | No | Yes | No | Model-dependent |
-| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | 3 fixed sizes | 16 options (incl. 21:9, 5:2, auto) | Prompt-driven |
+| Transparent BG | No | Yes (preview on gpt-image-2, png or webp only) | No | Model-dependent |
+| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | Any `WxH` up to 3:1 on gpt-image-2; 3 fixed sizes on older models | 16 options (incl. 21:9, 5:2, auto) | Prompt-driven |
 | Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts (edit) |
 | Quality tiers | N/A | auto / low / medium / high | low / medium / auto (2.0 only) | Model-dependent |
 | Thinking mode | Yes (`--thinking-level`) | No | No | Model-dependent |
@@ -437,7 +441,7 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Plugin manifest | `.claude-plugin/plugin.json` | Plugin metadata and version |
+| Plugin manifest | `.claude-plugin/plugin.json` | Plugin metadata, version and the /config rows (defaultProviders, outputDir) |
 | Skill | `skills/image-generation/SKILL.md` | API knowledge, prompting tips, script reference |
 | Command | `commands/generate-image.md` | `/generate-image` slash command |
 | Agent | `agents/image-generator.md` | Autonomous image generation |
@@ -452,6 +456,9 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | Skill evals | `skills/image-generation/evals/evals.json` | Trigger prompts for the skill's eval suite |
 | Hooks module | `hooks/index.ts` | Registers the `generate` tool and serves its calls through `run-all.sh` |
 | Tool input rules | `hooks/argv.ts` | Checks a `generate` call's input and builds `run-all.sh`'s argv |
+| Hooks manifest | `hooks/hooks.json` | Points the engine at `hooks/index.ts` |
+| Tool input type | `hooks/generate-input.d.ts` | Types the `generate` tool's input for the `tool.call` hook |
+| TypeScript config | `tsconfig.json` | Type-checks `hooks/` and `tests/` against `.claude/types` |
 | Automated tests | `tests/` | bats test suite for all scripts; `argv.test.ts` for the tool's input rules |
 
 ## Development
@@ -475,7 +482,7 @@ The hooks module has its own checks. Run `/plugin-types` in a Claude Code sessio
 ```bash
 tsc -p .                 # type-check hooks/ and tests/argv.test.ts
 claude plugin test .     # run tests/argv.test.ts
-claude plugin validate . # what the engine sees the module hook and call
+claude plugin validate . # what the engine sees: the module's hooks and the calls it makes
 ```
 
 See [TESTING.md](TESTING.md) for the full testing guide, including manual test procedures.
@@ -490,7 +497,8 @@ commands/                      -- Slash command definitions
 agents/                        -- Autonomous agent definitions
 skills/                        -- Skill knowledge and references
 scripts/                       -- Shell scripts for API calls
-tests/                         -- Automated tests (bats)
+hooks/                         -- Function hooks module registering the generate tool
+tests/                         -- Automated tests (bats, argv.test.ts)
 ```
 
 The scripts (`gemini.sh`, `openai.sh`, `xai.sh`, `openrouter.sh`) are standalone bash programs that handle API communication, base64 encoding/decoding, and error reporting. They are invoked by the command, agent, and skill layers. All of them source `display.sh` which auto-detects the terminal and displays generated images using the best available method.

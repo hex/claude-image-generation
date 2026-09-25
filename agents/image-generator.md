@@ -128,7 +128,8 @@ You are an image generation agent that creates and edits images using Google Gem
    **Multiple providers (parallel):**
    Use `run-all.sh` — one Bash call that forks all providers in parallel into a single
    shared streaming pane. Each provider produces `<base>-<provider>.png`, and the pane
-   shows colored banners + an animated spinner as results land.
+   shows colored banners as results land, with a line naming the providers still pending
+   (animated until the first image, then written once under each new block).
 
    Providers share a pane only while they overlap in time. Running the three scripts as
    three separate sequential Bash calls gives three panes, one per call — so reach for
@@ -149,7 +150,7 @@ You are an image generation agent that creates and edits images using Google Gem
    To run a subset of providers, pass `--providers gemini,openai` (comma-separated). To pass
    per-provider tuning flags, use `--gemini-extra "..."`, `--openai-extra "..."`,
    `--xai-extra "..."`, `--openrouter-extra "..."` — each is a single shell-split string of
-   additional arguments forwarded to that provider (e.g. `--openrouter-extra "--model openai/gpt-5-image"`).
+   additional arguments forwarded to that provider (e.g. `--openrouter-extra "--model openai/gpt-image-2"`).
 
    ```bash
    # Generate at 4K with Gemini, high quality with OpenAI, 2K with xAI
@@ -182,13 +183,13 @@ OpenAI (`openai.sh`):
 - `--moderation low` — less restrictive content filtering
 - `--output-format jpeg` for faster generation, `--output-format webp` for smaller files
 - `--output-compression 80` — compression level for jpeg/webp
-- `--background transparent` — transparent background (supported on gpt-image-2 and gpt-image-1.5)
-- `--input-fidelity high` — preserves faces/logos/textures in edit mode
+- `--background transparent` — transparent background (gpt-image-1.5; preview on gpt-image-2, with `--output-format` png or webp only)
+- `--input-fidelity high` — preserves faces/logos/textures in edit mode; not accepted with gpt-image-2 (that model always uses high fidelity; openai.sh refuses the flag)
 - `--model gpt-image-1-mini` — 3-4x cheaper for drafts; `--model gpt-image-1.5` for previous flagship
 
 xAI (`xai.sh`):
 - `--resolution 2k` — 2K output (LOWERCASE required, opposite of Gemini)
-- `--aspect-ratio 16:9` or `--aspect-ratio auto`
+- `--aspect-ratio 16:9` or `--aspect-ratio auto` (`auto`, `19.5:9` and `9:19.5` work on the Bash path only; the generate tool's `aspectRatio` takes whole-number `W:H`)
 - `--quality medium` — pin medium quality on `grok-imagine-image-2.0` (unset means auto: low for generation, medium for edits)
 - `--model grok-imagine-image` — standard tier, 300 RPM
 

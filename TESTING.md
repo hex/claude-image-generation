@@ -52,13 +52,13 @@ bats tests/openai.bats
 | `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 14 input images rejected |
 | `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 16 input images rejected, multiple images with `dall-e-2` rejected |
 | `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 5 input images rejected, `--quality` validation |
-| `tests/openrouter.bats` | `scripts/openrouter.sh` | Argument validation, missing API key, model override, chat-completions payload shape, image and text-only responses |
+| `tests/openrouter.bats` | `scripts/openrouter.sh` | Argument validation including an invalid `--mode`, missing API key, model override, usage text, a choice-level error on an HTTP 200 response reported by message |
 | `tests/retry.bats` | `scripts/retry.sh` | `curl_with_retry` on 429/5xx/network failures, delay doubling, `IMAGE_MAX_RETRIES` / `IMAGE_RETRY_DELAY`, attempt count handoff |
 | `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
-| `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), fixed 30% image sizing + DPI normalization, empty-timing parse, spinner silencing after the first image |
+| `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), image normalization to the display box + DPI pinning, empty-timing parse, the `waiting on` line (animated until the first image, then written once per block, clipped to the pane width), resize redraw and its replay order, retry labels on the waiting line, the retry offer (countdown, `r`, expiry, Esc, reprint after a resize) |
 | `tests/shared_pane.bats` | `scripts/display.sh`, `scripts/run-all.sh` | One pane per batch: registry attach, create-race wait, abandoned-claim takeover, stale/dismissed entries, token refcount, run-all attach + ownership |
-| `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction; multi-image payload shape (gemini inlineData part count in edit and generate modes, openai repeated `image[]` multipart fields, xai `images` array length) |
-| `tests/run-all.bats` | `scripts/run-all.sh` | `--input-image` forwarding — every repeated flag reaches each provider (provider scripts stubbed) |
+| `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction; multi-image payload shape (gemini inlineData part count in edit and generate modes, openai repeated `image[]` multipart fields, xai `images` array length, openrouter `image_url` content parts); xai `--quality` in the request body and the reported format; every provider retrying a 503 and reporting it to the pane |
+| `tests/run-all.bats` | `scripts/run-all.sh` | The retry offer: names only the failed providers, re-forks exactly those when the pane answers `.retry`, treats a pane closed mid-offer as no retry, writes no offer with `DISPLAY_PANE_RETRY_WAIT=0`, guards the pane release after a retry succeeds; `--input-image` forwarding (every repeated flag reaches each provider; provider scripts stubbed) |
 | `tests/bash32_compat.bats` | provider + display scripts | bash 3.2 array / associative-array safety |
 | `tests/frontmatter.bats` | skill / agent / command | YAML frontmatter validation |
 | `tests/argv.test.ts` | `hooks/argv.ts` | The generate tool's input rules: blank prompt, unknown provider, wrong field types, `outputBase` with an extension, malformed aspect ratio, config defaults vs. call overrides, edit mode, prompt kept as one argv element |
@@ -193,6 +193,18 @@ bash scripts/run-all.sh --mode edit --prompt "combine these" \
 
 These tests require a running Claude Code session with the plugin loaded. They verify end-to-end behavior.
 
+With the generate tool loaded (a Claude Code build with function hooks), the command skips the provider and path questions and uses the `/config` defaults (Default providers `all`, Output directory `.`). Run the steps below that answer those questions on a build without function hooks, or change the `/config` defaults first.
+
+When a session loads both the marketplace copy and a `--plugin-dir` copy of the plugin, the short name `/generate-image` is ambiguous; use `/claude-image-generation:generate-image`.
+
+### 3.0 Generate Tool
+
+**Setup:** A build with function hooks (see section 1), at least one API key set.
+
+1. Ask for an image that names providers, an output path and an aspect ratio (for example "draw a lighthouse at dusk with gemini and xai, save it as ./out/lighthouse, 16:9"), and check the call carries `providers`, `outputBase` and `aspectRatio`
+2. Check the result lists `saved ./out/lighthouse-gemini.png` and `saved ./out/lighthouse-xai.png`, or a `missing` line for any provider that failed, followed by `run-all.sh exited <code>`
+3. Trigger each refusal and check the tool refuses before anything runs: a blank prompt, a field of the wrong type (such as `providers` as a string), an unknown provider, an `outputBase` ending in `.png`, `.jpg`, `.jpeg` or `.webp`, and an aspect ratio that is not whole-number `W:H` (such as `auto` or `19.5:9`)
+
 ### 3.1 Basic Generation
 
 **Setup:** At least one API key set.
@@ -241,7 +253,7 @@ These tests require a running Claude Code session with the plugin loaded. They v
 1. Run `/generate-image a simple blue circle`
 2. Select "All in parallel"
 3. Verify a single task is created tracking the parallel run (`run-all.sh` owns parallelism; the agent does not orchestrate per-provider Task subagents)
-4. Verify a streaming pane opens (30% of the terminal's longer axis — a right-hand column on a wide terminal, a bottom band on a tall/narrow one) showing a colored banner + rendered image as each provider completes, plus a bottom spinner of pending providers that is shown only until the first image renders
+4. Verify a streaming pane opens (30% of the terminal's longer axis — a right-hand column on a wide terminal, a bottom band on a tall/narrow one) showing a colored banner + rendered image as each provider completes, plus a bottom `waiting on` line naming the pending providers. It animates until the first image renders; after that the watcher writes it once more under each new block, naming the providers still pending, and never rewrites it
 5. Verify three output files are generated with provider-suffixed filenames (e.g., `image-gemini.png`, `image-openai.png`, `image-xai.png`)
 
 ### 3.4 Output Location
@@ -256,9 +268,9 @@ These tests require a running Claude Code session with the plugin loaded. They v
 1. Run `/generate-image a sunset over the ocean` and select "All in parallel"
 2. Observe that a single task tracking the parallel run is created and marked in_progress
 3. A streaming pane opens, taking 30% of the terminal's longer axis (a right-hand column when the terminal is wide, a bottom band when it is tall/narrow). As each provider finishes, a colored banner appears (gemini blue / openai gray / xai red) with the model name and elapsed timing, followed by the rendered image
-4. Until the first image renders, the bottom of the pane shows an animated spinner with the names of pending providers in their accent colors. Once the first image appears the spinner goes silent — further redraws would erase the accumulated inline images in tmux control mode — so later providers appear as banner + image with no spinner
+4. Until the first image renders, the bottom of the pane shows an animated `waiting on` line with the names of pending providers in their accent colors. Once the first image appears the line stops animating: the watcher writes it once more under each new block, naming the providers still pending, and never rewrites it, because a repeated redraw would erase the accumulated inline images in tmux control mode
 5. When all providers complete, the pane shows interactive controls (`[f]inder [p]review [esc/ctrl-d]`)
-6. The task is marked completed and all output paths are reported. If any provider failed, run-all.sh exits with status 1 and the error appears as a red banner inline (with details in `$DISPLAY_PANE_DIR/logs/<provider>.err`)
+6. The task is marked completed and all output paths are reported. If any provider failed, run-all.sh exits with status 1 and the error appears inline in the pane as a red banner. The per-provider logs under `$DISPLAY_PANE_DIR/logs/` exist only while the pane is open; the pane deletes them when it closes, and `DISPLAY_PANE_DIR` never reaches the caller
 
 ### 3.6 One Pane Across Concurrently-Launched Providers
 
@@ -292,7 +304,10 @@ wait
    ```bash
    bash scripts/gemini.sh --mode transform --prompt "test" --output /tmp/test.png
    ```
-   The script will proceed but the API will reject the request (no client-side mode validation beyond generate/edit).
+   The scripts handle an unsupported mode differently:
+   - `gemini.sh` and `xai.sh` do not check `--mode`; any value other than `edit` runs a normal generation.
+   - `openai.sh` exits with an unbound-variable error, since neither its generate nor its edit branch runs.
+   - `openrouter.sh` exits 1 with "Error: --mode must be 'generate' or 'edit'".
 
 2. Run with an unreachable output path:
    ```bash
@@ -309,7 +324,7 @@ wait
 ### Rate Limiting
 
 1. Trigger many requests rapidly (or simulate HTTP 429)
-2. **Expected:** Script prints the HTTP 429 error and the API error message. The skill documentation advises switching to the other provider.
+2. **Expected:** The script retries a 429 up to three times first; if it still fails, it prints the HTTP 429 error and the API error message. Try again later or use another provider.
 
 ### Large Input Image (Gemini)
 

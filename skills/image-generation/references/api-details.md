@@ -55,7 +55,7 @@ The Gemini API uses a unified `generateContent` endpoint. Images are passed as `
 
 **14 aspect ratios** (3.1 Flash): `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9`, `1:4`, `4:1`, `1:8`, `8:1`. The 4 extreme ratios are 3.1 Flash only; the Pro image model supports only 10 ratios.
 
-### Google Search Grounding (3.1 Flash)
+### Google Search Grounding (Gemini 3 image models; Image Search on 3.1 Flash only)
 Top-level `tools` field (REST uses `google_search`, SDKs use `googleSearch`):
 
 ```json
@@ -111,6 +111,14 @@ Pricing: 5,000 grounding prompts/month free across Gemini 3 models, then $14 per
 | 4K         | $0.151         | 2,520         |
 
 Token rates: input $0.50/MTok, output text+thinking $3.00/MTok, output images $60.00/MTok. Batch API: 50% discount.
+
+### Pricing (gemini-3-pro-image, Standard tier)
+| Resolution | Cost per image | Output tokens |
+|------------|----------------|---------------|
+| 1K, 2K     | $0.134         | 1,120         |
+| 4K         | $0.24          | 2,000         |
+
+Token rates: input text/image $2.00/MTok (about $0.0011 per input image), output text+thinking $12.00/MTok, output images $120.00/MTok.
 
 ### Rate Limits
 - **Free tier: image generation not available** (IPM dropped to 0 in December 2025)
@@ -168,7 +176,6 @@ image[]=@path/to/second.png
 size=1024x1024
 output_format=png
 moderation=auto
-input_fidelity=high
 ```
 
 Multiple input images are sent as repeated `image[]` fields (up to 16). The generation endpoint accepts no image parameters, so reference-based composition goes through `/v1/images/edits`.
@@ -184,8 +191,7 @@ Content-Type: application/json
   "images": [
     {"image_url": "https://example.com/source.png"},
     {"file_id": "file-abc123"}
-  ],
-  "input_fidelity": "high"
+  ]
 }
 ```
 Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (Files API upload). Multipart form format still supported in parallel.
@@ -194,13 +200,13 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 
 | Parameter | Values | Notes |
 |-----------|--------|-------|
-| `size` | `auto`, `1024x1024`, `1536x1024`, `1024x1536` | Default `1024x1024` |
+| `size` | `auto` or `WxH` | Plugin default `1024x1024`. gpt-image-2 takes any size with both edges multiples of 16, max edge 3840, long-to-short ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`). Older models take `1024x1024`, `1536x1024`, `1024x1536` |
 | `quality` | `auto`, `low`, `medium`, `high` | Default `high` |
-| `background` | `auto`, `transparent`, `opaque` | `transparent` supported on gpt-image-2 and gpt-image-1.5 |
+| `background` | `auto`, `transparent`, `opaque` | `transparent` supported on gpt-image-1.5 and, in preview, on gpt-image-2 (`png` or `webp` output only; `jpeg` is not supported with it) |
 | `output_format` | `png`, `jpeg`, `webp` | `jpeg` is faster than `png` |
 | `output_compression` | integer 0-100 | Only applies to `jpeg`/`webp` |
 | `moderation` | `auto` (default), `low` | Less restrictive filtering; gpt-image models only |
-| `input_fidelity` | `low` (default), `high` | Edit only. `high` preserves faces/logos/textures. For 2/1.5: first 5 images get high fidelity. For 1/mini: first image only. |
+| `input_fidelity` | `low` (default), `high` | Edit only; not accepted with gpt-image-2, which always uses high fidelity (`openai.sh` refuses the flag for it). `high` preserves faces/logos/textures. On 1.5 the first 5 images get high fidelity; on gpt-image-1 and mini only the first. |
 | `partial_images` | integer 0-3 | SSE streaming, +100 output tokens per partial |
 
 ### Response Format
@@ -228,7 +234,7 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 
 ### Pricing
 
-**gpt-image-2**: pricing not yet enumerated on the model reference page — see https://platform.openai.com/docs/pricing for current per-image rates.
+**gpt-image-2** token pricing (standard): input image $8/MTok, input text $5/MTok, output image $30/MTok (cached input $2 image, $1.25 text; Batch halves each). OpenAI publishes no flat per-image price for it; see the cost calculator in its image generation guide.
 
 **gpt-image-1.5** output per image (excludes input tokens):
 | Quality | 1024x1024 | 1024x1536 | 1536x1024 |
@@ -335,6 +341,7 @@ The plugin always sends the `images` array form — even for a single input imag
 |-----------|--------|-------|
 | `aspect_ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` | `auto` lets model pick; `21:9` and `5:2` added 2026-08-28 |
 | `resolution` | `1k`, `2k` | **LOWERCASE required** — opposite of Gemini! Same price at both resolutions. |
+| `quality` | `low`, `medium`, `auto` | `grok-imagine-image-2.0` only. Omitted means `auto`: `low` for generation, `medium` for edits |
 | `n` | 1-10 | Images per request |
 | `response_format` | `url`, `b64_json` | Default: `url` |
 
@@ -382,10 +389,9 @@ Image generation and editing supported via `/v1/batches`. Batch URLs expire afte
 - Generated URLs are temporary (download promptly)
 - Flat per-image pricing (not token-based)
 - Prompts are revised by a chat model before generation (returned as `revised_prompt`)
-- `quality`, `size`, `style`, `seed`, `negative_prompt`, `guidance_scale`, `mask` — not supported
+- `size`, `style`, `seed`, `negative_prompt`, `guidance_scale`, `mask`: not supported. Only `grok-imagine-image-2.0` takes `quality`
 - **JPEG output quirk**: `response_format: "b64_json"` returns JPEG-encoded data regardless of filename. Files saved as `.png` contain JPEG content. Confirmed in official docs (examples save output with `.jpg` extension).
 - **Content moderation tightened 2026-01**: two-layer guard (prompt + post-gen classifier). Expect `content_policy_violation` errors on prompts with real identifiable people in altered contexts.
-- Quality/Speed generation modes are **consumer UI only** (grok.com/imagine), NOT API parameters
 
 ## OpenRouter (gateway)
 
@@ -437,7 +443,7 @@ The generated image is returned as a base64 data URL inside the assistant messag
   }]
 }
 ```
-The plugin reads `.choices[0].message.images[0].image_url.url`, strips the `data:<mime>;base64,` prefix, and decodes the remainder. If no image is present it falls back to reporting `.choices[0].message.content` (a refusal or text-only reply). Errors come back as `.error.message`.
+The plugin reads `.choices[0].message.images[0].image_url.url`, strips the `data:<mime>;base64,` prefix, and decodes the remainder. If no image is present it falls back to reporting `.choices[0].message.content` (a refusal or text-only reply). Errors come back as `.error.message`, except a failure upstream mid-generation: that arrives as HTTP 200 with `choices[0].error` (`code`, `message`), which the plugin reports by its code and message.
 
 ### Models
 `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-3.1-flash-image`. Others include `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0` and `openai/gpt-image-2`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
