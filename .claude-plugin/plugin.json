@@ -8,5 +8,28 @@
   },
   "repository": "https://github.com/hex/claude-image-generation",
   "license": "MIT",
-  "keywords": ["image-generation", "gemini", "openai", "gpt-image", "xai", "grok-image", "openrouter", "text-to-image", "image-editing"]
+  "keywords": ["image-generation", "gemini", "openai", "gpt-image", "xai", "grok-image", "openrouter", "text-to-image", "image-editing"],
+  "userConfig": {
+    "defaultProviders": {
+      "type": "string",
+      "title": "Default providers",
+      "description": "Which providers the generate tool runs when a call names none. \"all\" runs gemini, openai and xai in parallel; openrouter is opt-in.",
+      "required": false,
+      "default": "all",
+      "options": [
+        "all",
+        "gemini",
+        "openai",
+        "xai",
+        "openrouter"
+      ]
+    },
+    "outputDir": {
+      "type": "string",
+      "title": "Output directory",
+      "description": "Where the generate tool saves images when a call gives no outputBase, relative to the session's working directory.",
+      "required": false,
+      "default": "."
+    }
+  }
 }
