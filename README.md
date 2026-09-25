@@ -129,7 +129,7 @@ Browse the full list at [openrouter.ai/models](https://openrouter.ai/models?fmt=
 /generate-image --edit ./photo.png remove the background and make it transparent
 ```
 
-The command prompts you to select a provider (Gemini, OpenAI, xAI, OpenRouter, or all in parallel) and an output path.
+Without the generate tool (see Generate Tool under Usage), the command prompts you to select a provider (Gemini, OpenAI, xAI, OpenRouter, or all in parallel) and an output path.
 
 ### Agent (Automatic)
 
@@ -156,7 +156,7 @@ Two rows in `/config` set its defaults:
 | Default providers | `all` (gemini, openai, xai), `gemini`, `openai`, `xai`, `openrouter` | `all` |
 | Output directory | any path, relative to the session's working directory | `.` |
 
-The slash command and the agent don't use the tool yet; they still run the scripts through Bash.
+The slash command, the agent and the skill use the tool whenever the session offers it, and skip the provider and path questions. They fall back to running the scripts through Bash on builds without it, or when a request needs an option the tool does not take (image size, quality, transparent background, a specific model, or another per-provider flag).
 
 ### Direct Script Usage
 

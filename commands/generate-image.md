@@ -1,6 +1,6 @@
 ---
 description: Generate or edit images using AI (Gemini/OpenAI/xAI/OpenRouter)
-allowed-tools: Bash, Read, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList
+allowed-tools: mcp__claude-image-generation__generate, Bash, Read, AskUserQuestion, Task, TaskCreate, TaskUpdate, TaskList
 argument-hint: <prompt> [--edit <image-path>]
 ---
 
@@ -13,18 +13,30 @@ Generate or edit an image based on the user's request.
    - If `--edit` is present, the next argument is the path to an input image for editing
    - Determine mode: "edit" if --edit flag is present, otherwise "generate"
 
-2. Ask the user which provider to use with AskUserQuestion:
+2. If the `mcp__claude-image-generation__generate` tool is available, use it and skip steps 3-5:
+   - Call it with `prompt`, plus `inputImages: ["<input-path>"]` in edit mode.
+   - Pass `providers`, `outputBase` or `aspectRatio` only when the arguments name them. Leave
+     them out otherwise: the tool falls back to the person's `/config` defaults, so don't ask
+     which provider to use or where to save.
+   - The tool opens the same streaming pane and retry offer as `run-all.sh`.
+   - Its result lists each expected file as `saved` or `missing`; go to step 6 with it. If it
+     refuses the call, show its message and fix the input rather than retrying unchanged.
+   Take the Bash path in steps 3-5 instead when the tool is not available, or when the
+   request needs an option the tool does not take (image size, quality, transparent
+   background, a specific model, or another per-provider flag).
+
+3. Ask the user which provider to use with AskUserQuestion:
    - **Gemini** (gemini-3-pro-image): Premium quality, professional asset production, up to 14 reference images
    - **OpenAI** (gpt-image-2): Best for text rendering and transparent backgrounds
    - **xAI** (grok-imagine-image-2.0): Flagship, quality tiers, flat per-image pricing
    - **OpenRouter** (google/gemini-3.1-flash-image): Gateway to many image models through one key; pass any OpenRouter model slug via `--model`
    - **All in parallel**: Generate with the default providers (Gemini, OpenAI, xAI) and pick the best result. OpenRouter is opt-in — include it explicitly with `--providers gemini,openai,xai,openrouter` if the user wants it in the parallel run.
 
-3. Ask the user where to save the output with AskUserQuestion:
+4. Ask the user where to save the output with AskUserQuestion:
    - Current directory (e.g., `./generated-image.png`)
    - Custom path (let them type)
 
-4. Execute the generation using tasks for progress tracking:
+5. Execute the generation using tasks for progress tracking:
 
    **If single provider selected:**
    a. Create a task with TaskCreate:
@@ -67,7 +79,7 @@ Generate or edit an image based on the user's request.
       When a provider fails, the pane offers a retry for up to 45 seconds, so the call can
       return later than the slowest provider.
 
-5. After generation completes, confirm the output path(s) to the user.
+6. After generation completes, confirm the output path(s) to the user.
    If multiple were generated, let the user know all files are available so they can compare.
 
 ## Environment Requirements

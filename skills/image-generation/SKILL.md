@@ -43,6 +43,17 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 
 ## Usage
 
+### Generate Tool
+
+When `mcp__claude-image-generation__generate` is available (Claude Code builds with function
+hooks), prefer it over the scripts below. It takes `prompt`, and optionally `providers`,
+`outputBase` (a path without extension), `inputImages` (switches to edit mode) and
+`aspectRatio` (gemini and xai only). Leave `providers` and `outputBase` out unless the request
+gives them: the tool uses the person's `/config` defaults. It runs `run-all.sh`, so the pane
+and the retry offer behave as described under Parallel Generation, and it answers with each
+expected file marked `saved` or `missing`. Use the scripts instead when the request needs an
+option the tool does not take, such as `--image-size`, `--quality`, `--background`, `--model`.
+
 ### Text-to-Image Generation
 
 Use the scripts at `${CLAUDE_PLUGIN_ROOT}/scripts/`:
