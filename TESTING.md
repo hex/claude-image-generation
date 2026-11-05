@@ -51,19 +51,23 @@ bats tests/openai.bats
 |-----------|-------------------|----------------|
 | `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 14 input images rejected |
 | `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 16 input images rejected, multiple images with `dall-e-2` rejected, a prompt starting with `@` passed to curl with `--form-string` |
-| `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 5 input images rejected, `--quality` validation |
+| `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 5 input images rejected and five sent in one edit request, `--quality` validation |
 | `tests/openrouter.bats` | `scripts/openrouter.sh` | Argument validation including an invalid `--mode`, missing API key, model override, usage text, a choice-level error on an HTTP 200 response reported by message |
+| `tests/check_status.bats` | `scripts/check-status.sh` | A stub curl that answers per URL: a missing key sends no request; each provider's rejected-key answer (Gemini and xAI 400, OpenAI and OpenRouter 401) reads rejected, and a Gemini or xAI 400 that does not name the key does not; a model in the list reads `yes`, through an xAI alias too, and a missing one `no`, as does an OpenRouter model without image output; a Gemini list with more pages reads `unknown`; a request with no answer names curl's exit code, and a non-JSON list, or a 200 with an empty body from any provider, reads unreadable; keys reach curl as a header on stdin, never in its arguments; xAI falls back to `GROK_API_KEY`; each row's model matches the model its provider script sends; a provider script without its `MODEL="${VAR:-default}"` line, or a missing jq, stops the check with exit 1; the check leaves no response body in `$TMPDIR`. Runs under `/bin/bash` (3.2) |
+| `tests/model_fallback.bats` | `scripts/model-fallback.sh`, provider scripts | Runtime model fallback under `/bin/bash`: every provider retrying an unavailable default once with its fallback (model read from the gemini URL, the openai edit form field, or the JSON body); the fallback notice naming provider, model and status but none of the API's message (xAI's carries the team ID); the verdict recorded once the fallback answers HTTP 200, an OpenRouter 200 whose choice holds an error and no image included (that run still exits 1 naming the error), honoured by the next run, ignored past `IMAGE_AVAILABILITY_TTL` or with `0`, kept per key, stale when unreadable, its timestamp and the TTL read as decimal despite leading zeros, written through a temp file `mktemp` creates so a symlink planted at a temp path named after the process ID is never followed; a fallback that is unavailable too ending the run after two requests; no fallback for a bad key, a bad parameter, or a model named by `--model` or `*_IMAGE_MODEL`; a 503 retried on the default before a 404 moves to the fallback; the pane's status rows naming the fallback; the classifier over every captured answer in `tests/fixtures/model-fallback/` (`unavailable/` must classify unavailable, `other/` must not) |
 | `tests/retry.bats` | `scripts/retry.sh` | `curl_with_retry` on 429/5xx/network failures, delay doubling, `IMAGE_MAX_RETRIES` / `IMAGE_RETRY_DELAY`, attempt count handoff |
-| `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
-| `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), image normalization to the display box + DPI pinning, empty-timing parse, the `waiting on` line (animated until the first image, then written once per block, clipped to the pane width), resize redraw and its replay order, retry labels on the waiting line, the retry offer (countdown, `r`, expiry, Esc, reprint after a resize) |
+| `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling, the single-image and multi-image panes showing and opening a path with quotes, `$` and `\` whole |
+| `tests/tmux_pane.bats` | `scripts/display.sh` | The single-image and multi-image panes opened on a private, detached tmux server (`tmux -L`, killed in teardown along with its socket file): a path ending in `;` or `\;`, or a lone `;`, reaches the pane's drawing command byte for byte, and a `;` path first in a multi-image pane leaves the next path intact. Skips when tmux is not installed. Runs under `/bin/bash` (3.2) |
+| `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), image normalization to the display box + DPI pinning, empty-timing parse, the `waiting on` line (animated until the first image, then written once per block, clipped to the pane width), resize redraw and its replay order, retry labels on the waiting line, the retry offer (countdown, `r`, expiry, Esc, reprint after a resize), a model or path with tabs and newlines staying one status or manifest record, the close prompt's `f` and `p` keys opening each image whole, and every image a provider completed in a pane two batches share, each path once in the order it arrived |
 | `tests/shared_pane.bats` | `scripts/display.sh`, `scripts/run-all.sh` | One pane per batch: registry attach, create-race wait, abandoned-claim takeover, stale/dismissed entries, token refcount, run-all attach + ownership |
 | `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction; multi-image payload shape (gemini inlineData part count in edit and generate modes, openai repeated `image[]` multipart fields, xai `images` array length, openrouter `image_url` content parts); xai `--quality` in the request body and the reported format; every provider retrying a 503 and reporting it to the pane; every provider refusing an input that is not an image, a missing path and `/dev/zero` before any request; gemini, xai and openrouter sending two different images as their own bytes, each typed by its content (a GIF named `.png` goes as `image/gif`); the openai request sent by the real curl to `tests/one_request_server.py` (needs `python3`): every free-text field set to `@<file>` arrives as typed, and images named with `,` `;` `"` `\` or `-` arrive as their own bytes; an input file replaced after the check still uploads the checked bytes; every provider removing its copies of the input images on exit, refused or not. The multi-megabyte tests skip unless a large PNG named `test-input.png` sits at the repository root (gitignored) |
+| `tests/output_image.bats` | `scripts/output-image.sh` through every provider | Never overwriting: each provider refuses an `--output` that is a file, a symlink or a dangling symlink before calling curl, shows the refusal in the pane and leaves the old file and the link's target unchanged; refuses a symlink (to a file, `/dev/null` or a named pipe) or a folder that appears at the path while the request runs, and leaves it unchanged; leaves no file behind, temp file included, when the image data does not decode; keeps a file another process put at the path while the decode ran when the decode fails; saves the image with the mode the umask gives a new file (640 under `027`), under `/bin/bash` |
 | `tests/run-all.bats` | `scripts/run-all.sh` | The retry offer: names only the failed providers, re-forks exactly those when the pane answers `.retry`, treats a pane closed mid-offer as no retry, writes no offer with `DISPLAY_PANE_RETRY_WAIT=0`, guards the pane release after a retry succeeds; `--input-image` forwarding (every repeated flag reaches each provider; provider scripts stubbed) |
 | `tests/bash32_compat.bats` | provider + display scripts | bash 3.2 array / associative-array safety |
 | `tests/frontmatter.bats` | skill / agent / command | YAML frontmatter validation |
-| `tests/argv.test.ts` | `hooks/argv.ts` | The generate tool's input rules: blank prompt, unknown provider, wrong field types, `outputBase` with an extension, malformed aspect ratio, config defaults vs. call overrides, edit mode, prompt kept as one argv element |
+| `tests/argv.test.ts` | `hooks/argv.ts`, `hooks/index.ts` | The generate tool's input rules: blank prompt, a null character in the prompt, a prompt over 100,000 bytes (and one at the limit), unknown or repeated provider, wrong field types, `outputBase` that is blank, names a folder or has an extension, a control character in `outputBase` or an `inputImages` path, malformed or zero-sided aspect ratio, config defaults vs. call overrides, edit mode, prompt kept as one argv element. The `tool.call` hook: an existing file or dangling symlink at an output path refuses the call before `run-all.sh` runs; free paths run once and the answer lists what the run saved |
 
-Tests do not make real API calls. They validate argument parsing, error messages, exit codes, and terminal protocol output.
+Tests do not make real API calls. They validate argument parsing, error messages, exit codes, and terminal protocol output. The four provider test files call `stub_provider_api` (in `tests/test_helper.bash`) from `setup()`, so a test that runs a script as far as the API call gets an HTTP 401 from a local curl stub instead of sending a request.
 
 `tests/argv.test.ts` runs under `claude plugin test .`, not bats. `tsc -p .` type-checks the hooks module once `/plugin-types` has written `.claude/types`. To try the tool itself, start `claude --plugin-dir .` with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`. Saving a hooks file reloads the module, but the tool is registered at `session.start`, so a change to its name, description or schema needs a fresh session.
 
@@ -110,6 +114,8 @@ bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
 ```
 
 ### Model Override via Environment Variable
+
+The scripts never overwrite an output. With a valid key the first command saves `/tmp/test.png` and the next one refuses it before printing its model line, so delete `/tmp/test.png` between runs.
 
 ```bash
 # Gemini model override
@@ -189,6 +195,32 @@ bash scripts/run-all.sh --mode edit --prompt "combine these" \
 - xAI edit output is commonly JPEG data even when saved with a `.png` extension (verify with `file /tmp/multi-xai.png`)
 - Known limitation: `dall-e-2` edits remain non-functional even with a single image — the script sends form fields only the gpt-image models accept
 
+### Model Fallback Smoke Test (Real API Calls)
+
+**Setup:** API keys for the providers under test. Costs one image per provider. A model named by `*_IMAGE_MODEL` never falls back, so the test pins a model id that does not exist as the default in a copy of the scripts, which is what a retired default looks like to the script.
+
+```bash
+work=$(mktemp -d "${TMPDIR:-/tmp}/fallback.XXXXXX")
+cp -R scripts "$work/"
+sed -i '' 's/:-gemini-3-pro-image}/:-no-such-image-model-x9}/' "$work/scripts/gemini.sh"
+sed -i '' 's/:-gpt-image-2}/:-no-such-image-model-x9}/' "$work/scripts/openai.sh"
+sed -i '' 's/:-grok-imagine-image-2.0}/:-no-such-image-model-x9}/' "$work/scripts/xai.sh"
+sed -i '' 's#:-google/gemini-3.1-flash-image}#:-google/no-such-image-model-x9}#' "$work/scripts/openrouter.sh"
+export XDG_CACHE_HOME="$work/cache"
+unset GEMINI_IMAGE_MODEL OPENAI_IMAGE_MODEL XAI_IMAGE_MODEL OPENROUTER_IMAGE_MODEL
+for p in gemini openai xai openrouter; do
+  extra=(); [[ $p == openai ]] && extra=(--quality low)
+  env -u TMUX -u TMUX_PANE bash "$work/scripts/$p.sh" --mode generate \
+    --prompt "a small red paper boat on calm blue water" --output "$work/$p.png" "${extra[@]}"
+done
+ls "$work/cache/claude-image-generation/model-verdicts/"
+```
+
+**Expected:**
+
+- Each run prints `no-such-image-model-x9 is unavailable to this key (<provider>, HTTP <code>); drawing with fallback <fallback>`, with none of the API's message, and saves an image
+- The verdict directory holds one file per provider; running a provider again prints `... is remembered as unavailable to this key; drawing with fallback ...` and sends one request
+
 ## 3. Feature Tests (Via Slash Command)
 
 These tests require a running Claude Code session with the plugin loaded. They verify end-to-end behavior.
@@ -203,7 +235,8 @@ When a session loads both the marketplace copy and a `--plugin-dir` copy of the 
 
 1. Ask for an image that names providers, an output path and an aspect ratio (for example "draw a lighthouse at dusk with gemini and xai, save it as ./out/lighthouse, 16:9"), and check the call carries `providers`, `outputBase` and `aspectRatio`
 2. Check the result lists `saved ./out/lighthouse-gemini.png` and `saved ./out/lighthouse-xai.png`, or a `missing` line for any provider that failed, followed by `run-all.sh exited <code>`
-3. Trigger each refusal and check the tool refuses before anything runs: a blank prompt, a field of the wrong type (such as `providers` as a string), an unknown provider, an `outputBase` ending in `.png`, `.jpg`, `.jpeg` or `.webp`, and an aspect ratio that is not whole-number `W:H` (such as `auto` or `19.5:9`)
+3. Trigger each refusal and check the tool refuses before anything runs: a blank prompt, a field of the wrong type (such as `providers` as a string), an unknown provider, a provider named twice, an `outputBase` that is blank, ends in `/`, or ends in `.png`, `.jpg`, `.jpeg` or `.webp`, an `outputBase` holding a newline, and an aspect ratio that is not whole-number `W:H` (such as `auto`, `19.5:9` or `0:0`)
+4. Ask for the image from step 1 again with the same output path, and check the tool refuses with `./out/lighthouse-gemini.png already exists` and `./out/lighthouse-xai.png already exists`, runs no provider, and leaves both files as they were. Replace one of them with a symlink to another file (`printf canary > ./out/canary.txt && ln -sf canary.txt ./out/lighthouse-xai.png`), ask again, and check the refusal still names it and `./out/canary.txt` still reads `canary`
 
 ### 3.1 Basic Generation
 
@@ -285,7 +318,7 @@ wait
 1. Verify exactly one pane opens, not one per provider
 2. Verify both providers render into it, each under its own colored banner
 3. Verify the pane stays open until the slower provider finishes, then shows `[f]inder [p]review [esc/ctrl-d]`
-4. Run the same two commands again after the pane is dismissed and verify a fresh pane opens rather than the images landing in the dismissed one
+4. Delete `/tmp/pane-gemini.png` and `/tmp/pane-xai.png` (the scripts never overwrite an output), run the same two commands again after you dismiss the pane, and verify a fresh pane opens rather than the images landing in the dismissed one
 5. Start a provider in the background, then run `run-all.sh` while it is still generating, and verify both stream into the same pane and that run-all does not dismiss it while the background provider is still working
 
 ## 4. Edge Cases
@@ -339,7 +372,18 @@ wait
    printf 'not an image\n' > /tmp/notes.png
    bash scripts/gemini.sh --mode edit --prompt "test" --input-image /tmp/notes.png --output /tmp/test.png
    ```
-2. **Expected:** both exit 1 before any API call, with `Error: --input-image is not a readable file: ./nonexistent.png` and then `Error: --input-image is not a PNG, JPEG, WebP or GIF image: /tmp/notes.png`. The API key check runs first, so set `GEMINI_API_KEY` to any value.
+2. **Expected:** both exit 1 before any API call, with `Error: --input-image is not a readable file: ./nonexistent.png` and then `Error: --input-image is not a PNG, JPEG, WebP or GIF image: /tmp/notes.png`. The API key check runs first, so set `GEMINI_API_KEY` to any value. The output check runs next, so make sure `/tmp/test.png` does not exist.
+
+### Existing Output Path
+
+1. Put a file and a dangling symlink where the scripts would save:
+   ```bash
+   printf 'OLD IMAGE' > /tmp/taken.png
+   ln -sf /tmp/nowhere.txt /tmp/dangling.png
+   GEMINI_API_KEY=any bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/taken.png
+   GEMINI_API_KEY=any bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/dangling.png
+   ```
+2. **Expected:** both exit 1 before any API call, with `Error: --output already exists, refusing to overwrite it: /tmp/taken.png` and then the same for `/tmp/dangling.png`. `/tmp/taken.png` still reads `OLD IMAGE`, and `/tmp/nowhere.txt` does not exist.
 
 ## 5. Checklist Summary
 
@@ -361,4 +405,5 @@ wait
 | Invalid API key | Edge case | HTTP error reported, script exits 1 |
 | Nonexistent input image | Edge case | Script exits with error |
 | Unreachable output path | Edge case | Script exits with error |
+| Existing output path | Automated / Manual | Exit 1 before any API call; the file, the symlink and its target unchanged |
 | Rate limit (HTTP 429) | Edge case | Error reported with API message |

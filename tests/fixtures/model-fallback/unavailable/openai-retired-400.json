@@ -1,0 +1,1 @@
+{"error":{"message":"The model 'dall-e-3' does not exist.","type":"image_generation_user_error","param":"model","code":"invalid_value"}}

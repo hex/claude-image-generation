@@ -21,6 +21,8 @@ Generate or edit an image based on the user's request.
    - The tool opens the same streaming pane and retry offer as `run-all.sh`.
    - Its result lists each expected file as `saved` or `missing`; go to step 6 with it. If it
      refuses the call, show its message and fix the input rather than retrying unchanged.
+     It never overwrites: when the refusal says a file `already exists`, call it again with an
+     unused `outputBase` (add `-2`, `-3`) and leave the existing files alone.
    Take the Bash path in steps 3-5 instead when the tool is not available, or when the
    request needs an option the tool does not take (image size, quality, transparent
    background, a specific model, or another per-provider flag).
@@ -35,6 +37,8 @@ Generate or edit an image based on the user's request.
 4. Ask the user where to save the output with AskUserQuestion:
    - Current directory (e.g., `./generated-image.png`)
    - Custom path (let them type)
+   The scripts never overwrite a file and exit 1 when the output path already exists, so
+   offer a name that is not taken yet.
 
 5. Execute the generation using tasks for progress tracking:
 

@@ -27,9 +27,10 @@ teardown() {
 # $MOCK_DIR/curl with a shebang and the argv walk. curl_with_retry rewrites a streamed
 # `--data-binary @-` body to `@<tempfile>` before every real curl invocation, so a stub never
 # actually sees `@-` from a provider script -- what it sees is `@<path>` from curl_with_retry,
-# or (openai's -d/-F calls, which pass no --data-binary at all) nothing, in which case it falls
-# back to draining stdin. Callers append their own response-serving lines after this and chmod
-# the result themselves.
+# or (openai's -d/-F calls, which pass no --data-binary at all) nothing. Real curl reads no stdin
+# for those, so the stub only leaves an empty request.txt to show it was called: reading stdin
+# there would wait forever whenever the test run inherits a stdin that stays open. Callers append
+# their own response-serving lines after this and chmod the result themselves.
 __stub_curl_prelude() {
   cat > "$MOCK_DIR/curl" <<'STUB'
 #!/bin/bash
@@ -43,7 +44,7 @@ done
 case "$body_arg" in
   @-) cat > "${d}/request.txt" 2>/dev/null ;;
   @*) cp "${body_arg#@}" "${d}/request.txt" 2>/dev/null ;;
-  *)  cat > "${d}/request.txt" 2>/dev/null ;;
+  *)  : > "${d}/request.txt" ;;
 esac
 STUB
 }
@@ -299,6 +300,7 @@ run_provider_edit() {
       xai)        query=".images[].url | ${data_url}" ;;
       openrouter) query=".messages[0].content[] | select(.type == \"image_url\") | .image_url.url | ${data_url}" ;;
     esac
+    rm -f "$OUT"
     stub_curl "$(success_body "$p")"
     run_provider_edit "$p" "$first" "$second"
     assert_edit_succeeds
@@ -410,6 +412,7 @@ STUB
   for p in gemini openai xai openrouter; do
     for path in "${PLUGIN_ROOT}/tests/fixtures/oversized.png" "$MOCK_DIR/key.png"; do
       printf 'stand-in for a private key\n' > "$MOCK_DIR/key.png"
+      rm -f "$OUT"
       rm -rf "$scratch" && mkdir -p "$scratch"
       stub_curl "$(success_body "$p")"
       TMPDIR="$scratch" run_provider_edit "$p" "$path"
@@ -437,7 +440,7 @@ STUB
   { printf '\211PNG\r\n\032\n'; head -c 3000000 /dev/urandom; } > "$input_file"
   local p
   for p in gemini openai xai openrouter; do
-    rm -f "$MOCK_DIR/calls" "$DISPLAY_PANE_DIR/status"
+    rm -f "$MOCK_DIR/calls" "$DISPLAY_PANE_DIR/status" "$OUT"
     stub_curl_once_503 "$(success_body "$p")"
     IMAGE_RETRY_DELAY=0 GEMINI_API_KEY="$DUMMY_GEMINI_KEY" OPENAI_API_KEY="$DUMMY_OPENAI_KEY" \
       XAI_API_KEY="$DUMMY_XAI_KEY" OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY" \

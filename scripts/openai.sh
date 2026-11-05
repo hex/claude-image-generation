@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
+source "${SCRIPT_DIR}/output-image.sh"
+source "${SCRIPT_DIR}/model-fallback.sh"
 
 readonly PROVIDER_NAME="openai"
 
@@ -51,6 +53,7 @@ OUTPUT_COMPRESSION=""
 MODERATION="auto"
 INPUT_FIDELITY=""
 MODEL="${OPENAI_IMAGE_MODEL:-gpt-image-2}"
+FALLBACK_MODEL=$(model_fallback_for_default "$PROVIDER_NAME")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -65,7 +68,7 @@ while [[ $# -gt 0 ]]; do
     --output-compression) OUTPUT_COMPRESSION="$2"; shift 2 ;;
     --moderation) MODERATION="$2"; shift 2 ;;
     --input-fidelity) INPUT_FIDELITY="$2"; shift 2 ;;
-    --model) MODEL="$2"; shift 2 ;;
+    --model) MODEL="$2"; FALLBACK_MODEL=""; shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
@@ -124,6 +127,7 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   exit 1
 fi
 
+refuse_existing_output "$OUTPUT"
 snapshot_input_images
 
 OUTPUT_DIR=$(dirname "$OUTPUT")
@@ -131,72 +135,80 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
-if [[ "$MODE" == "generate" ]]; then
-  echo "Calling OpenAI API (model: ${MODEL}, mode: generate)..." >&2
-  display_pane_begin "$PROVIDER_NAME" "$MODEL"
+use_remembered_fallback
+echo "Calling OpenAI API (model: ${MODEL}, mode: ${MODE})..." >&2
+display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
-  REQUEST_BODY=$(jq -n \
-    --arg model "$MODEL" \
-    --arg prompt "$PROMPT" \
-    --arg size "$SIZE" \
-    --arg quality "$QUALITY" \
-    --arg background "$BACKGROUND" \
-    --arg format "$OUTPUT_FORMAT" \
-    --arg moderation "$MODERATION" \
-    '{
-      "model": $model,
-      "prompt": $prompt,
-      "n": 1,
-      "size": $size,
-      "quality": $quality,
-      "output_format": $format,
-      "background": $background,
-      "moderation": $moderation
-    }')
+# send_request <model> — posts the generate or edit request for this model and prints
+# curl_with_retry's body and status.
+send_request() {
+  local model="$1"
+  if [[ "$MODE" == "generate" ]]; then
+    local request_body
+    request_body=$(jq -n \
+      --arg model "$model" \
+      --arg prompt "$PROMPT" \
+      --arg size "$SIZE" \
+      --arg quality "$QUALITY" \
+      --arg background "$BACKGROUND" \
+      --arg format "$OUTPUT_FORMAT" \
+      --arg moderation "$MODERATION" \
+      '{
+        "model": $model,
+        "prompt": $prompt,
+        "n": 1,
+        "size": $size,
+        "quality": $quality,
+        "output_format": $format,
+        "background": $background,
+        "moderation": $moderation
+      }')
 
-  if [[ -n "$OUTPUT_COMPRESSION" ]]; then
-    REQUEST_BODY=$(echo "$REQUEST_BODY" | jq \
-      --argjson c "$OUTPUT_COMPRESSION" '. + {"output_compression": $c}')
+    if [[ -n "$OUTPUT_COMPRESSION" ]]; then
+      request_body=$(echo "$request_body" | jq \
+        --argjson c "$OUTPUT_COMPRESSION" '. + {"output_compression": $c}')
+    fi
+
+    curl_with_retry -s -w "\n%{http_code}" \
+      -X POST "https://api.openai.com/v1/images/generations" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+      -d "$request_body"
+
+  elif [[ "$MODE" == "edit" ]]; then
+    # curl's -F reads a value that starts with '@' or '<' from a file, so every text field goes
+    # through --form-string, which sends it as typed. In an image's -F value curl also splits the
+    # path at ',' and ';' unless it is double-quoted, with '\' and '"' escaped inside the quotes;
+    # the copy's path starts with $TMPDIR, which may hold either.
+    local -a edit_args
+    local i quoted_path
+    edit_args=(--form-string "model=${model}" --form-string "prompt=${PROMPT}" \
+      --form-string "size=${SIZE}" --form-string "quality=${QUALITY}" \
+      --form-string "background=${BACKGROUND}" --form-string "output_format=${OUTPUT_FORMAT}" \
+      --form-string "moderation=${MODERATION}")
+
+    for i in "${!INPUT_IMAGES[@]}"; do
+      quoted_path=${INPUT_IMAGES[$i]//\\/\\\\}
+      quoted_path=${quoted_path//\"/\\\"}
+      edit_args+=(-F "image[]=@\"${quoted_path}\";type=${INPUT_MIMES[$i]}")
+    done
+
+    if [[ -n "$OUTPUT_COMPRESSION" ]]; then
+      edit_args+=(--form-string "output_compression=${OUTPUT_COMPRESSION}")
+    fi
+
+    if [[ -n "$INPUT_FIDELITY" ]]; then
+      edit_args+=(--form-string "input_fidelity=${INPUT_FIDELITY}")
+    fi
+
+    curl_with_retry -s -w "\n%{http_code}" \
+      -X POST "https://api.openai.com/v1/images/edits" \
+      -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+      "${edit_args[@]}"
   fi
+}
 
-  RESPONSE=$(curl_with_retry -s -w "\n%{http_code}" \
-    -X POST "https://api.openai.com/v1/images/generations" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-    -d "$REQUEST_BODY")
-
-elif [[ "$MODE" == "edit" ]]; then
-  echo "Calling OpenAI API (model: ${MODEL}, mode: edit)..." >&2
-  display_pane_begin "$PROVIDER_NAME" "$MODEL"
-
-  # curl's -F reads a value that starts with '@' or '<' from a file, so every text field goes
-  # through --form-string, which sends it as typed. In an image's -F value curl also splits the
-  # path at ',' and ';' unless it is double-quoted, with '\' and '"' escaped inside the quotes;
-  # the copy's path starts with $TMPDIR, which may hold either.
-  EDIT_ARGS=(--form-string "model=${MODEL}" --form-string "prompt=${PROMPT}" \
-    --form-string "size=${SIZE}" --form-string "quality=${QUALITY}" \
-    --form-string "background=${BACKGROUND}" --form-string "output_format=${OUTPUT_FORMAT}" \
-    --form-string "moderation=${MODERATION}")
-
-  for i in "${!INPUT_IMAGES[@]}"; do
-    quoted_path=${INPUT_IMAGES[$i]//\\/\\\\}
-    quoted_path=${quoted_path//\"/\\\"}
-    EDIT_ARGS+=(-F "image[]=@\"${quoted_path}\";type=${INPUT_MIMES[$i]}")
-  done
-
-  if [[ -n "$OUTPUT_COMPRESSION" ]]; then
-    EDIT_ARGS+=(--form-string "output_compression=${OUTPUT_COMPRESSION}")
-  fi
-
-  if [[ -n "$INPUT_FIDELITY" ]]; then
-    EDIT_ARGS+=(--form-string "input_fidelity=${INPUT_FIDELITY}")
-  fi
-
-  RESPONSE=$(curl_with_retry -s -w "\n%{http_code}" \
-    -X POST "https://api.openai.com/v1/images/edits" \
-    -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-    "${EDIT_ARGS[@]}")
-fi
+request_with_model_fallback send_request
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
@@ -212,11 +224,7 @@ if [[ -z "$IMAGE_DATA" || "$IMAGE_DATA" == "null" ]]; then
   provider_die "No image data in response: $(echo "$BODY" | jq -c '.' 2>/dev/null || echo "$BODY")"
 fi
 
-if [[ "$(uname)" == "Darwin" ]]; then
-  echo "$IMAGE_DATA" | base64 -D > "$OUTPUT"
-else
-  echo "$IMAGE_DATA" | base64 -d > "$OUTPUT"
-fi
+save_image "$OUTPUT" <<< "$IMAGE_DATA"
 
 echo "Image saved to: ${OUTPUT}" >&2
 echo "Format: ${OUTPUT_FORMAT}" >&2

@@ -12,6 +12,7 @@ const RUN_TIMEOUT_MS = 600_000
 
 const DESCRIPTION = `Generate or edit images with Gemini, OpenAI, xAI and OpenRouter in parallel. \
 Each provider saves <outputBase>-<provider>.png; the result lists the files that exist. \
+Nothing is overwritten: the call is refused when any of those files already exists. \
 Omit providers and outputBase to use the person's /config defaults. \
 Providers: gemini (gemini-3-pro-image, professional assets, many reference images), \
 openai (gpt-image-2, text rendering, transparent backgrounds), \
@@ -54,12 +55,24 @@ export const register: Register = (on, options) => {
     const run = buildRun(e, defaults, $.plugin.root, timestamp(await $.clock.now()))
     if ('error' in run) return { deny: run.error }
 
+    // Nothing is ever overwritten, so a taken path refuses the whole call before any provider is
+    // paid. stat describes a symlink itself, a dangling one too, where exists would follow it and
+    // say no; it rejects only where there is nothing a provider could overwrite.
+    const taken: string[] = []
+    for (const path of run.outputs) {
+      if (await $.fs.stat(path).then(() => true, () => false)) taken.push(path)
+    }
+    if (taken.length > 0) {
+      return { deny: [...taken.map(path => `${path} already exists`), 'nothing is overwritten; choose another outputBase'].join('\n') }
+    }
+
     // Outside a tmux pane the providers draw inline images to /dev/tty, which is Claude Code's own screen.
     const { exitCode, stdout, stderr } = await $.process.run(run.argv, {
       timeoutMs: RUN_TIMEOUT_MS,
       env: { DISPLAY_IMAGE_TARGET: '/dev/null' },
     })
 
+    // Every path was free before the run, so a file there now is one this run saved.
     const saved: string[] = []
     const missing: string[] = []
     for (const path of run.outputs) {

@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
+source "${SCRIPT_DIR}/output-image.sh"
+source "${SCRIPT_DIR}/model-fallback.sh"
 
 readonly PROVIDER_NAME="gemini"
 
@@ -49,6 +51,7 @@ THINKING_LEVEL=""
 IMAGE_ONLY=""
 SEARCH_GROUNDING=""
 MODEL="${GEMINI_IMAGE_MODEL:-gemini-3-pro-image}"
+FALLBACK_MODEL=$(model_fallback_for_default "$PROVIDER_NAME")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -61,7 +64,7 @@ while [[ $# -gt 0 ]]; do
     --thinking-level) THINKING_LEVEL="$2"; shift 2 ;;
     --image-only) IMAGE_ONLY=1; shift ;;
     --search-grounding) SEARCH_GROUNDING=1; shift ;;
-    --model) MODEL="$2"; shift 2 ;;
+    --model) MODEL="$2"; FALLBACK_MODEL=""; shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
@@ -100,9 +103,8 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
   exit 1
 fi
 
+refuse_existing_output "$OUTPUT"
 snapshot_input_images
-
-API_URL="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent"
 
 build_request_body() {
   local parts="[]"
@@ -161,16 +163,23 @@ build_request_body() {
 
 REQUEST_BODY=$(build_request_body)
 
+use_remembered_fallback
 echo "Calling Gemini API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
-# The body embeds the base64 image in edit mode, so it is streamed to curl on stdin
-# (--data-binary @-) instead of passed as -d, which would exceed ARG_MAX.
-RESPONSE=$(printf '%s' "$REQUEST_BODY" | curl_with_retry -s -w "\n%{http_code}" \
-  -X POST "${API_URL}" \
-  -H "Content-Type: application/json" \
-  -H "x-goog-api-key: ${GEMINI_API_KEY}" \
-  --data-binary @-)
+# send_request <model> — posts the body to this model's URL, which is where gemini takes the
+# model, and prints curl_with_retry's body and status. The body embeds the base64 image in edit
+# mode, so it is streamed to curl on stdin (--data-binary @-) instead of passed as -d, which
+# would exceed ARG_MAX.
+send_request() {
+  printf '%s' "$REQUEST_BODY" | curl_with_retry -s -w "\n%{http_code}" \
+    -X POST "https://generativelanguage.googleapis.com/v1beta/models/${1}:generateContent" \
+    -H "Content-Type: application/json" \
+    -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+    --data-binary @-
+}
+
+request_with_model_fallback send_request
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
@@ -203,11 +212,7 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
-if [[ "$(uname)" == "Darwin" ]]; then
-  echo "$IMAGE_DATA" | base64 -D > "$OUTPUT"
-else
-  echo "$IMAGE_DATA" | base64 -d > "$OUTPUT"
-fi
+save_image "$OUTPUT" <<< "$IMAGE_DATA"
 
 TEXT_RESPONSE=$(echo "$BODY" | jq -r '
   .candidates[0].content.parts[]

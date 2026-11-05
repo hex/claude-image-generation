@@ -131,6 +131,39 @@ Browse the full list at [openrouter.ai/models](https://openrouter.ai/models?fmt=
 
 Without the generate tool (see Generate Tool under Usage), the command prompts you to select a provider (Gemini, OpenAI, xAI, OpenRouter, or all in parallel) and an output path.
 
+### Provider Status
+
+```
+/claude-image-generation:status
+```
+
+Shows one row per provider: whether the environment holds its API key, whether the provider accepts the key, and whether the model the plugin would use is in the provider's live model list:
+
+```
+provider    key                           model listed  model
+gemini      accepted                      yes           gemini-3.1-flash-image (GEMINI_IMAGE_MODEL)
+openai      rejected (HTTP 401)           not checked   gpt-image-2
+xai         accepted                      yes           grok-imagine-image-2.0
+openrouter  not set (OPENROUTER_API_KEY)  not checked   google/gemini-3.1-flash-image
+```
+
+Claude Code has a `/status` command of its own, so type the full name. The command runs `scripts/check-status.sh`, which you can also run yourself with `bash scripts/check-status.sh`. It sends GET requests only, which bill nothing, and passes each key to curl on stdin, never in its arguments.
+
+| Column | Values |
+|--------|--------|
+| `key` | `not set (<variable>)`, `accepted`, `rejected (HTTP <code>)`, `no answer (curl exit <code>)`, `unexpected HTTP <code>` |
+| `model listed` | `yes`, `no`, `not checked` (no accepted key), `unknown (list has more pages)`, `unreadable model list`, `no answer (curl exit <code>)`, `unexpected HTTP <code>` |
+| `model` | The provider script's default model, or the `*_IMAGE_MODEL` override followed by the variable's name |
+
+What the script asks each provider:
+
+- **Gemini**: `GET /v1beta/models?pageSize=1000`. Gemini answers a bad key with HTTP 400, and other faults too, so a 400 counts as a rejected key only when `error.details[].reason` is `API_KEY_INVALID`.
+- **OpenAI**: `GET /v1/models`.
+- **xAI**: `GET /v1/image-generation-models`. The model may match an id or one of its aliases. xAI also answers a bad key with HTTP 400, which counts as rejected only when the error text names the API key.
+- **OpenRouter**: `GET /api/v1/key` proves the key, since the model list answers without one, then `GET /api/v1/models`. The model has to list `image` among its output modalities.
+
+The script reads each default model and its override variable from the provider script's own `MODEL="${VAR:-default}"` line, so the two can't disagree. When that line is missing, or jq is not installed, it stops with an error and exits 1; otherwise it exits 0, whatever the rows say.
+
 ### Agent (Automatic)
 
 The `image-generator` agent triggers automatically when conversation context involves image creation. It handles provider selection, parallel generation, and result delivery without requiring the slash command.
@@ -143,11 +176,13 @@ On Claude Code builds with function hooks, the plugin also registers a tool, `mc
 |-------|----------|---------|
 | `prompt` | yes | What to draw, or how to change the input images |
 | `providers` | no | Any of `gemini`, `openai`, `xai`, `openrouter`; omitted, the `Default providers` setting |
-| `outputBase` | no | Path without extension; each provider saves `<outputBase>-<provider>.png`. Omitted, `<Output directory>/image-<timestamp>` |
+| `outputBase` | no | Path without extension, anywhere on disk; each provider saves `<outputBase>-<provider>.png`. Omitted, `<Output directory>/image-<timestamp>` |
 | `inputImages` | no | Images to edit; any entry switches to edit mode |
 | `aspectRatio` | no | Whole-number `W:H` such as `16:9`; passed to gemini and xai only |
 
-The tool runs `scripts/run-all.sh`, so the streaming pane and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check before anything runs: a blank prompt, a field of the wrong type, an unknown provider, an `outputBase` ending in `.png`, `.jpg`, `.jpeg` or `.webp` (any case), or an aspect ratio that is not whole-number `W:H` (so xAI's `auto`, `19.5:9` and `9:19.5` need the scripts).
+The tool runs `scripts/run-all.sh`, so the streaming pane and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check before anything runs: a blank prompt, a prompt over 100,000 bytes or with a null character (U+0000), a field of the wrong type, an unknown provider or one named twice, an `outputBase` that is blank, ends in `/`, or ends in `.png`, `.jpg`, `.jpeg` or `.webp` (any case), a control character in `outputBase` or an `inputImages` path, or an aspect ratio that is not whole-number `W:H` with both sides above zero (so xAI's `auto`, `19.5:9` and `9:19.5` need the scripts).
+
+The tool never overwrites a file. When any `<outputBase>-<provider>.png` it would save already exists, as a file or as a symlink (a dangling one too), it refuses the call before any provider runs and names each such path. Choose another `outputBase`, or move the old files away first. The scripts keep the same rule on their own (see Direct Script Usage).
 
 A call runs for at most ten minutes, the most the engine allows a process. That covers the slowest provider plus the 45-second retry offer.
 
@@ -165,6 +200,8 @@ The slash command, the agent and the skill use the tool whenever the session off
 ### Direct Script Usage
 
 Scripts are located in `scripts/` and can be invoked directly.
+
+A provider script never overwrites a file. It refuses an `--output` that already exists, as a file or as a symlink (a dangling one too), before it calls the API. It decodes the image into a hidden temp file in the output's folder, then gives that file the output's name with a hard link. The link fails on anything that appeared at the path during the request, and never follows it: a file, a folder, a device, a named pipe, or a symlink to any of them. Such a run exits 1 with `Could not save the image to <path>: File exists`, and a failed save removes only its own temp file. A filesystem without hard links, such as FAT, cannot take the image: the save fails naming the path and the system's error (`Operation not supported` on macOS). `run-all.sh` gives each provider its own `<base>-<provider>.png`, so a provider whose file exists fails with that refusal while the others still run.
 
 #### gemini.sh
 
@@ -423,6 +460,31 @@ Each provider script retries a transient API error (429 or a 5xx status, or a ne
 
 When a provider run through `run-all.sh` fails outright, its error shows under a red `✗ provider error` heading, and if any provider failed the pane offers `[r] retry failed (xai) · [esc/ctrl-d] close 45s`. The offer counts down until the first image is on the pane; after that it shows the time budget once, as `[r] retry failed (xai) · [esc/ctrl-d] close (up to 45s)`, because a rewritten line erases the pane's images. Pressing `r` re-runs only the failed providers inside the same run; Esc closes the pane and the run returns with what it has. `DISPLAY_PANE_RETRY_WAIT` sets how long the offer stays open (default 45 seconds; 0 disables it), and a run with a failure can take that much longer plus one more provider round.
 
+### Model Fallback
+
+When a provider's default model is unavailable to your key (unknown, retired, or not enabled for it), the script sends the same request once more with that provider's fallback model:
+
+| Provider | Default | Fallback |
+|----------|---------|----------|
+| Gemini | `gemini-3-pro-image` | `gemini-nano-banana-2.1` |
+| OpenAI | `gpt-image-2` | `gpt-image-2.5-sunburst` |
+| xAI | `grok-imagine-image-2.0` | `grok-imagine-image` |
+| OpenRouter | `google/gemini-3.1-flash-image` | `google/gemini-nano-banana-2.1` |
+
+The script sends a model you name with `--model` or a `*_IMAGE_MODEL` variable as named and never falls back from it, so the error names the model to change.
+
+The fallback runs only when the answer blames the model. That means HTTP 404, HTTP 403 (except on OpenRouter, where 403 means its moderation flagged the prompt), or HTTP 400 with a message saying the model does not exist or is not a valid model ID. A bad key, a bad parameter or a refused prompt fails the same way on any model, so it ends the run. The script retries a 429 or 5xx on the same model (see [Retries](#retries)). A run sends at most two models; if the fallback fails too, the script reports the fallback's error.
+
+The switch shows in stderr, for example `gpt-image-2 is unavailable to this key (openai, HTTP 400); drawing with fallback gpt-image-2.5-sunburst`. The line leaves out the API's own message, since xAI's names your account's team ID and stderr reaches pane logs and the tool result. In a streaming pane the provider's banner names the fallback model that drew the image.
+
+Once the fallback answers HTTP 200, the script records that the default is unavailable to that key, even when that answer holds no image. The default's own unavailable answer is the evidence, and the fallback's 200 shows the account and endpoint work. Later runs send the fallback first, printing `gpt-image-2 is remembered as unavailable to this key; drawing with fallback gpt-image-2.5-sunburst`. Verdicts live in `${XDG_CACHE_HOME:-~/.cache}/claude-image-generation/model-verdicts/`, one file per provider, default model and key digest; the key itself never touches disk. A fallback that answers with any other status leaves no verdict, since a refusal that covers the whole account would fail both models.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `IMAGE_AVAILABILITY_TTL` | `86400` | Seconds a verdict holds. `0` makes every run try the default first. |
+
+Delete the verdict directory to try the default again before the verdict expires.
+
 ## Provider Comparison
 
 | Feature | Gemini | OpenAI | xAI | OpenRouter |
@@ -446,6 +508,8 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | Plugin manifest | `.claude-plugin/plugin.json` | Plugin metadata, version and the /config rows (defaultProviders, outputDir) |
 | Skill | `skills/image-generation/SKILL.md` | API knowledge, prompting tips, script reference |
 | Command | `commands/generate-image.md` | `/generate-image` slash command |
+| Status command | `commands/status.md` | `/claude-image-generation:status` slash command |
+| Status script | `scripts/check-status.sh` | Per provider: key set, key accepted, model in the live model list |
 | Agent | `agents/image-generator.md` | Autonomous image generation |
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
@@ -453,6 +517,7 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
 | Retry helper | `scripts/retry.sh` | `curl_with_retry` for transient API failures |
 | Input image check | `scripts/input-images.sh` | Copies each `--input-image` into a private temp folder, reads the copy's type from its bytes and refuses anything that is not a PNG, JPEG, WebP or GIF file |
+| Output image save | `scripts/output-image.sh` | Refuses an `--output` that already exists, decodes the image into a temp file beside it and hard-links that to the output's name, so it never replaces or follows anything at the path |
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |
 | Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
@@ -462,7 +527,7 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | Hooks manifest | `hooks/hooks.json` | Points the engine at `hooks/index.ts` |
 | Tool input type | `hooks/generate-input.d.ts` | Types the `generate` tool's input for the `tool.call` hook |
 | TypeScript config | `tsconfig.json` | Type-checks `hooks/` and `tests/` against `.claude/types` |
-| Automated tests | `tests/` | bats test suite for all scripts; `argv.test.ts` for the tool's input rules |
+| Automated tests | `tests/` | bats test suite for all scripts; `argv.test.ts` for the tool's input rules and its refusal of an existing output file |
 
 ## Development
 

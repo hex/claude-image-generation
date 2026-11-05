@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "The model 'no-such-image-model-x9' does not exist.",
+    "type": "image_generation_user_error",
+    "param": "model",
+    "code": "invalid_value"
+  }
+}
