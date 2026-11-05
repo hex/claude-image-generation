@@ -124,7 +124,7 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   exit 1
 fi
 
-read_input_mimes
+snapshot_input_images
 
 OUTPUT_DIR=$(dirname "$OUTPUT")
 if [[ ! -d "$OUTPUT_DIR" ]]; then
@@ -171,17 +171,15 @@ elif [[ "$MODE" == "edit" ]]; then
 
   # curl's -F reads a value that starts with '@' or '<' from a file, so every text field goes
   # through --form-string, which sends it as typed. In an image's -F value curl also splits the
-  # path at ',' and ';' unless it is double-quoted, with '\' and '"' escaped inside the quotes,
-  # and reads the path '-' from stdin, so a relative path gets a './' prefix.
+  # path at ',' and ';' unless it is double-quoted, with '\' and '"' escaped inside the quotes;
+  # the copy's path starts with $TMPDIR, which may hold either.
   EDIT_ARGS=(--form-string "model=${MODEL}" --form-string "prompt=${PROMPT}" \
     --form-string "size=${SIZE}" --form-string "quality=${QUALITY}" \
     --form-string "background=${BACKGROUND}" --form-string "output_format=${OUTPUT_FORMAT}" \
     --form-string "moderation=${MODERATION}")
 
   for i in "${!INPUT_IMAGES[@]}"; do
-    quoted_path=${INPUT_IMAGES[$i]}
-    [[ "$quoted_path" == /* ]] || quoted_path="./${quoted_path}"
-    quoted_path=${quoted_path//\\/\\\\}
+    quoted_path=${INPUT_IMAGES[$i]//\\/\\\\}
     quoted_path=${quoted_path//\"/\\\"}
     EDIT_ARGS+=(-F "image[]=@\"${quoted_path}\";type=${INPUT_MIMES[$i]}")
   done

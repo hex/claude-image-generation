@@ -100,7 +100,7 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
   exit 1
 fi
 
-read_input_mimes
+snapshot_input_images
 
 API_URL="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent"
 
@@ -159,10 +159,6 @@ build_request_body() {
   echo "$request"
 }
 
-if [[ ${#INPUT_IMAGES[@]} -gt 0 ]]; then
-  tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' EXIT
-fi
 REQUEST_BODY=$(build_request_body)
 
 echo "Calling Gemini API (model: ${MODEL}, mode: ${MODE})..." >&2

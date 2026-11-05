@@ -96,7 +96,7 @@ if [[ -z "$XAI_API_KEY" ]]; then
   exit 1
 fi
 
-read_input_mimes
+snapshot_input_images
 
 OUTPUT_DIR=$(dirname "$OUTPUT")
 if [[ ! -d "$OUTPUT_DIR" ]]; then
@@ -134,8 +134,6 @@ API_URL="https://api.x.ai/v1/images/generations"
 
 if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -gt 0 ]]; then
   API_URL="https://api.x.ai/v1/images/edits"
-  tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' EXIT
   REQUEST_BODY=$(echo "$REQUEST_BODY" | jq '. + {"images": []}')
   for i in "${!INPUT_IMAGES[@]}"; do
     # A normal image's base64 exceeds ARG_MAX, so it reaches jq through --rawfile

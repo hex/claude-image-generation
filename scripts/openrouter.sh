@@ -77,7 +77,7 @@ if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
   exit 1
 fi
 
-read_input_mimes
+snapshot_input_images
 
 OUTPUT_DIR=$(dirname "$OUTPUT")
 if [[ ! -d "$OUTPUT_DIR" ]]; then
@@ -122,10 +122,6 @@ build_request_body() {
     }'
 }
 
-if [[ ${#INPUT_IMAGES[@]} -gt 0 ]]; then
-  tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' EXIT
-fi
 REQUEST_BODY=$(build_request_body)
 
 echo "Calling OpenRouter API (model: ${MODEL}, mode: ${MODE})..." >&2
