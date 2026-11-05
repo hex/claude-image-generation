@@ -163,6 +163,31 @@ STUB
   rm -rf "$mock"
 }
 
+@test "the close prompt's f and p keys open each image whole, quotes and spaces included" {
+  local wd mock
+  make_named_render_watcher
+  printf '#!/bin/bash\n{ printf "%%s|" "$@"; echo; } >> "%s/open.log"\n' "$mock" > "$mock/open"
+  chmod +x "$mock/open"
+  local streamed="$mock/O'Brien \"Co\".png" added="$mock/plain one.png"
+  cp "$OVERSIZED_FIXTURE" "$streamed"
+  cp "$OVERSIZED_FIXTURE" "$added"
+  source "$DISPLAY_SH"
+  DISPLAY_PANE_DIR="$wd" display_pane_status gemini complete 1200 gemini-3-pro-image "$streamed"
+  DISPLAY_PANE_DIR="$wd" display_pane_add "$added"
+  touch "$wd/.done"
+  printf 'fp' > "$mock/keys"
+
+  HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" < "$mock/keys" >/dev/null 2>&1
+  local opened
+  opened=$(cat "$mock/open.log" 2>/dev/null || true)
+  [[ "$opened" == "-R|${streamed}|"$'\n'"-R|${added}|"$'\n'"-a|Preview|${streamed}|${added}|" ]] || {
+    echo "f and p did not open both images whole; open calls:"
+    echo "$opened"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
 @test "the waiting line is written once per block while an image is up, never per tick" {
   local mock="${BATS_TMPDIR}/watcher_spinner_$$"
   mkdir -p "$mock/.iterm2"
