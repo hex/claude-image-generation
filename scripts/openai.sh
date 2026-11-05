@@ -28,11 +28,11 @@ Options:
   --output-format     Format: png, jpeg, webp (default: png; jpeg is faster)
   --output-compression  Compression 0-100 (for jpeg/webp only)
   --moderation        Moderation: auto, low (default: auto)
-  --input-fidelity    Edit mode only: low, high (default: low); refused with gpt-image-2, which
-                      always uses high fidelity. 'high' preserves faces/logos/textures on the first
+  --input-fidelity    Edit mode only: low, high (default: low); refused with gpt-image-2 and
+                      gpt-image-2.6-sunburst. 'high' preserves faces/logos/textures on the first
                       5 images on gpt-image-1.5, the first image only on gpt-image-1 and mini
-  --model             OpenAI model (default: gpt-image-2)
-                      Alternatives: gpt-image-1.5, gpt-image-1-mini (3-4x cheaper), gpt-image-1
+  --model             OpenAI model (default: gpt-image-2.6-sunburst)
+                      Alternatives: gpt-image-2, gpt-image-1.5, gpt-image-1-mini (3-4x cheaper), gpt-image-1
 
 Environment:
   OPENAI_API_KEY      OpenAI API key (required)
@@ -52,7 +52,7 @@ OUTPUT_FORMAT="png"
 OUTPUT_COMPRESSION=""
 MODERATION="auto"
 INPUT_FIDELITY=""
-MODEL="${OPENAI_IMAGE_MODEL:-gpt-image-2}"
+MODEL="${OPENAI_IMAGE_MODEL:-gpt-image-2.6-sunburst}"
 FALLBACK_MODEL=$(model_fallback_for_default "$PROVIDER_NAME")
 
 while [[ $# -gt 0 ]]; do
@@ -88,11 +88,12 @@ if [[ -n "$INPUT_FIDELITY" ]]; then
     low|high) ;;
     *) echo "Error: --input-fidelity must be 'low' or 'high'" >&2; exit 1 ;;
   esac
-  # gpt-image-2 edits every input image at high fidelity and the API does not take the
-  # parameter for it; its dated snapshots behave the same.
+  # The API answers HTTP 400 when either model is sent the parameter. gpt-image-2 edits every
+  # input image at high fidelity, and its dated snapshots behave the same; gpt-image-2.6-sunburst
+  # has no dated snapshot.
   case "$MODEL" in
-    gpt-image-2|gpt-image-2-*)
-      echo "Error: --input-fidelity is not accepted by gpt-image-2, which always uses high fidelity; drop the flag or pass --model gpt-image-1.5" >&2
+    gpt-image-2|gpt-image-2-*|gpt-image-2.6-sunburst)
+      echo "Error: --input-fidelity is not accepted by ${MODEL}; drop the flag or pass --model gpt-image-1.5" >&2
       exit 1 ;;
   esac
 fi

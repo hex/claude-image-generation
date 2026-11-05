@@ -187,7 +187,7 @@ OpenAI (`openai.sh`):
 - `--output-format jpeg` for faster generation, `--output-format webp` for smaller files
 - `--output-compression 80` — compression level for jpeg/webp
 - `--background transparent` — transparent background (gpt-image-1.5; preview on gpt-image-2, with `--output-format` png or webp only)
-- `--input-fidelity high` — preserves faces/logos/textures in edit mode; not accepted with gpt-image-2 (that model always uses high fidelity; openai.sh refuses the flag)
+- `--input-fidelity high` — preserves faces/logos/textures in edit mode; not accepted with gpt-image-2 (that model always uses high fidelity) or the default gpt-image-2.6-sunburst, and openai.sh refuses the flag for both
 - `--model gpt-image-1-mini` — 3-4x cheaper for drafts; `--model gpt-image-1.5` for previous flagship
 
 xAI (`xai.sh`):
@@ -197,7 +197,7 @@ xAI (`xai.sh`):
 - `--model grok-imagine-image` — standard tier, 300 RPM
 
 OpenRouter (`openrouter.sh`):
-- `--model <slug>` — any OpenRouter model that supports image output (e.g. `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0`, `openai/gpt-image-2`). Default `google/gemini-3.1-flash-image`.
+- `--model <slug>` — any OpenRouter model that supports image output (e.g. `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0`, `openai/gpt-image-2`). Default `google/gemini-nano-banana-2.1`.
 - `--site-url` / `--site-name` — optional OpenRouter attribution headers. Aspect ratio, resolution, and quality are prompt-driven and model-dependent — describe them in the prompt.
 
 Infer appropriate flags from user intent: "hero image" → 2K/4K, "social post" → 1:1 or 9:16, "draft" → low quality or mini model, "for printing" → 4K, "transparent logo" → OpenAI with `--background transparent`.

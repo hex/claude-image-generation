@@ -14,6 +14,8 @@ cover the versions up to 2026.9.1.
 - Every provider refuses an `--input-image` whose first bytes are not PNG, JPEG, WebP or GIF, or a path that is not a readable file, and exits 1 before any request. A key file passed as an input image used to go out to the API, and Gemini and OpenRouter sent an empty image for a missing path.
 - Each input image's type comes from its bytes, not its extension, so a GIF named `.png` goes as `image/gif`.
 - Each provider sends a private copy of every input image, taken under `$TMPDIR` when the check runs, and removes the copies on exit. Replacing the file after the check no longer changes what gets sent.
+- Default openai model is now gpt-image-2.6-sunburst (was gpt-image-2).
+- Default openrouter model is now google/gemini-nano-banana-2.1 (was google/gemini-3.1-flash-image); its fallback is now google/gemini-3.1-flash-image.
 
 ### Security
 - OpenAI edit mode sends the prompt and every other text field with `--form-string`. Through `-F`, a value starting with `@` or `<` made curl read that local file and upload its contents in place of the text.

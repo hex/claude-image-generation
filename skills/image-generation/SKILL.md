@@ -18,7 +18,7 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 - **Env var**: `GEMINI_API_KEY`
 
 ### OpenAI GPT Image 2
-- **Model**: `gpt-image-2` (default, snapshot `gpt-image-2-2026-04-21`); `gpt-image-1.5` available as previous flagship via `--model`
+- **Model**: `gpt-image-2.6-sunburst` (default); `gpt-image-2` (snapshot `gpt-image-2-2026-04-21`) and `gpt-image-1.5` (previous flagship) available via `--model`
 - **Strengths**: Superior text rendering, transparent backgrounds, up to 16 input images for editing, quality tiers
 - **Sizes**: on `gpt-image-2`, any `WxH` with both edges multiples of 16, longest edge up to 3840 and ratio at most 3:1 (such as 2048x1152, 3840x2160); older models take 1024x1024, 1536x1024 (landscape), 1024x1536 (portrait)
 - **Quality**: low (fast/cheap), medium, high (best fidelity)
@@ -34,7 +34,7 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 - **Env var**: `XAI_API_KEY` or `GROK_API_KEY`
 
 ### OpenRouter (gateway)
-- **Model**: any OpenRouter model slug that supports image output; default `google/gemini-3.1-flash-image`. Others: `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0`, `openai/gpt-image-2`, and more at [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image)
+- **Model**: any OpenRouter model slug that supports image output; default `google/gemini-nano-banana-2.1`. Others: `google/gemini-3.1-flash-image`, `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0`, `openai/gpt-image-2`, and more at [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image)
 - **Strengths**: One key reaches many providers' image models; useful for access, fallback, and comparison without separate accounts
 - **API shape**: Uses the chat-completions endpoint (`/api/v1/chat/completions`) with `modalities: ["image","text"]`, not a dedicated images endpoint. Images come back as base64 data URLs in `message.images[]`
 - **Editing**: Input images are attached as `image_url` content parts (base64 data URLs) in the user message
@@ -79,7 +79,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/xai.sh" \
   --prompt "a serene mountain landscape at sunset" \
   --output ./generated.png
 
-# OpenRouter (any image model via --model; default google/gemini-3.1-flash-image)
+# OpenRouter (any image model via --model; default google/gemini-nano-banana-2.1)
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter.sh" \
   --mode generate \
   --prompt "a serene mountain landscape at sunset" \
@@ -192,7 +192,7 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 - If multiple providers are used in parallel and one fails, report the error and present the successful results
 - Rate limit errors (HTTP 429) mean the provider's quota is exhausted. The script retries a 429 up to three times first; if it still fails, try again later or use another provider
 - The script automatically retries a 429 or 5xx status, or a network failure, up to three times with a doubling delay before giving up
-- When the default model is unavailable to the key (HTTP 404, a 403 outside OpenRouter, or a 400 saying the model does not exist), the script sends the request once more with the provider's fallback and says so on stderr: gemini `gemini-nano-banana-2.1`, openai `gpt-image-2.5-sunburst`, xai `grok-imagine-image`, openrouter `google/gemini-nano-banana-2.1`. Report which model drew the image. A model named with `--model` or `*_IMAGE_MODEL` never falls back. Once the fallback answers HTTP 200, even with no image in it, the script records the verdict and later runs send the fallback first until it expires: the default's own unavailable answer is the evidence, and the fallback's 200 shows the account and endpoint work
+- When the default model is unavailable to the key (HTTP 404, a 403 outside OpenRouter, or a 400 saying the model does not exist), the script sends the request once more with the provider's fallback and says so on stderr: gemini `gemini-nano-banana-2.1`, openai `gpt-image-2.5-sunburst`, xai `grok-imagine-image`, openrouter `google/gemini-3.1-flash-image`. Report which model drew the image. A model named with `--model` or `*_IMAGE_MODEL` never falls back. Once the fallback answers HTTP 200, even with no image in it, the script records the verdict and later runs send the fallback first until it expires: the default's own unavailable answer is the evidence, and the fallback's 200 shows the account and endpoint work
 
 | Env var | Default | Purpose |
 |---------|---------|---------|
@@ -230,8 +230,8 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 | `--output-format` | png, jpeg, webp | png |
 | `--output-compression` | 0-100 (jpeg/webp only) | -- |
 | `--moderation` | auto, low | auto |
-| `--input-fidelity` | low, high (edit only); not accepted with gpt-image-2 (that model always uses high fidelity; openai.sh refuses the flag) | unset (API `low`) |
-| `--model` | OpenAI model name | gpt-image-2 |
+| `--input-fidelity` | low, high (edit only); not accepted with gpt-image-2 (that model always uses high fidelity) or gpt-image-2.6-sunburst, and openai.sh refuses the flag for both | unset (API `low`) |
+| `--model` | OpenAI model name | gpt-image-2.6-sunburst |
 
 ### xai.sh
 | Flag | Values | Default |
@@ -252,6 +252,6 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
 | `--input-image` | file path, repeatable | (edit only) |
-| `--model` | any OpenRouter image model slug | google/gemini-3.1-flash-image |
+| `--model` | any OpenRouter image model slug | google/gemini-nano-banana-2.1 |
 | `--site-url` | URL (sent as `HTTP-Referer`) | (from `OPENROUTER_SITE_URL`) |
 | `--site-name` | text (sent as `X-Title`) | (from `OPENROUTER_SITE_NAME`) |

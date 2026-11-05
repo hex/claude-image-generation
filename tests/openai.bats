@@ -69,11 +69,11 @@ teardown() {
   assert_output_contains "Usage:"
 }
 
-@test "openai: default model is gpt-image-2" {
+@test "openai: default model is gpt-image-2.6-sunburst" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
   # The script prints "Calling OpenAI API (model: ...)" before the curl call
   run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT"
-  assert_output_contains "model: gpt-image-2"
+  assert_output_contains "Calling OpenAI API (model: gpt-image-2.6-sunburst, mode: generate)"
 }
 
 @test "openai: OPENAI_IMAGE_MODEL env var overrides default model" {
@@ -101,12 +101,17 @@ teardown() {
   assert_output_contains "at most 16"
 }
 
-@test "openai: --input-fidelity is refused on gpt-image-2, which always edits at high fidelity" {
+@test "openai: --input-fidelity is refused on the default gpt-image-2.6-sunburst and on gpt-image-2, whose API rejects it" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
   run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "$OUT" \
     --input-image "/tmp/x.png" --input-fidelity high
   assert_status 1
-  assert_output_contains "Error: --input-fidelity is not accepted by gpt-image-2"
+  assert_output_contains "Error: --input-fidelity is not accepted by gpt-image-2.6-sunburst; drop the flag or pass --model gpt-image-1.5"
+
+  run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "$OUT" \
+    --input-image "/tmp/x.png" --input-fidelity high --model gpt-image-2
+  assert_status 1
+  assert_output_contains "Error: --input-fidelity is not accepted by gpt-image-2; drop the flag or pass --model gpt-image-1.5"
 }
 
 @test "openai: --input-fidelity still reaches the API on gpt-image-1.5" {
@@ -118,7 +123,7 @@ teardown() {
   PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "$OUT" \
     --input-image "$PNG_FIXTURE" --input-fidelity high --model gpt-image-1.5
   assert_output_contains "Calling OpenAI API (model: gpt-image-1.5, mode: edit)"
-  [[ "$output" != *"not accepted by gpt-image-2"* ]] || { echo "refused a model that takes the flag: $output"; return 1; }
+  [[ "$output" != *"is not accepted by"* ]] || { echo "refused a model that takes the flag: $output"; return 1; }
 }
 
 @test "openai: dall-e-2 with multiple images rejected" {

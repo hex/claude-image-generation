@@ -69,11 +69,11 @@ setup() {
   assert_output_contains "Usage:"
 }
 
-@test "openrouter: default model is google/gemini-3.1-flash-image" {
+@test "openrouter: default model is google/gemini-nano-banana-2.1" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
   # The script prints "Calling OpenRouter API (model: ...)" before the curl call
   run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
-  assert_output_contains "model: google/gemini-3.1-flash-image"
+  assert_output_contains "Calling OpenRouter API (model: google/gemini-nano-banana-2.1, mode: generate)"
 }
 
 @test "openrouter: OPENROUTER_IMAGE_MODEL env var overrides default model" {

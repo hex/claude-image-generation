@@ -6,7 +6,7 @@
 # list, answered both the generate and edit requests, and has no announced shutdown. A fallback
 # must be a different model from the default: a dated snapshot or alias of the default would
 # re-send the request that just failed.
-MODEL_FALLBACKS="gemini:gemini-nano-banana-2.1 openai:gpt-image-2.5-sunburst xai:grok-imagine-image openrouter:google/gemini-nano-banana-2.1"
+MODEL_FALLBACKS="gemini:gemini-nano-banana-2.1 openai:gpt-image-2.5-sunburst xai:grok-imagine-image openrouter:google/gemini-3.1-flash-image"
 
 # How long an "unavailable" verdict holds, in seconds. A retired model stays retired, but a model
 # not yet enabled for a key or region can arrive within days. 0 stops runs reading verdicts.

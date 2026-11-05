@@ -62,9 +62,9 @@ Override the default model per provider via environment variables:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `GEMINI_IMAGE_MODEL` | `gemini-3-pro-image` | Gemini model used for generation and editing |
-| `OPENAI_IMAGE_MODEL` | `gpt-image-2` | OpenAI model used for generation and editing |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-2.6-sunburst` | OpenAI model used for generation and editing |
 | `XAI_IMAGE_MODEL` | `grok-imagine-image-2.0` | xAI model used for generation and editing |
-| `OPENROUTER_IMAGE_MODEL` | `google/gemini-3.1-flash-image` | OpenRouter model slug used for generation and editing |
+| `OPENROUTER_IMAGE_MODEL` | `google/gemini-nano-banana-2.1` | OpenRouter model slug used for generation and editing |
 
 Command-line `--model` flag on the scripts takes precedence over environment variables.
 
@@ -94,7 +94,8 @@ The `-preview` IDs of the two GA models still answer but passed Google's earlies
 
 | Model | Characteristics |
 |-------|-----------------|
-| `gpt-image-2` | Latest flagship, snapshot `gpt-image-2-2026-04-21` (default) |
+| `gpt-image-2.6-sunburst` | Built for detailed work and precise edits (default) |
+| `gpt-image-2` | Snapshot `gpt-image-2-2026-04-21` |
 | `gpt-image-1.5` | Previous flagship, superior text rendering, transparent backgrounds, quality tiers (shutdown 2026-12-01) |
 | `gpt-image-1-mini` | 3-4x cheaper, cost-efficient for drafts and previews (shutdown 2026-12-01) |
 | `gpt-image-1` | Older generation (shutdown 2026-10-23) |
@@ -113,7 +114,8 @@ OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any 
 
 | Model | Characteristics |
 |-------|-----------------|
-| `google/gemini-3.1-flash-image` | Fast Gemini image model, generation + editing (default) |
+| `google/gemini-nano-banana-2.1` | Flash-tier Gemini image model ("Nano Banana 2.1"), generation + editing (default) |
+| `google/gemini-3.1-flash-image` | Fast Gemini image model, generation + editing |
 | `google/gemini-3-pro-image` | Pro-tier Gemini image model, premium quality |
 | `x-ai/grok-imagine-image-2.0` | xAI's flagship image model via OpenRouter |
 | `openai/gpt-image-2` | OpenAI's flagship image model via OpenRouter (`openai/gpt-5-image` and `openai/gpt-5-image-mini` are the older chat-image models) |
@@ -142,9 +144,9 @@ Shows one row per provider: whether the environment holds its API key, whether t
 ```
 provider    key                           model listed  model
 gemini      accepted                      yes           gemini-3.1-flash-image (GEMINI_IMAGE_MODEL)
-openai      rejected (HTTP 401)           not checked   gpt-image-2
+openai      rejected (HTTP 401)           not checked   gpt-image-2.6-sunburst
 xai         accepted                      yes           grok-imagine-image-2.0
-openrouter  not set (OPENROUTER_API_KEY)  not checked   google/gemini-3.1-flash-image
+openrouter  not set (OPENROUTER_API_KEY)  not checked   google/gemini-nano-banana-2.1
 ```
 
 Claude Code has a `/status` command of its own, so type the full name. The command runs `scripts/check-status.sh`, which you can also run yourself with `bash scripts/check-status.sh`. It sends GET requests only, which bill nothing, and passes each key to curl on stdin, never in its arguments.
@@ -304,8 +306,8 @@ bash scripts/openai.sh \
 | `--output-format` | `png`, `jpeg`, `webp` | `png` | No |
 | `--output-compression` | integer 0-100 (jpeg/webp only) | -- | No |
 | `--moderation` | `auto`, `low` | `auto` | No |
-| `--input-fidelity` | `low`, `high` (edit only); not accepted with `gpt-image-2` (that model always uses high fidelity; `openai.sh` refuses the flag) | unset (API default `low`) | No |
-| `--model` | OpenAI model name | `gpt-image-2` | No |
+| `--input-fidelity` | `low`, `high` (edit only); not accepted with `gpt-image-2` (that model always uses high fidelity) or `gpt-image-2.6-sunburst`, and `openai.sh` refuses the flag for both | unset (API default `low`) | No |
+| `--model` | OpenAI model name | `gpt-image-2.6-sunburst` | No |
 
 #### xai.sh
 
@@ -365,7 +367,7 @@ bash scripts/xai.sh \
 OpenRouter is a gateway to many image models through a single key. It uses the chat-completions API, so `--model` accepts any OpenRouter model slug that supports image output.
 
 ```bash
-# Generate (default model: google/gemini-3.1-flash-image)
+# Generate (default model: google/gemini-nano-banana-2.1)
 bash scripts/openrouter.sh \
   --mode generate \
   --prompt "a mountain at sunset" \
@@ -394,7 +396,7 @@ bash scripts/openrouter.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path, repeatable | -- | Edit mode only |
-| `--model` | any OpenRouter image model slug | `google/gemini-3.1-flash-image` | No |
+| `--model` | any OpenRouter image model slug | `google/gemini-nano-banana-2.1` | No |
 | `--site-url` | URL | (none) | No (sent as `HTTP-Referer` for OpenRouter attribution) |
 | `--site-name` | text | (none) | No (sent as `X-Title` for OpenRouter attribution) |
 
@@ -467,17 +469,17 @@ When a provider's default model is unavailable to your key (unknown, retired, or
 | Provider | Default | Fallback |
 |----------|---------|----------|
 | Gemini | `gemini-3-pro-image` | `gemini-nano-banana-2.1` |
-| OpenAI | `gpt-image-2` | `gpt-image-2.5-sunburst` |
+| OpenAI | `gpt-image-2.6-sunburst` | `gpt-image-2.5-sunburst` |
 | xAI | `grok-imagine-image-2.0` | `grok-imagine-image` |
-| OpenRouter | `google/gemini-3.1-flash-image` | `google/gemini-nano-banana-2.1` |
+| OpenRouter | `google/gemini-nano-banana-2.1` | `google/gemini-3.1-flash-image` |
 
 The script sends a model you name with `--model` or a `*_IMAGE_MODEL` variable as named and never falls back from it, so the error names the model to change.
 
 The fallback runs only when the answer blames the model. That means HTTP 404, HTTP 403 (except on OpenRouter, where 403 means its moderation flagged the prompt), or HTTP 400 with a message saying the model does not exist or is not a valid model ID. A bad key, a bad parameter or a refused prompt fails the same way on any model, so it ends the run. The script retries a 429 or 5xx on the same model (see [Retries](#retries)). A run sends at most two models; if the fallback fails too, the script reports the fallback's error.
 
-The switch shows in stderr, for example `gpt-image-2 is unavailable to this key (openai, HTTP 400); drawing with fallback gpt-image-2.5-sunburst`. The line leaves out the API's own message, since xAI's names your account's team ID and stderr reaches pane logs and the tool result. In a streaming pane the provider's banner names the fallback model that drew the image.
+The switch shows in stderr, for example `gpt-image-2.6-sunburst is unavailable to this key (openai, HTTP 400); drawing with fallback gpt-image-2.5-sunburst`. The line leaves out the API's own message, since xAI's names your account's team ID and stderr reaches pane logs and the tool result. In a streaming pane the provider's banner names the fallback model that drew the image.
 
-Once the fallback answers HTTP 200, the script records that the default is unavailable to that key, even when that answer holds no image. The default's own unavailable answer is the evidence, and the fallback's 200 shows the account and endpoint work. Later runs send the fallback first, printing `gpt-image-2 is remembered as unavailable to this key; drawing with fallback gpt-image-2.5-sunburst`. Verdicts live in `${XDG_CACHE_HOME:-~/.cache}/claude-image-generation/model-verdicts/`, one file per provider, default model and key digest; the key itself never touches disk. A fallback that answers with any other status leaves no verdict, since a refusal that covers the whole account would fail both models.
+Once the fallback answers HTTP 200, the script records that the default is unavailable to that key, even when that answer holds no image. The default's own unavailable answer is the evidence, and the fallback's 200 shows the account and endpoint work. Later runs send the fallback first, printing `gpt-image-2.6-sunburst is remembered as unavailable to this key; drawing with fallback gpt-image-2.5-sunburst`. Verdicts live in `${XDG_CACHE_HOME:-~/.cache}/claude-image-generation/model-verdicts/`, one file per provider, default model and key digest; the key itself never touches disk. A fallback that answers with any other status leaves no verdict, since a refusal that covers the whole account would fail both models.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -489,7 +491,7 @@ Delete the verdict directory to try the default again before the verdict expires
 
 | Feature | Gemini | OpenAI | xAI | OpenRouter |
 |---------|--------|--------|-----|------------|
-| Default model | gemini-3-pro-image | gpt-image-2 | grok-imagine-image-2.0 | google/gemini-3.1-flash-image |
+| Default model | gemini-3-pro-image | gpt-image-2.6-sunburst | grok-imagine-image-2.0 | google/gemini-nano-banana-2.1 |
 | Max resolution | 4K (via `--image-size`) | 3840 px long edge on gpt-image-2 (via `--size`); 1536x1024 on older models | 2K (via `--resolution`) | Model-dependent |
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
 | Transparent BG | No | Yes (preview on gpt-image-2, png or webp only) | No | Model-dependent |

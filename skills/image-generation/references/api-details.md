@@ -208,7 +208,7 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 | `output_format` | `png`, `jpeg`, `webp` | `jpeg` is faster than `png` |
 | `output_compression` | integer 0-100 | Only applies to `jpeg`/`webp` |
 | `moderation` | `auto` (default), `low` | Less restrictive filtering; gpt-image models only |
-| `input_fidelity` | `low` (default), `high` | Edit only; not accepted with gpt-image-2, which always uses high fidelity (`openai.sh` refuses the flag for it). `high` preserves faces/logos/textures. On 1.5 the first 5 images get high fidelity; on gpt-image-1 and mini only the first. |
+| `input_fidelity` | `low` (default), `high` | Edit only; not accepted with gpt-image-2, which always uses high fidelity, or gpt-image-2.6-sunburst (`openai.sh` refuses the flag for both). `high` preserves faces/logos/textures. On 1.5 the first 5 images get high fidelity; on gpt-image-1 and mini only the first. |
 | `partial_images` | integer 0-3 | SSE streaming, +100 output tokens per partial |
 
 ### Response Format
@@ -228,7 +228,8 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 ```
 
 ### Models
-- `gpt-image-2` (default): Current flagship. Snapshot: `gpt-image-2-2026-04-21`
+- `gpt-image-2.6-sunburst` (default): The 2.6 model for detailed work and precise edits; `gpt-image-2.6-flare` is the faster one. Generation and edit endpoints only, no dated snapshot, same per-token price as `gpt-image-2`. Sent `input_fidelity`, it answers HTTP 400 `"The model 'gpt-image-2.6-sunburst' does not support the 'input_fidelity' parameter."` (captured 2026-11-05)
+- `gpt-image-2`: Snapshot: `gpt-image-2-2026-04-21`
 - `gpt-image-1.5`: Previous flagship. Snapshot: `gpt-image-1.5-2025-12-16`. **Shutdown 2026-12-01**
 - `gpt-image-1-mini`: 3-4x cheaper, same API surface, only first image gets high fidelity on edits. **Shutdown 2026-12-01**
 - `gpt-image-1`: Older generation. **Shutdown 2026-10-23**
@@ -452,9 +453,9 @@ The generated image is returned as a base64 data URL inside the assistant messag
 The plugin reads `.choices[0].message.images[0].image_url.url`, strips the `data:<mime>;base64,` prefix, and decodes the remainder. If no image is present it falls back to reporting `.choices[0].message.content` (a refusal or text-only reply). Errors come back as `.error.message`, except a failure upstream mid-generation: that arrives as HTTP 200 with `choices[0].error` (`code`, `message`), which the plugin reports by its code and message.
 
 ### Models
-`--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-3.1-flash-image`. Others include `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0` and `openai/gpt-image-2`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
+`--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-nano-banana-2.1`. Others include `google/gemini-3.1-flash-image`, `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0` and `openai/gpt-image-2`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
 
-When the default is unavailable to the key, the plugin falls back to `google/gemini-nano-banana-2.1`. An unknown slug answers HTTP 400 with `{"error": {"message": "<slug> is not a valid model ID", "code": 400}}`; a deprecated model, or one with no endpoint for the requested modalities, answers HTTP 404 (`"Claude 3 Haiku was deprecated on Sep 10, 2026. ..."`, `"No endpoints found that support the requested output modalities: image, text"`). All three captured 2026-11-05.
+When the default is unavailable to the key, the plugin falls back to `google/gemini-3.1-flash-image`. An unknown slug answers HTTP 400 with `{"error": {"message": "<slug> is not a valid model ID", "code": 400}}`; a deprecated model, or one with no endpoint for the requested modalities, answers HTTP 404 (`"Claude 3 Haiku was deprecated on Sep 10, 2026. ..."`, `"No endpoints found that support the requested output modalities: image, text"`). All three captured 2026-11-05.
 
 ### Constraints
 - Aspect ratio, resolution, and quality are model-dependent and driven by the prompt — there are no dedicated flags for them

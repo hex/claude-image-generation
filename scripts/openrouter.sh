@@ -25,7 +25,7 @@ Options:
   --prompt            Text prompt describing the image (required)
   --output            Output file path (required)
   --input-image       Input image path for edit mode (required for edit, repeatable)
-  --model             OpenRouter model slug (default: google/gemini-3.1-flash-image)
+  --model             OpenRouter model slug (default: google/gemini-nano-banana-2.1)
   --site-url          Sent as HTTP-Referer for OpenRouter attribution (optional)
   --site-name         Sent as X-Title for OpenRouter attribution (optional)
 
@@ -42,7 +42,7 @@ MODE=""
 PROMPT=""
 OUTPUT=""
 INPUT_IMAGES=()
-MODEL="${OPENROUTER_IMAGE_MODEL:-google/gemini-3.1-flash-image}"
+MODEL="${OPENROUTER_IMAGE_MODEL:-google/gemini-nano-banana-2.1}"
 FALLBACK_MODEL=$(model_fallback_for_default "$PROVIDER_NAME")
 SITE_URL="${OPENROUTER_SITE_URL:-}"
 SITE_NAME="${OPENROUTER_SITE_NAME:-}"

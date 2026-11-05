@@ -113,10 +113,10 @@ run_provider() {
 
   assert_status 0
   assert_calls 2
-  assert_sent 1 gpt-image-2
+  assert_sent 1 gpt-image-2.6-sunburst
   assert_sent 2 gpt-image-2.5-sunburst
   [[ "$(cat "$OUT")" == "fake" ]] || { echo "fallback image not saved: $(cat "$OUT")"; return 1; }
-  assert_output_contains "gpt-image-2 is unavailable"
+  assert_output_contains "gpt-image-2.6-sunburst is unavailable"
   assert_output_contains "gpt-image-2.5-sunburst"
 }
 
@@ -127,7 +127,7 @@ run_provider() {
 
   assert_status 0
   assert_calls 2
-  assert_sent 1 gpt-image-2
+  assert_sent 1 gpt-image-2.6-sunburst
   assert_sent 2 gpt-image-2.5-sunburst
 }
 
@@ -163,11 +163,11 @@ run_provider() {
 
   assert_status 0
   assert_calls 2
-  assert_sent 1 google/gemini-3.1-flash-image
-  assert_sent 2 google/gemini-nano-banana-2.1
+  assert_sent 1 google/gemini-nano-banana-2.1
+  assert_sent 2 google/gemini-3.1-flash-image
   [[ "$(jq -r '.messages[0].content' "$MOCK_DIR/body.2")" == "a red dot" ]] || { echo "fallback lost the prompt"; return 1; }
   [[ "$(cat "$OUT")" == "fake" ]] || { echo "fallback image not saved: $(cat "$OUT")"; return 1; }
-  assert_output_contains "Model: google/gemini-nano-banana-2.1"
+  assert_output_contains "Model: google/gemini-3.1-flash-image"
 }
 
 # classify <fixture> — runs the classifier on a captured body, under the provider and status its
@@ -235,7 +235,7 @@ reset_stub() {
   assert_status 0
   assert_calls 1
   assert_sent 1 gpt-image-2.5-sunburst
-  assert_output_contains "gpt-image-2 is remembered as unavailable to this key; drawing with fallback gpt-image-2.5-sunburst"
+  assert_output_contains "gpt-image-2.6-sunburst is remembered as unavailable to this key; drawing with fallback gpt-image-2.5-sunburst"
 }
 
 @test "openai: a fallback that is unavailable too ends the run after two requests and is not remembered" {
@@ -244,14 +244,14 @@ reset_stub() {
 
   assert_status 1
   assert_calls 2
-  assert_sent 1 gpt-image-2
+  assert_sent 1 gpt-image-2.6-sunburst
   assert_sent 2 gpt-image-2.5-sunburst
   assert_output_contains "OpenAI API returned HTTP 400: The model 'no-such-image-model-x9' does not exist."
 
   reset_stub openai ok
   run_provider openai
   assert_status 0
-  assert_sent 1 gpt-image-2
+  assert_sent 1 gpt-image-2.6-sunburst
 }
 
 @test "openrouter: a fallback that answers 200 with an error on the choice and no image still records the verdict" {
@@ -264,7 +264,7 @@ reset_stub() {
 
   assert_status 1
   assert_calls 2
-  assert_sent 2 google/gemini-nano-banana-2.1
+  assert_sent 2 google/gemini-3.1-flash-image
   [[ "${lines[${#lines[@]}-1]}" == "OpenRouter provider error (502): upstream boom" ]] || {
     echo "the run did not end naming the choice's error:"; echo "$output"; return 1; }
   [[ -n "$(find "$XDG_CACHE_HOME" -name '*.json')" ]] || { echo "no verdict recorded"; return 1; }
@@ -273,7 +273,7 @@ reset_stub() {
   run_provider openrouter
   assert_status 0
   assert_calls 1
-  assert_sent 1 google/gemini-nano-banana-2.1
+  assert_sent 1 google/gemini-3.1-flash-image
 }
 
 @test "openai: a remembered verdict is ignored once it is older than IMAGE_AVAILABILITY_TTL" {
@@ -289,7 +289,7 @@ reset_stub() {
   IMAGE_AVAILABILITY_TTL=3600 run_provider openai
   assert_status 0
   assert_calls 1
-  assert_sent 1 gpt-image-2
+  assert_sent 1 gpt-image-2.6-sunburst
 
   reset_stub openai ok
   IMAGE_AVAILABILITY_TTL=3700 run_provider openai
@@ -330,7 +330,7 @@ reset_stub() {
 
   reset_stub openai ok
   IMAGE_AVAILABILITY_TTL=0 run_provider openai
-  assert_sent 1 gpt-image-2
+  assert_sent 1 gpt-image-2.6-sunburst
 }
 
 @test "every provider reports a bad key or a bad parameter without trying the fallback" {
@@ -351,9 +351,9 @@ reset_stub() {
   for provider in gemini openai xai openrouter; do
     case "$provider" in
       gemini) default=gemini-3-pro-image ;;
-      openai) default=gpt-image-2 ;;
+      openai) default=gpt-image-2.6-sunburst ;;
       xai) default=grok-imagine-image-2.0 ;;
-      openrouter) default=google/gemini-3.1-flash-image ;;
+      openrouter) default=google/gemini-nano-banana-2.1 ;;
     esac
     unavailable=$(ls "$FIXTURES"/unavailable/"$provider"-*.json | head -1)
     env_var="$(printf '%s' "$provider" | tr '[:lower:]' '[:upper:]')_IMAGE_MODEL"
@@ -379,9 +379,9 @@ reset_stub() {
   assert_status 0
 
   reset_stub openai ok
-  run_provider openai --model gpt-image-2
+  run_provider openai --model gpt-image-2.6-sunburst
   assert_status 0
-  assert_sent 1 gpt-image-2
+  assert_sent 1 gpt-image-2.6-sunburst
 }
 
 @test "openai: a verdict is kept per API key" {
@@ -391,7 +391,7 @@ reset_stub() {
 
   reset_stub openai ok
   OPENAI_API_KEY="another-test-key-not-real" run_provider openai
-  assert_sent 1 gpt-image-2
+  assert_sent 1 gpt-image-2.6-sunburst
 }
 
 @test "openai: a verdict file that cannot be read counts as stale instead of failing the run" {
@@ -408,7 +408,7 @@ reset_stub() {
     run_provider openai
     assert_status 0
     assert_calls 1
-    assert_sent 1 gpt-image-2
+    assert_sent 1 gpt-image-2.6-sunburst
   done
 }
 
@@ -453,7 +453,7 @@ reset_stub() {
 
   local rows
   rows=$(cut -f1,2,4 "$DISPLAY_PANE_DIR/status")
-  [[ "$rows" == $'openai\tquerying\tgpt-image-2\nopenai\tquerying\tgpt-image-2.5-sunburst\nopenai\tcomplete\tgpt-image-2.5-sunburst' ]] || {
+  [[ "$rows" == $'openai\tquerying\tgpt-image-2.6-sunburst\nopenai\tquerying\tgpt-image-2.5-sunburst\nopenai\tcomplete\tgpt-image-2.5-sunburst' ]] || {
     echo "status rows:"; echo "$rows"; return 1; }
 }
 

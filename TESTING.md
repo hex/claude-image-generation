@@ -126,7 +126,7 @@ bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/test.png
 # OpenAI model override (forcing previous flagship)
 export OPENAI_IMAGE_MODEL="gpt-image-1.5"
 bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
-# Expected: stderr includes "model: gpt-image-1.5" (not the default gpt-image-2)
+# Expected: stderr includes "model: gpt-image-1.5" (not the default gpt-image-2.6-sunburst)
 
 # xAI model override
 export XAI_IMAGE_MODEL="grok-imagine-image-quality"
@@ -203,9 +203,9 @@ bash scripts/run-all.sh --mode edit --prompt "combine these" \
 work=$(mktemp -d "${TMPDIR:-/tmp}/fallback.XXXXXX")
 cp -R scripts "$work/"
 sed -i '' 's/:-gemini-3-pro-image}/:-no-such-image-model-x9}/' "$work/scripts/gemini.sh"
-sed -i '' 's/:-gpt-image-2}/:-no-such-image-model-x9}/' "$work/scripts/openai.sh"
+sed -i '' 's/:-gpt-image-2.6-sunburst}/:-no-such-image-model-x9}/' "$work/scripts/openai.sh"
 sed -i '' 's/:-grok-imagine-image-2.0}/:-no-such-image-model-x9}/' "$work/scripts/xai.sh"
-sed -i '' 's#:-google/gemini-3.1-flash-image}#:-google/no-such-image-model-x9}#' "$work/scripts/openrouter.sh"
+sed -i '' 's#:-google/gemini-nano-banana-2.1}#:-google/no-such-image-model-x9}#' "$work/scripts/openrouter.sh"
 export XDG_CACHE_HOME="$work/cache"
 unset GEMINI_IMAGE_MODEL OPENAI_IMAGE_MODEL XAI_IMAGE_MODEL OPENROUTER_IMAGE_MODEL
 for p in gemini openai xai openrouter; do
