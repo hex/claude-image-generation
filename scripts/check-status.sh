@@ -104,10 +104,18 @@ classify_key() {
   esac
 }
 
-# classify_listing <fetch result> <body file>
+# classify_listing <fetch result> <body file> — an empty body passes jq with no output, so a
+# blank answer counts as unreadable too.
 classify_listing() {
+  local listed
   case "$1" in
-    200) jq -r --arg model "$MODEL" "$LISTED" "$2" 2>/dev/null || echo "unreadable model list" ;;
+    200)
+      if listed=$(jq -r --arg model "$MODEL" "$LISTED" "$2" 2>/dev/null) && [[ -n "$listed" ]]; then
+        echo "$listed"
+      else
+        echo "unreadable model list"
+      fi
+      ;;
     "curl exit "*) echo "no answer ($1)" ;;
     *) echo "unexpected HTTP $1" ;;
   esac
