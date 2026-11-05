@@ -143,11 +143,13 @@ On Claude Code builds with function hooks, the plugin also registers a tool, `mc
 |-------|----------|---------|
 | `prompt` | yes | What to draw, or how to change the input images |
 | `providers` | no | Any of `gemini`, `openai`, `xai`, `openrouter`; omitted, the `Default providers` setting |
-| `outputBase` | no | Path without extension; each provider saves `<outputBase>-<provider>.png`. Omitted, `<Output directory>/image-<timestamp>` |
+| `outputBase` | no | Path without extension, anywhere on disk; each provider saves `<outputBase>-<provider>.png`. Omitted, `<Output directory>/image-<timestamp>` |
 | `inputImages` | no | Images to edit; any entry switches to edit mode |
 | `aspectRatio` | no | Whole-number `W:H` such as `16:9`; passed to gemini and xai only |
 
-The tool runs `scripts/run-all.sh`, so the streaming pane and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check before anything runs: a blank prompt, a field of the wrong type, an unknown provider, an `outputBase` ending in `.png`, `.jpg`, `.jpeg` or `.webp` (any case), or an aspect ratio that is not whole-number `W:H` (so xAI's `auto`, `19.5:9` and `9:19.5` need the scripts).
+The tool runs `scripts/run-all.sh`, so the streaming pane and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check before anything runs: a blank prompt, a prompt over 100,000 bytes or with a null character (U+0000), a field of the wrong type, an unknown provider or one named twice, an `outputBase` that is blank, ends in `/`, or ends in `.png`, `.jpg`, `.jpeg` or `.webp` (any case), a control character in `outputBase` or an `inputImages` path, or an aspect ratio that is not whole-number `W:H` with both sides above zero (so xAI's `auto`, `19.5:9` and `9:19.5` need the scripts).
+
+The tool never overwrites a file. When any `<outputBase>-<provider>.png` it would save already exists, as a file or as a symlink (a dangling one too), it refuses the call before any provider runs and names each such path. Choose another `outputBase`, or move the old files away first. The scripts keep the same rule on their own (see Direct Script Usage).
 
 A call runs for at most ten minutes, the most the engine allows a process. That covers the slowest provider plus the 45-second retry offer.
 
@@ -165,6 +167,8 @@ The slash command, the agent and the skill use the tool whenever the session off
 ### Direct Script Usage
 
 Scripts are located in `scripts/` and can be invoked directly.
+
+A provider script never overwrites a file. It refuses an `--output` that already exists, as a file or as a symlink (a dangling one too), before it calls the API, and it writes the image only into a file it creates itself, so it also refuses a symlink that appears at the path while the request runs. `run-all.sh` gives each provider its own `<base>-<provider>.png`, so a provider whose file exists fails with that refusal while the others still run.
 
 #### gemini.sh
 
@@ -453,6 +457,7 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
 | Retry helper | `scripts/retry.sh` | `curl_with_retry` for transient API failures |
 | Input image check | `scripts/input-images.sh` | Copies each `--input-image` into a private temp folder, reads the copy's type from its bytes and refuses anything that is not a PNG, JPEG, WebP or GIF file |
+| Output image save | `scripts/output-image.sh` | Refuses an `--output` that already exists and decodes the image only into a file it creates, never through a symlink |
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |
 | Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
@@ -462,7 +467,7 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | Hooks manifest | `hooks/hooks.json` | Points the engine at `hooks/index.ts` |
 | Tool input type | `hooks/generate-input.d.ts` | Types the `generate` tool's input for the `tool.call` hook |
 | TypeScript config | `tsconfig.json` | Type-checks `hooks/` and `tests/` against `.claude/types` |
-| Automated tests | `tests/` | bats test suite for all scripts; `argv.test.ts` for the tool's input rules |
+| Automated tests | `tests/` | bats test suite for all scripts; `argv.test.ts` for the tool's input rules and its refusal of an existing output file |
 
 ## Development
 

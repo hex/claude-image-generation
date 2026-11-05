@@ -58,10 +58,11 @@ bats tests/openai.bats
 | `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), image normalization to the display box + DPI pinning, empty-timing parse, the `waiting on` line (animated until the first image, then written once per block, clipped to the pane width), resize redraw and its replay order, retry labels on the waiting line, the retry offer (countdown, `r`, expiry, Esc, reprint after a resize) |
 | `tests/shared_pane.bats` | `scripts/display.sh`, `scripts/run-all.sh` | One pane per batch: registry attach, create-race wait, abandoned-claim takeover, stale/dismissed entries, token refcount, run-all attach + ownership |
 | `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction; multi-image payload shape (gemini inlineData part count in edit and generate modes, openai repeated `image[]` multipart fields, xai `images` array length, openrouter `image_url` content parts); xai `--quality` in the request body and the reported format; every provider retrying a 503 and reporting it to the pane; every provider refusing an input that is not an image, a missing path and `/dev/zero` before any request; gemini, xai and openrouter sending two different images as their own bytes, each typed by its content (a GIF named `.png` goes as `image/gif`); the openai request sent by the real curl to `tests/one_request_server.py` (needs `python3`): every free-text field set to `@<file>` arrives as typed, and images named with `,` `;` `"` `\` or `-` arrive as their own bytes; an input file replaced after the check still uploads the checked bytes; every provider removing its copies of the input images on exit, refused or not. The multi-megabyte tests skip unless a large PNG named `test-input.png` sits at the repository root (gitignored) |
+| `tests/output_image.bats` | `scripts/output-image.sh` through every provider | Never overwriting: each provider refuses an `--output` that is a file, a symlink or a dangling symlink before calling curl, shows the refusal in the pane and leaves the old file and the link's target unchanged; refuses to write through a symlink that appears at the path while the request runs; leaves no file behind when the image data does not decode |
 | `tests/run-all.bats` | `scripts/run-all.sh` | The retry offer: names only the failed providers, re-forks exactly those when the pane answers `.retry`, treats a pane closed mid-offer as no retry, writes no offer with `DISPLAY_PANE_RETRY_WAIT=0`, guards the pane release after a retry succeeds; `--input-image` forwarding (every repeated flag reaches each provider; provider scripts stubbed) |
 | `tests/bash32_compat.bats` | provider + display scripts | bash 3.2 array / associative-array safety |
 | `tests/frontmatter.bats` | skill / agent / command | YAML frontmatter validation |
-| `tests/argv.test.ts` | `hooks/argv.ts` | The generate tool's input rules: blank prompt, unknown provider, wrong field types, `outputBase` with an extension, malformed aspect ratio, config defaults vs. call overrides, edit mode, prompt kept as one argv element |
+| `tests/argv.test.ts` | `hooks/argv.ts`, `hooks/index.ts` | The generate tool's input rules: blank prompt, a null character in the prompt, a prompt over 100,000 bytes (and one at the limit), unknown or repeated provider, wrong field types, `outputBase` that is blank, names a folder or has an extension, a control character in `outputBase` or an `inputImages` path, malformed or zero-sided aspect ratio, config defaults vs. call overrides, edit mode, prompt kept as one argv element. The `tool.call` hook: an existing file or dangling symlink at an output path refuses the call before `run-all.sh` runs; free paths run once and the answer lists what the run saved |
 
 Tests do not make real API calls. They validate argument parsing, error messages, exit codes, and terminal protocol output.
 
@@ -110,6 +111,8 @@ bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
 ```
 
 ### Model Override via Environment Variable
+
+The scripts never overwrite an output. With a valid key the first command saves `/tmp/test.png` and the next one refuses it before printing its model line, so delete `/tmp/test.png` between runs.
 
 ```bash
 # Gemini model override
@@ -203,7 +206,8 @@ When a session loads both the marketplace copy and a `--plugin-dir` copy of the 
 
 1. Ask for an image that names providers, an output path and an aspect ratio (for example "draw a lighthouse at dusk with gemini and xai, save it as ./out/lighthouse, 16:9"), and check the call carries `providers`, `outputBase` and `aspectRatio`
 2. Check the result lists `saved ./out/lighthouse-gemini.png` and `saved ./out/lighthouse-xai.png`, or a `missing` line for any provider that failed, followed by `run-all.sh exited <code>`
-3. Trigger each refusal and check the tool refuses before anything runs: a blank prompt, a field of the wrong type (such as `providers` as a string), an unknown provider, an `outputBase` ending in `.png`, `.jpg`, `.jpeg` or `.webp`, and an aspect ratio that is not whole-number `W:H` (such as `auto` or `19.5:9`)
+3. Trigger each refusal and check the tool refuses before anything runs: a blank prompt, a field of the wrong type (such as `providers` as a string), an unknown provider, a provider named twice, an `outputBase` that is blank, ends in `/`, or ends in `.png`, `.jpg`, `.jpeg` or `.webp`, an `outputBase` holding a newline, and an aspect ratio that is not whole-number `W:H` (such as `auto`, `19.5:9` or `0:0`)
+4. Ask for the image from step 1 again with the same output path, and check the tool refuses with `./out/lighthouse-gemini.png already exists` and `./out/lighthouse-xai.png already exists`, runs no provider, and leaves both files as they were. Replace one of them with a symlink to another file (`printf canary > ./out/canary.txt && ln -sf canary.txt ./out/lighthouse-xai.png`), ask again, and check the refusal still names it and `./out/canary.txt` still reads `canary`
 
 ### 3.1 Basic Generation
 
@@ -285,7 +289,7 @@ wait
 1. Verify exactly one pane opens, not one per provider
 2. Verify both providers render into it, each under its own colored banner
 3. Verify the pane stays open until the slower provider finishes, then shows `[f]inder [p]review [esc/ctrl-d]`
-4. Run the same two commands again after the pane is dismissed and verify a fresh pane opens rather than the images landing in the dismissed one
+4. Delete `/tmp/pane-gemini.png` and `/tmp/pane-xai.png` (the scripts never overwrite an output), run the same two commands again after you dismiss the pane, and verify a fresh pane opens rather than the images landing in the dismissed one
 5. Start a provider in the background, then run `run-all.sh` while it is still generating, and verify both stream into the same pane and that run-all does not dismiss it while the background provider is still working
 
 ## 4. Edge Cases
@@ -339,7 +343,18 @@ wait
    printf 'not an image\n' > /tmp/notes.png
    bash scripts/gemini.sh --mode edit --prompt "test" --input-image /tmp/notes.png --output /tmp/test.png
    ```
-2. **Expected:** both exit 1 before any API call, with `Error: --input-image is not a readable file: ./nonexistent.png` and then `Error: --input-image is not a PNG, JPEG, WebP or GIF image: /tmp/notes.png`. The API key check runs first, so set `GEMINI_API_KEY` to any value.
+2. **Expected:** both exit 1 before any API call, with `Error: --input-image is not a readable file: ./nonexistent.png` and then `Error: --input-image is not a PNG, JPEG, WebP or GIF image: /tmp/notes.png`. The API key check runs first, so set `GEMINI_API_KEY` to any value. The output check runs next, so make sure `/tmp/test.png` does not exist.
+
+### Existing Output Path
+
+1. Put a file and a dangling symlink where the scripts would save:
+   ```bash
+   printf 'OLD IMAGE' > /tmp/taken.png
+   ln -sf /tmp/nowhere.txt /tmp/dangling.png
+   GEMINI_API_KEY=any bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/taken.png
+   GEMINI_API_KEY=any bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/dangling.png
+   ```
+2. **Expected:** both exit 1 before any API call, with `Error: --output already exists, refusing to overwrite it: /tmp/taken.png` and then the same for `/tmp/dangling.png`. `/tmp/taken.png` still reads `OLD IMAGE`, and `/tmp/nowhere.txt` does not exist.
 
 ## 5. Checklist Summary
 
@@ -361,4 +376,5 @@ wait
 | Invalid API key | Edge case | HTTP error reported, script exits 1 |
 | Nonexistent input image | Edge case | Script exits with error |
 | Unreachable output path | Edge case | Script exits with error |
+| Existing output path | Automated / Manual | Exit 1 before any API call; the file, the symlink and its target unchanged |
 | Rate limit (HTTP 429) | Edge case | Error reported with API message |

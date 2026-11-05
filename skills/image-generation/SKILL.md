@@ -51,7 +51,9 @@ hooks), prefer it over the scripts below. It takes `prompt`, and optionally `pro
 `aspectRatio` (whole-number `W:H`, gemini and xai only). Leave `providers` and `outputBase` out unless the request
 gives them: the tool uses the person's `/config` defaults. It runs `run-all.sh`, so the pane
 and the retry offer behave as described under Parallel Generation, and it answers with each
-expected file marked `saved` or `missing`. Use the scripts instead when the request needs an
+expected file marked `saved` or `missing`. It never overwrites: when any
+`<outputBase>-<provider>.png` already exists it refuses the call and names each path, so pick
+an unused `outputBase` (add `-2`, `-3`) rather than deleting the old files. Use the scripts instead when the request needs an
 option the tool does not take, such as `--image-size`, `--quality`, `--background`, `--model`.
 
 ### Text-to-Image Generation
@@ -133,7 +135,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
 ```
 
 Each provider produces `<base>-<provider>.png` (e.g. `<base>-gemini.png`, `<base>-openai.png`,
-`<base>-xai.png`). The default set is `gemini,openai,xai`; OpenRouter is opt-in.
+`<base>-xai.png`). The default set is `gemini,openai,xai`; OpenRouter is opt-in. No script
+overwrites a file: a provider whose output path already exists, as a file or a symlink, exits 1
+before calling its API while the others run, so choose a base whose files do not exist yet.
 
 Optional flags:
 - `--input-image <path>` — required for `--mode edit`; repeatable, every image is forwarded to each provider. Forwarding happens in edit mode only — for Gemini's generate-mode reference images, call gemini.sh directly. Each path must be a PNG, JPEG, WebP or GIF file; the type is read from its bytes, and anything else is refused before any API call
@@ -182,6 +186,8 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 
 - Scripts exit with code 1 on failure and print error details to stderr
 - If an API key is missing, the script exits immediately with a clear message
+- `Error: --output already exists, refusing to overwrite it: <path>` means a file or a symlink holds the path, and the script sent no request. Rerun with a new path rather than deleting the file
+- `Could not save the image to <path>: <reason>` means the API answered but the script did not write the image, because something appeared at the path during the request or the image data did not decode. The script leaves no partial file behind
 - HTTP errors include the status code and API error message
 - If multiple providers are used in parallel and one fails, report the error and present the successful results
 - Rate limit errors (HTTP 429) mean the provider's quota is exhausted. The script retries a 429 up to three times first; if it still fails, try again later or use another provider
