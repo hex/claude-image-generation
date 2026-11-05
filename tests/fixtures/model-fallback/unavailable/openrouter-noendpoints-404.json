@@ -1,0 +1,1 @@
+{"error":{"message":"No endpoints found that support the requested output modalities: image, text","code":404,"metadata":{"routing_funnel":[{"step":"Initial Endpoints","endpoint_count":8},{"step":"Filter by Regional Surcharge","endpoint_count":4}],"failed_routing_step":"Filter by Model Output Modalities"}}}
