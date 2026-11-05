@@ -7,6 +7,10 @@ setup() {
   # These tests run openrouter.sh far enough to reach the display pane, which would join or
   # split a pane in the developer's own tmux session once per test.
   disable_display
+  # Some tests run openrouter.sh as far as the API call, which would otherwise go to OpenRouter.
+  stub_provider_api
+  # An output path of this test's own, so no file left by another run stands in for it.
+  OUT="${BATS_TEST_TMPDIR}/out.png"
   # Clear API key by default; tests that need it set it explicitly
   unset OPENROUTER_API_KEY 2>/dev/null || true
   unset OPENROUTER_IMAGE_MODEL 2>/dev/null || true
@@ -20,13 +24,13 @@ setup() {
 }
 
 @test "openrouter: missing --mode prints error" {
-  run "$OPENROUTER_SH" --prompt "a cat" --output "/tmp/out.png"
+  run "$OPENROUTER_SH" --prompt "a cat" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --mode, --prompt, and --output are required"
 }
 
 @test "openrouter: missing --prompt prints error" {
-  run "$OPENROUTER_SH" --mode generate --output "/tmp/out.png"
+  run "$OPENROUTER_SH" --mode generate --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --mode, --prompt, and --output are required"
 }
@@ -39,21 +43,21 @@ setup() {
 
 @test "openrouter: invalid --mode prints error" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
-  run "$OPENROUTER_SH" --mode bogus --prompt "a cat" --output "/tmp/out.png"
+  run "$OPENROUTER_SH" --mode bogus --prompt "a cat" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --mode must be 'generate' or 'edit'"
 }
 
 @test "openrouter: edit mode without --input-image prints error" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
-  run "$OPENROUTER_SH" --mode edit --prompt "make it blue" --output "/tmp/out.png"
+  run "$OPENROUTER_SH" --mode edit --prompt "make it blue" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --input-image is required for edit mode"
 }
 
 @test "openrouter: missing OPENROUTER_API_KEY prints error" {
   unset OPENROUTER_API_KEY 2>/dev/null || true
-  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "/tmp/out.png"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: OPENROUTER_API_KEY environment variable is not set"
 }
@@ -68,21 +72,21 @@ setup() {
 @test "openrouter: default model is google/gemini-3.1-flash-image" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
   # The script prints "Calling OpenRouter API (model: ...)" before the curl call
-  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-openrouter-out.png"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_output_contains "model: google/gemini-3.1-flash-image"
 }
 
 @test "openrouter: OPENROUTER_IMAGE_MODEL env var overrides default model" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
   export OPENROUTER_IMAGE_MODEL="custom/openrouter-model"
-  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-openrouter-out.png"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_output_contains "model: custom/openrouter-model"
 }
 
 @test "openrouter: --model flag overrides default and env var" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
   export OPENROUTER_IMAGE_MODEL="custom/openrouter-model"
-  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-openrouter-out.png" --model "flag/model"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model "flag/model"
   assert_output_contains "model: flag/model"
 }
 
@@ -110,7 +114,7 @@ setup() {
   printf '%s\n200\n' '{"choices":[{"error":{"code":502,"message":"upstream boom"},"finish_reason":"error","message":{"content":""}}]}' > "$mock_dir/response.txt"
   printf '#!/bin/bash\ncat >/dev/null\ncat "$(dirname "$0")/response.txt"\n' > "$mock_dir/curl"
   chmod +x "$mock_dir/curl"
-  PATH="$mock_dir:$PATH" run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "${BATS_TMPDIR}/openrouter_err_$$.png"
+  PATH="$mock_dir:$PATH" run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
   rm -rf "$mock_dir" "$DISPLAY_PANE_DIR"
   assert_status 1
   assert_output_contains "OpenRouter provider error (502): upstream boom"

@@ -7,6 +7,10 @@ setup() {
   # These tests run gemini.sh far enough to reach the display pane, which would join or
   # split a pane in the developer's own tmux session once per test.
   disable_display
+  # Some tests run gemini.sh as far as the API call, which would otherwise go to Google.
+  stub_provider_api
+  # An output path of this test's own, so no file left by another run stands in for it.
+  OUT="${BATS_TEST_TMPDIR}/out.png"
   # Clear API key by default; tests that need it set it explicitly
   unset GEMINI_API_KEY 2>/dev/null || true
   unset GEMINI_IMAGE_MODEL 2>/dev/null || true
@@ -20,13 +24,13 @@ setup() {
 }
 
 @test "gemini: missing --mode prints error" {
-  run "$GEMINI_SH" --prompt "a cat" --output "/tmp/out.png"
+  run "$GEMINI_SH" --prompt "a cat" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --mode, --prompt, and --output are required"
 }
 
 @test "gemini: missing --prompt prints error" {
-  run "$GEMINI_SH" --mode generate --output "/tmp/out.png"
+  run "$GEMINI_SH" --mode generate --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --mode, --prompt, and --output are required"
 }
@@ -39,14 +43,14 @@ setup() {
 
 @test "gemini: edit mode without --input-image prints error" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
-  run "$GEMINI_SH" --mode edit --prompt "make it blue" --output "/tmp/out.png"
+  run "$GEMINI_SH" --mode edit --prompt "make it blue" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --input-image is required for edit mode"
 }
 
 @test "gemini: missing GEMINI_API_KEY prints error" {
   unset GEMINI_API_KEY 2>/dev/null || true
-  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "/tmp/out.png"
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: GEMINI_API_KEY environment variable is not set"
 }
@@ -61,7 +65,7 @@ setup() {
 @test "gemini: default model is gemini-3-pro-image" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
   # The script will fail at the curl call, but we can check stderr for the model name
-  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-gemini-out.png"
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT"
   # The script either prints the model in its API call message or fails at curl.
   # Since we have a dummy key, curl will fail, but the "Calling Gemini API" message
   # is printed before the curl call.
@@ -71,20 +75,20 @@ setup() {
 @test "gemini: GEMINI_IMAGE_MODEL env var overrides default model" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
   export GEMINI_IMAGE_MODEL="gemini-custom-model"
-  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-gemini-out.png"
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_output_contains "model: gemini-custom-model"
 }
 
 @test "gemini: --model flag overrides default and env var" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
   export GEMINI_IMAGE_MODEL="gemini-custom-model"
-  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-gemini-out.png" --model "gemini-flag-model"
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT" --model "gemini-flag-model"
   assert_output_contains "model: gemini-flag-model"
 }
 
 @test "gemini: more than 14 input images is rejected" {
   export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
-  local args=(--mode edit --prompt "combine these" --output "/tmp/out.png")
+  local args=(--mode edit --prompt "combine these" --output "$OUT")
   for i in $(seq 1 15); do
     args+=(--input-image "/tmp/x.png")
   done

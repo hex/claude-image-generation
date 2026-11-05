@@ -311,7 +311,7 @@ display_image_in_pane() {
   local terminal
   terminal=$(get_outer_terminal) || true
 
-  local display_cmd
+  local -a display_cmd
   case "$terminal" in
     iterm2)
       local imgcat_path
@@ -320,10 +320,10 @@ display_image_in_pane() {
         return 1
       }
       local pane_width="${DISPLAY_IMAGE_WIDTH:-512}"
-      display_cmd="$(printf '%q' "$imgcat_path") -W ${pane_width}px $(printf '%q' "$file_path")"
+      display_cmd=("$imgcat_path" -W "${pane_width}px" "$file_path")
       ;;
     kitty)
-      display_cmd="kitten icat --align left $(printf '%q' "$file_path")"
+      display_cmd=(kitten icat --align left "$file_path")
       ;;
     *)
       # Fallback: try sixel if a conversion tool is available
@@ -331,20 +331,15 @@ display_image_in_pane() {
       local sixel_width="${DISPLAY_IMAGE_WIDTH:-512}"
       if sixel_tool=$(_sixel_find_tool 2>/dev/null); then
         case "$sixel_tool" in
-          img2sixel) display_cmd="img2sixel --width=${sixel_width} $(printf '%q' "$file_path")" ;;
-          chafa)     display_cmd="chafa --format=sixels --size=${sixel_width}x $(printf '%q' "$file_path")" ;;
-          magick)    display_cmd="magick $(printf '%q' "$file_path") -geometry ${sixel_width}x\\> sixel:-" ;;
+          img2sixel) display_cmd=(img2sixel "--width=${sixel_width}" "$file_path") ;;
+          chafa)     display_cmd=(chafa --format=sixels "--size=${sixel_width}x" "$file_path") ;;
+          magick)    display_cmd=(magick "$file_path" -geometry "${sixel_width}x>" sixel:-) ;;
         esac
       else
-        display_cmd="echo 'No inline image protocol detected'; echo 'Image saved to: $(printf '%q' "$file_path")'"
+        display_cmd=(printf 'No inline image protocol detected\nImage saved to: %s\n' "$file_path")
       fi
       ;;
   esac
-
-  local filename
-  filename=$(basename "$file_path")
-  local safe_filename
-  safe_filename=$(printf '%q' "$filename")
 
   # Target the originating pane so the split opens here even if the user
   # has switched to a different tmux window/tab.
@@ -352,14 +347,25 @@ display_image_in_pane() {
   __pane_target_args
   local -a target_args=(${__PANE_TARGET_ARGS[@]+"${__PANE_TARGET_ARGS[@]}"})
 
-  local safe_path
-  safe_path=$(printf '%q' "$file_path")
-
+  # tmux runs a command given as several words directly, with no shell parsing them, so the
+  # path reaches the pane script as data: $1 is the image, the rest its display command.
   tmux split-window -v -l '40%' ${target_args[@]+"${target_args[@]}"} \
-    "bash -c '_esc=\$(printf \"\\033\"); echo \"--- ${safe_filename} ---\"; echo; ${display_cmd}; echo; printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then open -R ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then open -a Preview ${safe_path} 2>/dev/null || xdg-open ${safe_path} 2>/dev/null; fi; done'"
+    bash -c '_esc=$(printf "\033"); file=$1; shift; echo "--- ${file##*/} ---"; echo; "$@"; echo; printf "[f]inder [p]review [esc/ctrl-d] close "; while true; do read -n1 -s -r _key || break; if [ "$_key" = "$_esc" ]; then break; fi; if [ "$_key" = "f" ] || [ "$_key" = "F" ]; then open -R "$file" 2>/dev/null || xdg-open "$file" 2>/dev/null; elif [ "$_key" = "p" ] || [ "$_key" = "P" ]; then open -a Preview "$file" 2>/dev/null || xdg-open "$file" 2>/dev/null; fi; done' \
+    bash "$file_path" "${display_cmd[@]}"
 }
 
 # ── Streaming Display Pane ────────────────────────────────────────────
+
+# Escapes backslash, tab and newline in a value bound for one line of the manifest or the status
+# log, where a raw tab would end its field and a raw newline would start another record. The
+# watcher restores the value with printf %b. Usage: __pane_escape_field <out_var> <value>
+__pane_escape_field() {
+  local __value="$2"
+  __value="${__value//\\/\\\\}"
+  __value="${__value//$'\t'/\\t}"
+  __value="${__value//$'\n'/\\n}"
+  printf -v "$1" '%s' "$__value"
+}
 
 # Appends a file path to the streaming pane manifest.
 # The watcher in the tmux pane picks up new entries and renders them.
@@ -373,6 +379,7 @@ display_pane_add() {
   if [[ "$file_path" != /* ]]; then
     file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
   fi
+  __pane_escape_field file_path "$file_path"
   printf '%s\n' "$file_path" >> "$DISPLAY_PANE_DIR/manifest"
 }
 
@@ -400,6 +407,9 @@ display_pane_status() {
   if [[ -n "$path" && "$path" != /* ]]; then
     path="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
   fi
+  # Model and path come from the caller's arguments; the other fields are fixed words.
+  __pane_escape_field model "$model"
+  __pane_escape_field path "$path"
   printf '%s\t%s\t%s\t%s\t%s\n' "$provider" "$state" "$ms" "$model" "$path" \
     >> "$DISPLAY_PANE_DIR/status"
 }
@@ -665,6 +675,8 @@ seen_providers=""
 drawn_order=""
 status_lines_processed=0
 manifest_shown=0
+# The manifest images shown so far, restored to their real paths, for the f and p keys.
+manifest_paths=()
 spinner_frame=0
 any_image_rendered=""
 SPINNERS=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
@@ -909,6 +921,18 @@ prompt_line() {
     printf '\r\033[K[f]inder [p]review [esc/ctrl-d] close '
 }
 
+# collect_pane_images — fills pane_images with every image the pane was given, each provider's
+# then the manifest's, one array element per path so open receives each path whole.
+collect_pane_images() {
+    pane_images=()
+    local p __path
+    for p in $seen_providers; do
+        map_get __path provider_path "$p"
+        [[ -n "$__path" ]] && pane_images+=("$__path")
+    done
+    pane_images+=(${manifest_paths[@]+"${manifest_paths[@]}"})
+}
+
 # read_key <var> — one keypress with a one-second timeout. Returns 0 with a key, 1 on a
 # timeout (a real tick: safe to check the width), 2 when input is gone. bash 3.2 reports a
 # timeout and end of input both as status 1, so they are told apart by cost: a timeout burns
@@ -989,6 +1013,9 @@ while true; do
             status_lines_processed=$((status_lines_processed + 1))
             { IFS= read -r provider; IFS= read -r state; IFS= read -r ms; IFS= read -r model; IFS= read -r path; } \
                 < <(pane_parse_status_line "$line")
+            # display_pane_status escaped these two; restore the tabs and newlines they held.
+            printf -v model '%b' "$model"
+            printf -v path '%b' "$path"
             note_provider "$provider"
             map_set provider_state "$provider" "$state"
             [[ -n "$ms" ]] && map_set provider_timing "$provider" "$ms"
@@ -1024,9 +1051,11 @@ while true; do
             manifest_lines+=("$__mline")
         done < "$WATCH/manifest" 2>/dev/null
         while [[ $manifest_shown -lt ${#manifest_lines[@]} ]]; do
-            mpath="${manifest_lines[$manifest_shown]}"
+            # display_pane_add escaped the path; restore the tabs and newlines it held.
+            printf -v mpath '%b' "${manifest_lines[$manifest_shown]}"
             manifest_shown=$((manifest_shown + 1))
             [[ -z "$mpath" ]] && continue
+            manifest_paths+=("$mpath")
             clear_loading
             mname=$(basename "$mpath")
             printf '\n--- %s ---\n' "$mname"
@@ -1068,11 +1097,13 @@ while true; do
     esac
     if [ "$_key" = "$_esc" ]; then break; fi
     if [ "$_key" = "f" ] || [ "$_key" = "F" ]; then
-        { awk -F'\t' '$5!=""{print $5}' "$WATCH/status" 2>/dev/null;
-          cat "$WATCH/manifest" 2>/dev/null; } | sort -u | xargs -I{} open -R {} 2>/dev/null
+        collect_pane_images
+        for __image in ${pane_images[@]+"${pane_images[@]}"}; do
+            open -R "$__image" 2>/dev/null
+        done
     elif [ "$_key" = "p" ] || [ "$_key" = "P" ]; then
-        { awk -F'\t' '$5!=""{print $5}' "$WATCH/status" 2>/dev/null;
-          cat "$WATCH/manifest" 2>/dev/null; } | sort -u | xargs open -a Preview 2>/dev/null
+        collect_pane_images
+        [[ ${#pane_images[@]} -gt 0 ]] && open -a Preview "${pane_images[@]}" 2>/dev/null
     fi
 done
 WATCHEREOF
@@ -1258,46 +1289,33 @@ display_image() {
 
 # ── Multi-Image Grid Display ──────────────────────────────────────────
 
-# Builds the display command for a single image.
-# Prints the command fragment to stdout.
-_build_image_cmd() {
-  local file_path="$1"
-  local terminal="$2"
-
-  local filename safe_filename safe_path
-  filename=$(basename "$file_path")
-  safe_filename=$(printf '%q' "$filename")
-  safe_path=$(printf '%q' "$file_path")
-
-  local cmd="echo --- ${safe_filename} ---; "
-  local width="${DISPLAY_IMAGE_WIDTH:-512}"
-
-  case "$terminal" in
-    iterm2)
-      local imgcat_path
-      imgcat_path=$(find_imgcat) || return 1
-      cmd+="$(printf '%q' "$imgcat_path") -W ${width}px ${safe_path}; "
-      ;;
-    kitty)
-      cmd+="kitten icat --align left ${safe_path}; "
-      ;;
-    *)
-      local sixel_tool
-      if sixel_tool=$(_sixel_find_tool 2>/dev/null); then
-        case "$sixel_tool" in
-          img2sixel) cmd+="img2sixel --width=${width} ${safe_path}; " ;;
-          chafa)     cmd+="chafa --format=sixels --size=${width}x ${safe_path}; " ;;
-          magick)    cmd+="magick ${safe_path} -geometry ${width}x\\> sixel:-; " ;;
-        esac
-      else
-        cmd+="echo 'Image: ${safe_path}'; "
-      fi
-      ;;
+# The program the multi-image pane runs. Its arguments are the tool that draws an image (imgcat,
+# kitten, img2sixel, chafa, magick, or none for a text line), the width, the imgcat path, then
+# the images, so every path stays one word and no shell ever parses it.
+__IMAGES_PANE_SCRIPT='_esc=$(printf "\033"); tool=$1; width=$2; imgcat=$3; shift 3
+for f in "$@"; do
+  echo "--- ${f##*/} ---"
+  case $tool in
+    imgcat)    "$imgcat" -W "${width}px" "$f" ;;
+    kitten)    kitten icat --align left "$f" ;;
+    img2sixel) img2sixel "--width=${width}" "$f" ;;
+    chafa)     chafa --format=sixels "--size=${width}x" "$f" ;;
+    magick)    magick "$f" -geometry "${width}x>" sixel:- ;;
+    *)         echo "Image: $f" ;;
   esac
-
-  cmd+="echo; "
-  printf '%s' "$cmd"
-}
+  echo
+done
+printf "[f]inder [p]review [esc/ctrl-d] close "
+while true; do
+  read -n1 -s -r _key || break
+  if [ "$_key" = "$_esc" ]; then break; fi
+  # One open call with every path (macOS), else xdg-open per file (Linux).
+  if [ "$_key" = "f" ] || [ "$_key" = "F" ]; then
+    open -R "$@" 2>/dev/null || for _f in "$@"; do xdg-open "$_f" 2>/dev/null; done
+  elif [ "$_key" = "p" ] || [ "$_key" = "P" ]; then
+    open -a Preview "$@" 2>/dev/null || for _f in "$@"; do xdg-open "$_f" 2>/dev/null; done
+  fi
+done'
 
 # Opens a vertical side pane displaying multiple images stacked top-to-bottom.
 # Uses -h (horizontal split) to create a tall pane on the right side.
@@ -1318,8 +1336,20 @@ display_images_in_pane() {
   local terminal
   terminal=$(get_outer_terminal) || true
 
-  local display_cmd=""
-  local all_safe_paths=""
+  local tool imgcat_path=""
+  case "$terminal" in
+    iterm2)
+      imgcat_path=$(find_imgcat) || {
+        echo "imgcat not found, cannot display images" >&2
+        return 1
+      }
+      tool=imgcat
+      ;;
+    kitty) tool=kitten ;;
+    *) tool=$(_sixel_find_tool 2>/dev/null) || tool=none ;;
+  esac
+
+  local -a paths=()
   for file_path in "${files[@]}"; do
     if [[ "$file_path" != /* ]]; then
       file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
@@ -1327,19 +1357,10 @@ display_images_in_pane() {
     if [[ ! -f "$file_path" ]]; then
       continue
     fi
-
-    display_cmd+=$(_build_image_cmd "$file_path" "$terminal")
-
-    local safe_path
-    safe_path=$(printf '%q' "$file_path")
-    all_safe_paths+="${safe_path} "
+    paths+=("$file_path")
   done
 
-  # Single open call with all paths (macOS), fallback to per-file xdg-open (Linux)
-  local finder_cmd="open -R ${all_safe_paths}2>/dev/null || for _f in ${all_safe_paths}; do xdg-open \"\$_f\" 2>/dev/null; done; "
-  local preview_cmd="open -a Preview ${all_safe_paths}2>/dev/null || for _f in ${all_safe_paths}; do xdg-open \"\$_f\" 2>/dev/null; done; "
-
-  if [[ -z "$display_cmd" ]]; then
+  if [[ ${#paths[@]} -eq 0 ]]; then
     return 0
   fi
 
@@ -1348,8 +1369,9 @@ display_images_in_pane() {
   __pane_target_args
   local -a target_args=(${__PANE_TARGET_ARGS[@]+"${__PANE_TARGET_ARGS[@]}"})
 
+  # tmux runs a command given as several words directly, with no shell parsing them.
   tmux split-window -h -l "$pane_width" ${target_args[@]+"${target_args[@]}"} \
-    "bash -c '_esc=\$(printf \"\\033\"); ${display_cmd}printf \"[f]inder [p]review [esc/ctrl-d] close \"; while true; do read -n1 -s -r _key || break; if [ \"\$_key\" = \"\$_esc\" ]; then break; fi; if [ \"\$_key\" = \"f\" ] || [ \"\$_key\" = \"F\" ]; then ${finder_cmd}elif [ \"\$_key\" = \"p\" ] || [ \"\$_key\" = \"P\" ]; then ${preview_cmd}fi; done'"
+    bash -c "$__IMAGES_PANE_SCRIPT" bash "$tool" "${DISPLAY_IMAGE_WIDTH:-512}" "$imgcat_path" "${paths[@]}"
 }
 
 # Displays multiple images using the best available method.

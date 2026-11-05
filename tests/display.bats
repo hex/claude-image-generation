@@ -827,6 +827,89 @@ teardown() {
   }
 }
 
+# --- paths that need quoting ---
+
+# Installs, in directory $1, a tmux that runs split-window's command the way tmux does (one
+# word through a shell, several words directly) with its keys read from $1/keys, an imgcat
+# under $1/.iterm2 that prints the path it is handed, and an open that logs each call as its
+# arguments joined by | to $1/open.log. Point HOME and PATH at $1 before calling the subject.
+make_pane_runner() {
+  mkdir -p "$1/.iterm2"
+  cat > "$1/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "split-window" ] || exit 0
+shift
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v|-h) shift ;;
+    -l|-t) shift 2 ;;
+    *) break ;;
+  esac
+done
+keys="$(dirname "$0")/keys"
+[ $# -eq 1 ] && exec /bin/sh -c "$1" < "$keys"
+exec "$@" < "$keys"
+STUB
+  printf '#!/bin/bash\necho "IMGCAT:${@: -1}"\n' > "$1/.iterm2/imgcat"
+  printf '#!/bin/bash\n{ printf "%%s|" "$@"; echo; } >> "%s/open.log"\n' "$1" > "$1/open"
+  printf 'fp' > "$1/keys"
+  chmod +x "$1/tmux" "$1/.iterm2/imgcat" "$1/open"
+}
+
+@test "display: display_image_in_pane shows and opens a path holding quotes, a dollar and a backslash" {
+  source "$DISPLAY_SH"
+  local mock_dir="${BATS_TMPDIR}/mock_pane_quoting_$$"
+  rm -rf "$mock_dir"
+  make_pane_runner "$mock_dir"
+  export TMUX="/tmp/tmux-501/default,12345,0" TMUX_PANE="%0" LC_TERMINAL="iTerm2"
+  export HOME="$mock_dir" PATH="$mock_dir:$PATH"
+  local img="${mock_dir}/O'Brien \"Co\" \$HOME \\ x.png"
+  printf 'x' > "$img"
+
+  run display_image_in_pane "$img"
+
+  assert_output_contains "--- O'Brien \"Co\" \$HOME \\ x.png ---"
+  assert_status 0
+  assert_output_contains "IMGCAT:${img}"
+  local opened
+  opened=$(cat "$mock_dir/open.log" 2>/dev/null || true)
+  [[ "$opened" == "-R|${img}|"$'\n'"-a|Preview|${img}|" ]] || {
+    echo "f and p did not open the image whole; open calls:"
+    echo "$opened"
+    echo "pane output: $output"
+    return 1
+  }
+  rm -rf "$mock_dir"
+}
+
+@test "display: display_images_in_pane shows and opens every path, one holding quotes" {
+  source "$DISPLAY_SH"
+  local mock_dir="${BATS_TMPDIR}/mock_grid_quoting_$$"
+  rm -rf "$mock_dir"
+  make_pane_runner "$mock_dir"
+  export TMUX="/tmp/tmux-501/default,12345,0" TMUX_PANE="%0" LC_TERMINAL="iTerm2"
+  export HOME="$mock_dir" PATH="$mock_dir:$PATH"
+  local odd="${mock_dir}/O'Brien \"Co\".png" plain="${mock_dir}/plain.png"
+  printf 'x' > "$odd"
+  printf 'y' > "$plain"
+
+  run display_images_in_pane "$odd" "$plain"
+
+  assert_output_contains "--- O'Brien \"Co\".png ---"
+  assert_status 0
+  assert_output_contains "IMGCAT:${odd}"
+  assert_output_contains "IMGCAT:${plain}"
+  local opened
+  opened=$(cat "$mock_dir/open.log" 2>/dev/null || true)
+  [[ "$opened" == "-R|${odd}|${plain}|"$'\n'"-a|Preview|${odd}|${plain}|" ]] || {
+    echo "f and p did not open both images whole; open calls:"
+    echo "$opened"
+    echo "pane output: $output"
+    return 1
+  }
+  rm -rf "$mock_dir"
+}
+
 # --- display_pane_add (streaming pane) ---
 
 @test "display: display_pane_add writes path to manifest" {
