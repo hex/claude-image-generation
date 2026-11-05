@@ -92,6 +92,77 @@ STUB
   rm -rf "$mock"
 }
 
+# Builds a watcher dir whose imgcat stub prints the path it is handed and whose sips always
+# fails, so render.sh passes imgcat the original file and the output names the exact file the
+# pane showed. Sets $wd and $mock for the caller.
+make_named_render_watcher() {
+  mock="${BATS_TMPDIR}/watcher_named_$$"
+  mkdir -p "$mock/.iterm2"
+  printf '#!/bin/bash\necho "DISPLAYED:${@: -1}"\n' > "$mock/.iterm2/imgcat"
+  printf '#!/bin/bash\nexit 1\n' > "$mock/sips"
+  cat > "$mock/tmux" <<'STUB'
+#!/bin/bash
+[ "$1" = "display-message" ] && { echo "200 50"; exit 0; }
+exit 0
+STUB
+  chmod +x "$mock/.iterm2/imgcat" "$mock/sips" "$mock/tmux"
+  wd=$(HOME="$mock" PATH="$mock:$PATH" TMUX="fake,1,0" TMUX_PANE="%0" \
+       LC_TERMINAL="iTerm2" TERM_PROGRAM="iTerm.app" \
+       bash -c "source '$DISPLAY_SH'; display_pane_open")
+  [[ -f "$wd/watcher.sh" ]] || { echo "no watcher.sh at '$wd'"; return 1; }
+}
+
+@test "a model and path holding tabs and newlines reach the watcher as one status record" {
+  local wd mock
+  make_named_render_watcher
+  # Written raw, this path reads as a gemini record cut short, then a whole record for a forged
+  # provider showing another image, then a stray line. Raw, the tab in the model would push the
+  # rest of the model into the path field.
+  local model="gemini-3"$'\t'"pro"
+  local real="$mock/art"$'\n'"forged"$'\t'"complete"$'\t'"0"$'\t'"spoof"$'\t'"${OVERSIZED_FIXTURE}"$'\n'"end.png"
+  mkdir -p "$(dirname "$real")"
+  cp "$OVERSIZED_FIXTURE" "$real"
+  source "$DISPLAY_SH"
+  DISPLAY_PANE_DIR="$wd" display_pane_status gemini complete 1200 "$model" "$real"
+  touch "$wd/.done"
+
+  local output n
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"DISPLAYED:${real}"$'\n'* ]] || {
+    echo "gemini's own image never reached the pane:"
+    echo "$output"
+    return 1
+  }
+  n=$(grep -c 'DISPLAYED:' <<<"$output")
+  [[ "$n" -eq 1 ]] || { echo "one record rendered $n images, want 1:"; echo "$output"; return 1; }
+  [[ "$output" == *"$model"* ]] || { echo "the banner lost the model's tab:"; echo "$output"; return 1; }
+  [[ "$output" != *"FORGED"* ]] || { echo "a forged provider got a banner:"; echo "$output"; return 1; }
+  rm -rf "$mock"
+}
+
+@test "a manifest path holding a newline renders as one image" {
+  local wd mock
+  make_named_render_watcher
+  # Written raw, this path reads as two manifest entries, the second naming another image.
+  local real="$mock/two"$'\n'"${OVERSIZED_FIXTURE}"
+  mkdir -p "$(dirname "$real")"
+  cp "$OVERSIZED_FIXTURE" "$real"
+  source "$DISPLAY_SH"
+  DISPLAY_PANE_DIR="$wd" display_pane_add "$real"
+  touch "$wd/.done"
+
+  local output n
+  output=$(HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" </dev/null 2>&1)
+  [[ "$output" == *"DISPLAYED:${real}"$'\n'* ]] || {
+    echo "the image never reached the pane under its own path:"
+    echo "$output"
+    return 1
+  }
+  n=$(grep -c 'DISPLAYED:' <<<"$output")
+  [[ "$n" -eq 1 ]] || { echo "one manifest entry rendered $n images, want 1:"; echo "$output"; return 1; }
+  rm -rf "$mock"
+}
+
 @test "the waiting line is written once per block while an image is up, never per tick" {
   local mock="${BATS_TMPDIR}/watcher_spinner_$$"
   mkdir -p "$mock/.iterm2"
