@@ -2,10 +2,8 @@
 # ABOUTME: Reads each --input-image's type from its first bytes, so a provider script refuses
 # ABOUTME: any path that is not a PNG, JPEG, WebP or GIF file before it sends anything.
 
-# read_input_mimes — sets INPUT_MIMES[i] to the MIME type of INPUT_IMAGES[i], or prints why the
-# first refused path was refused and exits 1. The model chooses these paths, so the type comes
-# from the bytes, never the name: a key file renamed to .png is still refused. The regular-file
-# test runs first because reading a FIFO would block.
+# read_input_mimes — fills INPUT_MIMES from INPUT_IMAGES, index for index, or prints the refusal
+# and exits 1 at the first path that is not a readable PNG, JPEG, WebP or GIF file.
 read_input_mimes() {
   INPUT_MIMES=()
   local img magic

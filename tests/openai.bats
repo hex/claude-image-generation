@@ -4,7 +4,6 @@
 setup() {
   load test_helper
   OPENAI_SH="${PLUGIN_ROOT}/scripts/openai.sh"
-  # A real PNG for tests that must get past the input-image check to the request.
   PNG_FIXTURE="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
   # These tests run openai.sh far enough to reach the display pane, which would join or
   # split a pane in the developer's own tmux session once per test.

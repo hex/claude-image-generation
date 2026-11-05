@@ -247,8 +247,7 @@ success_body() {
   esac
 }
 
-# run_provider_edit <provider> <input-image> — runs one provider's edit mode with every
-# dummy key set, so the same call works for all four scripts.
+# run_provider_edit <provider> <input-image> — one provider's edit mode, with every dummy key set.
 run_provider_edit() {
   GEMINI_API_KEY="$DUMMY_GEMINI_KEY" OPENAI_API_KEY="$DUMMY_OPENAI_KEY" \
     XAI_API_KEY="$DUMMY_XAI_KEY" OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY" \
@@ -257,8 +256,6 @@ run_provider_edit() {
 }
 
 @test "every provider refuses an input file that is not an image, before sending anything" {
-  # The model chooses the input path, so a file such as an SSH key must never be uploaded,
-  # even when it carries an image extension.
   local not_image="$MOCK_DIR/key.png"
   printf 'stand-in for a private key\n' > "$not_image"
   local p
@@ -273,7 +270,6 @@ run_provider_edit() {
 }
 
 @test "every provider refuses a missing path or a device as an input image" {
-  # /dev/zero never ends, so reading it as an image would fill the disk with base64.
   local p path
   for p in gemini openai xai openrouter; do
     for path in "$MOCK_DIR/missing.png" /dev/zero; do
@@ -287,10 +283,8 @@ run_provider_edit() {
   done
 }
 
-# route_curl_to_local_server <body> — installs a curl that runs the real curl against a
-# one-shot local listener in place of the provider's https URL. The listener saves the raw
-# request to $MOCK_DIR/request.raw and answers 200 with <body>, so a test reads exactly the
-# bytes curl would have sent.
+# route_curl_to_local_server <body> — installs a curl that runs the real curl against a one-shot
+# local listener, which saves the raw request to $MOCK_DIR/request.raw and answers 200 with <body>.
 route_curl_to_local_server() {
   local real_curl
   real_curl=$(command -v curl)
