@@ -315,7 +315,8 @@ run_provider_edit() {
 
 # route_curl_to_local_server <body> — installs a curl that runs the real curl against
 # tests/one_request_server.py in place of the provider's https URL. The server saves the whole
-# request to $MOCK_DIR/request.raw before it answers 200 with <body>.
+# request to $MOCK_DIR/request.raw before it answers 200 with <body>. An executable
+# $MOCK_DIR/before_curl runs just before the real curl.
 route_curl_to_local_server() {
   local real_curl
   real_curl=$(command -v curl)
@@ -341,6 +342,7 @@ for a in "\$@"; do
   case "\$a" in https://*) a="http://127.0.0.1:\$port/\${a#https://*/}" ;; esac
   args+=("\$a")
 done
+[ -x "\$d/before_curl" ] && "\$d/before_curl"
 "$real_curl" --max-time 5 "\${args[@]}"
 curl_status=\$?
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
@@ -385,6 +387,35 @@ STUB
   count=$(grep -cxF $'Content-Type: image/png\r' "$request")
   [[ "$count" -eq 2 ]] || { echo "expected 2 parts typed image/png, got $count:"; cat "$request"; return 1; }
   if grep -qF 'canary' "$request"; then echo "uploaded something that is not an input image:"; cat "$request"; return 1; fi
+}
+
+@test "openai: an input file replaced after the check still uploads the bytes that were checked" {
+  command -v python3 >/dev/null || skip "needs python3"
+  local image="$MOCK_DIR/photo.png"
+  { printf '\211PNG\r\n\032\n'; printf 'bytes that were checked'; } > "$image"
+  printf 'canary written after the check\n' > "$MOCK_DIR/replacement"
+  printf '#!/bin/bash\ncp "%s" "%s"\n' "$MOCK_DIR/replacement" "$image" > "$MOCK_DIR/before_curl"
+  chmod +x "$MOCK_DIR/before_curl"
+  route_curl_to_local_server "$(success_body openai)"
+
+  run_provider_edit openai "$image"
+
+  assert_edit_succeeds
+  grep -qF 'bytes that were checked' "$MOCK_DIR/request.raw" || { echo "checked bytes missing:"; cat "$MOCK_DIR/request.raw"; return 1; }
+  if grep -qF 'canary' "$MOCK_DIR/request.raw"; then echo "uploaded the replacement:"; cat "$MOCK_DIR/request.raw"; return 1; fi
+}
+
+@test "every provider removes its copies of the input images when it exits" {
+  local scratch="$MOCK_DIR/tmp" p path
+  for p in gemini openai xai openrouter; do
+    for path in "${PLUGIN_ROOT}/tests/fixtures/oversized.png" "$MOCK_DIR/key.png"; do
+      printf 'stand-in for a private key\n' > "$MOCK_DIR/key.png"
+      rm -rf "$scratch" && mkdir -p "$scratch"
+      stub_curl "$(success_body "$p")"
+      TMPDIR="$scratch" run_provider_edit "$p" "$path"
+      [[ -z "$(ls -A "$scratch")" ]] || { echo "$p ${path}: left behind:"; ls -A "$scratch"; return 1; }
+    done
+  done
 }
 
 # stub_curl_once_503 <body> — first call answers 503 with an error body, later calls the
