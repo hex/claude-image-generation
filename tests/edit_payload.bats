@@ -27,9 +27,10 @@ teardown() {
 # $MOCK_DIR/curl with a shebang and the argv walk. curl_with_retry rewrites a streamed
 # `--data-binary @-` body to `@<tempfile>` before every real curl invocation, so a stub never
 # actually sees `@-` from a provider script -- what it sees is `@<path>` from curl_with_retry,
-# or (openai's -d/-F calls, which pass no --data-binary at all) nothing, in which case it falls
-# back to draining stdin. Callers append their own response-serving lines after this and chmod
-# the result themselves.
+# or (openai's -d/-F calls, which pass no --data-binary at all) nothing. Real curl reads no stdin
+# for those, so the stub only leaves an empty request.txt to show it was called: reading stdin
+# there would wait forever whenever the test run inherits a stdin that stays open. Callers append
+# their own response-serving lines after this and chmod the result themselves.
 __stub_curl_prelude() {
   cat > "$MOCK_DIR/curl" <<'STUB'
 #!/bin/bash
@@ -43,7 +44,7 @@ done
 case "$body_arg" in
   @-) cat > "${d}/request.txt" 2>/dev/null ;;
   @*) cp "${body_arg#@}" "${d}/request.txt" 2>/dev/null ;;
-  *)  cat > "${d}/request.txt" 2>/dev/null ;;
+  *)  : > "${d}/request.txt" ;;
 esac
 STUB
 }
