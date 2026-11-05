@@ -361,6 +361,17 @@ display_image_in_pane() {
 
 # ── Streaming Display Pane ────────────────────────────────────────────
 
+# Escapes backslash, tab and newline in a value bound for one line of the manifest or the status
+# log, where a raw tab would end its field and a raw newline would start another record. The
+# watcher restores the value with printf %b. Usage: __pane_escape_field <out_var> <value>
+__pane_escape_field() {
+  local __value="$2"
+  __value="${__value//\\/\\\\}"
+  __value="${__value//$'\t'/\\t}"
+  __value="${__value//$'\n'/\\n}"
+  printf -v "$1" '%s' "$__value"
+}
+
 # Appends a file path to the streaming pane manifest.
 # The watcher in the tmux pane picks up new entries and renders them.
 # Usage: display_pane_add <file_path>
@@ -373,6 +384,7 @@ display_pane_add() {
   if [[ "$file_path" != /* ]]; then
     file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
   fi
+  __pane_escape_field file_path "$file_path"
   printf '%s\n' "$file_path" >> "$DISPLAY_PANE_DIR/manifest"
 }
 
@@ -400,6 +412,9 @@ display_pane_status() {
   if [[ -n "$path" && "$path" != /* ]]; then
     path="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
   fi
+  # Model and path come from the caller's arguments; the other fields are fixed words.
+  __pane_escape_field model "$model"
+  __pane_escape_field path "$path"
   printf '%s\t%s\t%s\t%s\t%s\n' "$provider" "$state" "$ms" "$model" "$path" \
     >> "$DISPLAY_PANE_DIR/status"
 }
@@ -989,6 +1004,9 @@ while true; do
             status_lines_processed=$((status_lines_processed + 1))
             { IFS= read -r provider; IFS= read -r state; IFS= read -r ms; IFS= read -r model; IFS= read -r path; } \
                 < <(pane_parse_status_line "$line")
+            # display_pane_status escaped these two; restore the tabs and newlines they held.
+            printf -v model '%b' "$model"
+            printf -v path '%b' "$path"
             note_provider "$provider"
             map_set provider_state "$provider" "$state"
             [[ -n "$ms" ]] && map_set provider_timing "$provider" "$ms"
@@ -1024,7 +1042,8 @@ while true; do
             manifest_lines+=("$__mline")
         done < "$WATCH/manifest" 2>/dev/null
         while [[ $manifest_shown -lt ${#manifest_lines[@]} ]]; do
-            mpath="${manifest_lines[$manifest_shown]}"
+            # display_pane_add escaped the path; restore the tabs and newlines it held.
+            printf -v mpath '%b' "${manifest_lines[$manifest_shown]}"
             manifest_shown=$((manifest_shown + 1))
             [[ -z "$mpath" ]] && continue
             clear_loading
