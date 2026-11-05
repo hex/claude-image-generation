@@ -345,15 +345,18 @@ reset_stub() {
   stub_curl_answers openai "$FIXTURES/unavailable/openai-unknown-400.json" ok
   run_provider openai
   assert_status 0
-  local verdict
+  local verdict corrupt
   verdict=$(find "$XDG_CACHE_HOME" -name '*.json')
-  printf '{"checked_at":1.5' > "$verdict"
-
-  reset_stub openai ok
-  run_provider openai
-  assert_status 0
-  assert_calls 1
-  assert_sent 1 gpt-image-2
+  # A truncated file, and a whole one whose timestamp is a word: under set -u, a word reaching
+  # shell arithmetic is an unbound variable and would end the run.
+  for corrupt in '{"checked_at":17' '{"checked_at":"yesterday"}'; do
+    printf '%s' "$corrupt" > "$verdict"
+    reset_stub openai ok
+    run_provider openai
+    assert_status 0
+    assert_calls 1
+    assert_sent 1 gpt-image-2
+  done
 }
 
 @test "gemini: a transient error is retried on the default, and only the unavailable answer moves to the fallback" {
