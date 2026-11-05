@@ -152,6 +152,9 @@ run_provider() {
   assert_sent 2 grok-imagine-image
   [[ "$(jq -r '.aspect_ratio' "$MOCK_DIR/body.2")" == "16:9" ]] || { echo "fallback lost the request's other fields"; return 1; }
   [[ "$(cat "$OUT")" == "fake" ]] || { echo "fallback image not saved: $(cat "$OUT")"; return 1; }
+  # xAI's message names the account's team id, and stderr reaches pane logs and the tool result.
+  assert_output_contains "grok-imagine-image-2.0 is unavailable to this key (xai, HTTP 404); drawing with fallback grok-imagine-image"
+  assert_output_not_contains "00000000-0000-0000-0000-000000000000"
 }
 
 @test "openrouter: an unavailable default model is retried once with the fallback, which draws" {
