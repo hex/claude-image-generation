@@ -247,12 +247,16 @@ success_body() {
   esac
 }
 
-# run_provider_edit <provider> <input-image> — one provider's edit mode, with every dummy key set.
+# run_provider_edit <provider> <input-image>... — one provider's edit mode, with every dummy key set.
 run_provider_edit() {
+  local provider="$1" img
+  shift
+  local -a image_args=()
+  for img in "$@"; do image_args+=(--input-image "$img"); done
   GEMINI_API_KEY="$DUMMY_GEMINI_KEY" OPENAI_API_KEY="$DUMMY_OPENAI_KEY" \
     XAI_API_KEY="$DUMMY_XAI_KEY" OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY" \
-    run bash "${PLUGIN_ROOT}/scripts/${1}.sh" --mode edit --prompt "add a rainbow" \
-    --input-image "$2" --output "$OUT"
+    run bash "${PLUGIN_ROOT}/scripts/${provider}.sh" --mode edit --prompt "add a rainbow" \
+    "${image_args[@]}" --output "$OUT"
 }
 
 @test "every provider refuses an input file that is not an image, before sending anything" {
@@ -283,8 +287,35 @@ run_provider_edit() {
   done
 }
 
-# route_curl_to_local_server <body> — installs a curl that runs the real curl against a one-shot
-# local listener, which saves the raw request to $MOCK_DIR/request.raw and answers 200 with <body>.
+@test "gemini, xai and openrouter send each input image's own bytes, typed by its content" {
+  # The second file is named .png but holds GIF bytes.
+  local first="${PLUGIN_ROOT}/tests/fixtures/oversized.png" second="$MOCK_DIR/second.png"
+  printf 'GIF89a bytes of the second image' > "$second"
+  local data_url='capture("^data:(?<m>[^;]+);base64,(?<d>.*)$") | "\(.m) \(.d)"'
+  local p query parts count mime1 data1 mime2 data2
+  for p in gemini xai openrouter; do
+    case "$p" in
+      gemini)     query='.contents[0].parts[] | select(.inlineData) | .inlineData | "\(.mimeType) \(.data)"' ;;
+      xai)        query=".images[].url | ${data_url}" ;;
+      openrouter) query=".messages[0].content[] | select(.type == \"image_url\") | .image_url.url | ${data_url}" ;;
+    esac
+    stub_curl "$(success_body "$p")"
+    run_provider_edit "$p" "$first" "$second"
+    assert_edit_succeeds
+    parts=$(jq -r "$query" "$MOCK_DIR/request.txt")
+    count=$(printf '%s\n' "$parts" | wc -l | tr -d ' ')
+    [[ "$count" -eq 2 ]] || { echo "$p: expected 2 image parts, got $count"; return 1; }
+    { read -r mime1 data1; read -r mime2 data2; } <<< "$parts"
+    [[ "$mime1" == "image/png" && "$mime2" == "image/gif" ]] || {
+      echo "$p: expected image/png then image/gif, got $mime1 then $mime2"; return 1; }
+    printf '%s' "$data1" | base64 --decode | cmp -s - "$first" || { echo "$p: first part is not the first image"; return 1; }
+    printf '%s' "$data2" | base64 --decode | cmp -s - "$second" || { echo "$p: second part is not the second image"; return 1; }
+  done
+}
+
+# route_curl_to_local_server <body> — installs a curl that runs the real curl against
+# tests/one_request_server.py in place of the provider's https URL. The server saves the whole
+# request to $MOCK_DIR/request.raw before it answers 200 with <body>.
 route_curl_to_local_server() {
   local real_curl
   real_curl=$(command -v curl)
@@ -292,15 +323,19 @@ route_curl_to_local_server() {
   cat > "$MOCK_DIR/curl" <<STUB
 #!/bin/bash
 d="$MOCK_DIR"
-port=\$((20000 + RANDOM % 20000))
-body=\$(cat "\$d/response.body")
-printf 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' \
-  "\${#body}" "\$body" | nc -l 127.0.0.1 "\$port" > "\$d/request.raw" &
-nc_pid=\$!
+rm -f "\$d/port"
+python3 -I "${PLUGIN_ROOT}/tests/one_request_server.py" "\$d/port" "\$d/request.raw" "\$d/response.body" &
+server_pid=\$!
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-  lsof -nP -iTCP:"\$port" -sTCP:LISTEN >/dev/null 2>&1 && break
+  [ -s "\$d/port" ] && break
   sleep 0.1
 done
+if [ ! -s "\$d/port" ]; then
+  kill "\$server_pid" 2>/dev/null
+  echo "the local server never started" >&2
+  exit 7
+fi
+port=\$(cat "\$d/port")
 args=()
 for a in "\$@"; do
   case "\$a" in https://*) a="http://127.0.0.1:\$port/\${a#https://*/}" ;; esac
@@ -309,10 +344,10 @@ done
 "$real_curl" --max-time 5 "\${args[@]}"
 curl_status=\$?
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-  kill -0 "\$nc_pid" 2>/dev/null || break
+  kill -0 "\$server_pid" 2>/dev/null || break
   sleep 0.1
 done
-kill "\$nc_pid" 2>/dev/null
+kill "\$server_pid" 2>/dev/null
 exit \$curl_status
 STUB
   chmod +x "$MOCK_DIR/curl"
@@ -320,27 +355,36 @@ STUB
 }
 
 @test "openai: the request carries text fields as typed and each image's own bytes" {
-  command -v nc >/dev/null && command -v lsof >/dev/null || skip "needs nc and lsof"
-  # curl's -F reads a value starting with '@' from a file, and splits an image path at ','
-  # and ';'. The prompt must arrive as typed, and an image whose name holds those characters
-  # must arrive as its own bytes, not as the files curl would split the name into.
+  command -v python3 >/dev/null || skip "needs python3"
+  # curl's -F reads a value starting with '@' from a file, splits an image path at ',' and ';',
+  # and reads the path '-' from stdin. Every free-text field must arrive as typed, and each image
+  # as its own bytes, never as a file curl split out of its name or as the script's stdin.
   local dir="$MOCK_DIR/odd"
   mkdir -p "$dir"
-  printf 'canary from the prompt file\n' > "$dir/notes.txt"
+  local typed="@${dir}/notes.txt"
+  printf 'canary from a file named in a field\n' > "$dir/notes.txt"
   printf 'canary from a split name\n' > "$dir/a"
-  local image="$dir/a,b;c\"d\\e.png"
-  { printf '\211PNG\r\n\032\n'; printf 'bytes of the oddly named image'; } > "$image"
+  printf 'canary from stdin\n' > "$dir/stdin.txt"
+  local odd="$dir/a,b;c\"d\\e.png"
+  { printf '\211PNG\r\n\032\n'; printf 'bytes of the oddly named image'; } > "$odd"
+  { printf '\211PNG\r\n\032\n'; printf 'bytes of the image named dash'; } > "$dir/-"
   route_curl_to_local_server "$(success_body openai)"
+  cd "$dir"
 
-  OPENAI_API_KEY="$DUMMY_OPENAI_KEY" run bash "${PLUGIN_ROOT}/scripts/openai.sh" \
-    --mode edit --prompt "@${dir}/notes.txt" --input-image "$image" --output "$OUT"
+  IMAGE_MAX_RETRIES=0 OPENAI_API_KEY="$DUMMY_OPENAI_KEY" run bash "${PLUGIN_ROOT}/scripts/openai.sh" \
+    --mode edit --prompt "$typed" --model "$typed" --size "$typed" --quality "$typed" \
+    --background "$typed" --output-format webp --output-compression "$typed" \
+    --input-image "$odd" --input-image - --output "$OUT" < "$dir/stdin.txt"
 
   assert_edit_succeeds
-  local request="$MOCK_DIR/request.raw"
-  grep -qxF "@${dir}/notes.txt"$'\r' "$request" || { echo "prompt not sent as typed:"; cat "$request"; return 1; }
-  grep -qF 'bytes of the oddly named image' "$request" || { echo "image bytes missing:"; cat "$request"; return 1; }
-  grep -qxF $'Content-Type: image/png\r' "$request" || { echo "image part not typed image/png:"; cat "$request"; return 1; }
-  if grep -qF 'canary' "$request"; then echo "uploaded a file that is not the image:"; cat "$request"; return 1; fi
+  local request="$MOCK_DIR/request.raw" count
+  count=$(grep -cxF "${typed}"$'\r' "$request")
+  [[ "$count" -eq 6 ]] || { echo "expected 6 fields sent as typed, got $count:"; cat "$request"; return 1; }
+  grep -qF 'bytes of the oddly named image' "$request" || { echo "oddly named image missing:"; cat "$request"; return 1; }
+  grep -qF 'bytes of the image named dash' "$request" || { echo "image named - missing:"; cat "$request"; return 1; }
+  count=$(grep -cxF $'Content-Type: image/png\r' "$request")
+  [[ "$count" -eq 2 ]] || { echo "expected 2 parts typed image/png, got $count:"; cat "$request"; return 1; }
+  if grep -qF 'canary' "$request"; then echo "uploaded something that is not an input image:"; cat "$request"; return 1; fi
 }
 
 # stub_curl_once_503 <body> — first call answers 503 with an error body, later calls the
