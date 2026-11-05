@@ -31,3 +31,8 @@ image-generation-workspace/
 .claude/settings.local.json
 .obsidian/
 CLAUDE.local.md
+.cs/private/
+.cs/vault-mnt/
+.cs/session.lock
+.cs/session.mutex.lock
+.cs-tmp.*
