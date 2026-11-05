@@ -7,6 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
+source "${SCRIPT_DIR}/input-images.sh"
 
 readonly PROVIDER_NAME="xai"
 
@@ -95,6 +96,8 @@ if [[ -z "$XAI_API_KEY" ]]; then
   exit 1
 fi
 
+snapshot_input_images
+
 OUTPUT_DIR=$(dirname "$OUTPUT")
 if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
@@ -131,23 +134,15 @@ API_URL="https://api.x.ai/v1/images/generations"
 
 if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -gt 0 ]]; then
   API_URL="https://api.x.ai/v1/images/edits"
-  tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' EXIT
   REQUEST_BODY=$(echo "$REQUEST_BODY" | jq '. + {"images": []}')
-  for img in "${INPUT_IMAGES[@]}"; do
-    local_mime_type="image/png"
-    case "${img##*.}" in
-      jpg|jpeg) local_mime_type="image/jpeg" ;;
-      webp) local_mime_type="image/webp" ;;
-      gif) local_mime_type="image/gif" ;;
-    esac
+  for i in "${!INPUT_IMAGES[@]}"; do
     # A normal image's base64 exceeds ARG_MAX, so it reaches jq through --rawfile
     # instead of an argument. This jq reads REQUEST_BODY on stdin, so the base64 needs
     # its own file; the data: prefix is small enough to stay an argument.
     image_b64_file=$(mktemp -p "$tmpdir")
-    base64 < "$img" | tr -d '\n' > "$image_b64_file"
+    base64 < "${INPUT_IMAGES[$i]}" | tr -d '\n' > "$image_b64_file"
     REQUEST_BODY=$(echo "$REQUEST_BODY" \
-      | jq --arg prefix "data:${local_mime_type};base64," --rawfile b64 "$image_b64_file" \
+      | jq --arg prefix "data:${INPUT_MIMES[$i]};base64," --rawfile b64 "$image_b64_file" \
       '.images += [{"type": "image_url", "url": ($prefix + $b64)}]')
   done
 fi

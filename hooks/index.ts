@@ -32,7 +32,7 @@ const INPUT_SCHEMA = {
       type: 'string',
       description: 'Path without extension, e.g. "art/hero"; omitted, <configured dir>/image-<timestamp>.',
     },
-    inputImages: { type: 'array', items: { type: 'string' }, description: 'Images to edit; switches to edit mode.' },
+    inputImages: { type: 'array', items: { type: 'string' }, description: 'PNG, JPEG, WebP or GIF files to edit; switches to edit mode.' },
     aspectRatio: { type: 'string', description: 'W:H such as 16:9; gemini and xai only.' },
   },
   required: ['prompt'],

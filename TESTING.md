@@ -50,14 +50,14 @@ bats tests/openai.bats
 | Test file | Script under test | What it covers |
 |-----------|-------------------|----------------|
 | `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 14 input images rejected |
-| `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 16 input images rejected, multiple images with `dall-e-2` rejected |
+| `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 16 input images rejected, multiple images with `dall-e-2` rejected, a prompt starting with `@` passed to curl with `--form-string` |
 | `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 5 input images rejected, `--quality` validation |
 | `tests/openrouter.bats` | `scripts/openrouter.sh` | Argument validation including an invalid `--mode`, missing API key, model override, usage text, a choice-level error on an HTTP 200 response reported by message |
 | `tests/retry.bats` | `scripts/retry.sh` | `curl_with_retry` on 429/5xx/network failures, delay doubling, `IMAGE_MAX_RETRIES` / `IMAGE_RETRY_DELAY`, attempt count handoff |
 | `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
 | `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), image normalization to the display box + DPI pinning, empty-timing parse, the `waiting on` line (animated until the first image, then written once per block, clipped to the pane width), resize redraw and its replay order, retry labels on the waiting line, the retry offer (countdown, `r`, expiry, Esc, reprint after a resize) |
 | `tests/shared_pane.bats` | `scripts/display.sh`, `scripts/run-all.sh` | One pane per batch: registry attach, create-race wait, abandoned-claim takeover, stale/dismissed entries, token refcount, run-all attach + ownership |
-| `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction; multi-image payload shape (gemini inlineData part count in edit and generate modes, openai repeated `image[]` multipart fields, xai `images` array length, openrouter `image_url` content parts); xai `--quality` in the request body and the reported format; every provider retrying a 503 and reporting it to the pane |
+| `tests/edit_payload.bats` | provider scripts | base64 / `--rawfile` edit-payload construction; multi-image payload shape (gemini inlineData part count in edit and generate modes, openai repeated `image[]` multipart fields, xai `images` array length, openrouter `image_url` content parts); xai `--quality` in the request body and the reported format; every provider retrying a 503 and reporting it to the pane; every provider refusing an input that is not an image, a missing path and `/dev/zero` before any request; gemini, xai and openrouter sending two different images as their own bytes, each typed by its content (a GIF named `.png` goes as `image/gif`); the openai request sent by the real curl to `tests/one_request_server.py` (needs `python3`): every free-text field set to `@<file>` arrives as typed, and images named with `,` `;` `"` `\` or `-` arrive as their own bytes; an input file replaced after the check still uploads the checked bytes; every provider removing its copies of the input images on exit, refused or not. The multi-megabyte tests skip unless a large PNG named `test-input.png` sits at the repository root (gitignored) |
 | `tests/run-all.bats` | `scripts/run-all.sh` | The retry offer: names only the failed providers, re-forks exactly those when the pane answers `.retry`, treats a pane closed mid-offer as no retry, writes no offer with `DISPLAY_PANE_RETRY_WAIT=0`, guards the pane release after a retry succeeds; `--input-image` forwarding (every repeated flag reaches each provider; provider scripts stubbed) |
 | `tests/bash32_compat.bats` | provider + display scripts | bash 3.2 array / associative-array safety |
 | `tests/frontmatter.bats` | skill / agent / command | YAML frontmatter validation |
@@ -331,13 +331,15 @@ wait
 1. Provide an image larger than 7 MB as `--input-image`
 2. **Expected:** The API may reject it. The script reports the HTTP error and API message.
 
-### Nonexistent Input Image
+### Nonexistent or Non-Image Input
 
-1. Run edit mode with a path that does not exist:
+1. Run edit mode with a path that does not exist, then with a text file named like an image:
    ```bash
    bash scripts/gemini.sh --mode edit --prompt "test" --input-image ./nonexistent.png --output /tmp/test.png
+   printf 'not an image\n' > /tmp/notes.png
+   bash scripts/gemini.sh --mode edit --prompt "test" --input-image /tmp/notes.png --output /tmp/test.png
    ```
-2. **Expected:** `base64` command fails, script exits with error due to `set -euo pipefail`.
+2. **Expected:** both exit 1 before any API call, with `Error: --input-image is not a readable file: ./nonexistent.png` and then `Error: --input-image is not a PNG, JPEG, WebP or GIF image: /tmp/notes.png`. The API key check runs first, so set `GEMINI_API_KEY` to any value.
 
 ## 5. Checklist Summary
 

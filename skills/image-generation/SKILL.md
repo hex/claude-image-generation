@@ -136,7 +136,7 @@ Each provider produces `<base>-<provider>.png` (e.g. `<base>-gemini.png`, `<base
 `<base>-xai.png`). The default set is `gemini,openai,xai`; OpenRouter is opt-in.
 
 Optional flags:
-- `--input-image <path>` — required for `--mode edit`; repeatable, every image is forwarded to each provider. Forwarding happens in edit mode only — for Gemini's generate-mode reference images, call gemini.sh directly
+- `--input-image <path>` — required for `--mode edit`; repeatable, every image is forwarded to each provider. Forwarding happens in edit mode only — for Gemini's generate-mode reference images, call gemini.sh directly. Each path must be a PNG, JPEG, WebP or GIF file; the type is read from its bytes, and anything else is refused before any API call
 - `--providers gemini,openai` — comma-separated subset; add `openrouter` to include it (e.g. `--providers gemini,openai,xai,openrouter`)
 - `--gemini-extra "--image-size 4K --aspect-ratio 16:9"` — pass-through args to gemini.sh
 - `--openai-extra "--quality high"` — pass-through args to openai.sh

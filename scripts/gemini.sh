@@ -7,6 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
+source "${SCRIPT_DIR}/input-images.sh"
 
 readonly PROVIDER_NAME="gemini"
 
@@ -99,27 +100,23 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
   exit 1
 fi
 
+snapshot_input_images
+
 API_URL="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent"
 
 build_request_body() {
   local parts="[]"
 
   if [[ ${#INPUT_IMAGES[@]} -gt 0 ]]; then
-    local img mime_type img_b64_file
-    for img in "${INPUT_IMAGES[@]}"; do
-      case "${img##*.}" in
-        png) mime_type="image/png" ;;
-        jpg|jpeg) mime_type="image/jpeg" ;;
-        webp) mime_type="image/webp" ;;
-        *) mime_type="image/png" ;;
-      esac
+    local i img_b64_file
+    for i in "${!INPUT_IMAGES[@]}"; do
       # The base64 image is streamed into jq via --rawfile rather than passed as an
       # argument: a normal image exceeds ARG_MAX (1 MB on macOS) and jq would die with
       # "argument list too long". The growing parts JSON travels on stdin (as jq's main
       # input) rather than --argjson, for the same reason.
       img_b64_file=$(mktemp -p "$tmpdir")
-      base64 < "$img" | tr -d '\n' > "$img_b64_file"
-      parts=$(echo "$parts" | jq --arg mime "$mime_type" --rawfile data "$img_b64_file" \
+      base64 < "${INPUT_IMAGES[$i]}" | tr -d '\n' > "$img_b64_file"
+      parts=$(echo "$parts" | jq --arg mime "${INPUT_MIMES[$i]}" --rawfile data "$img_b64_file" \
         '. + [{"inlineData": {"mimeType": $mime, "data": $data}}]')
     done
   fi
@@ -162,10 +159,6 @@ build_request_body() {
   echo "$request"
 }
 
-if [[ ${#INPUT_IMAGES[@]} -gt 0 ]]; then
-  tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' EXIT
-fi
 REQUEST_BODY=$(build_request_body)
 
 echo "Calling Gemini API (model: ${MODEL}, mode: ${MODE})..." >&2

@@ -4,12 +4,19 @@
 setup() {
   load test_helper
   OPENAI_SH="${PLUGIN_ROOT}/scripts/openai.sh"
+  PNG_FIXTURE="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
   # These tests run openai.sh far enough to reach the display pane, which would join or
   # split a pane in the developer's own tmux session once per test.
   disable_display
   # Clear API key by default; tests that need it set it explicitly
   unset OPENAI_API_KEY 2>/dev/null || true
   unset OPENAI_IMAGE_MODEL 2>/dev/null || true
+}
+
+teardown() {
+  [[ -n "${MOCK_DIR:-}" ]] && rm -rf "$MOCK_DIR"
+  [[ -n "${CAPTURE_FILE:-}" ]] && rm -f "$CAPTURE_FILE"
+  return 0
 }
 
 @test "openai: no arguments prints error and usage" {
@@ -100,8 +107,12 @@ setup() {
 
 @test "openai: --input-fidelity still reaches the API on gpt-image-1.5" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
-  run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "/tmp/out.png" \
-    --input-image "/tmp/x.png" --input-fidelity high --model gpt-image-1.5
+  MOCK_DIR="${BATS_TMPDIR}/openai_curl_mock_$$"
+  mkdir -p "$MOCK_DIR"
+  printf '#!/bin/bash\nprintf "{}\\n401\\n"\n' > "$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
+  PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "/tmp/out.png" \
+    --input-image "$PNG_FIXTURE" --input-fidelity high --model gpt-image-1.5
   assert_output_contains "Calling OpenAI API (model: gpt-image-1.5, mode: edit)"
   [[ "$output" != *"not accepted by gpt-image-2"* ]] || { echo "refused a model that takes the flag: $output"; return 1; }
 }
@@ -112,6 +123,29 @@ setup() {
     --model dall-e-2 --input-image "/tmp/x.png" --input-image "/tmp/y.png"
   assert_status 1
   assert_output_contains "at most 1 input image for dall-e-2"
+}
+
+@test "openai: edit mode sends prompt via --form-string, not -F" {
+  # curl's -F treats a value starting with '@' or '<' as a file to read, so a prompt
+  # starting with either would leak local file contents to the API as the "prompt"
+  # field instead of being sent as text. --form-string sends it literally.
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  MOCK_DIR="${BATS_TMPDIR}/openai_curl_mock_$$"
+  CAPTURE_FILE="${BATS_TMPDIR}/openai_curl_args_$$"
+  mkdir -p "$MOCK_DIR"
+  cat > "$MOCK_DIR/curl" <<EOF
+#!/bin/bash
+printf '%s\n' "\$@" > "${CAPTURE_FILE}"
+printf '{"data":[{"b64_json":""}]}\n200\n'
+EOF
+  chmod +x "$MOCK_DIR/curl"
+
+  PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt '@/etc/passwd' \
+    --output "/tmp/bats-test-openai-out.png" --input-image "$PNG_FIXTURE"
+
+  local flag
+  flag=$(grep -B1 -x 'prompt=@/etc/passwd' "$CAPTURE_FILE" | head -1)
+  [[ "$flag" == "--form-string" ]] || { echo "prompt was passed after '${flag}', not --form-string:"; cat "$CAPTURE_FILE"; return 1; }
 }
 
 @test "openai: usage text includes all documented options" {
