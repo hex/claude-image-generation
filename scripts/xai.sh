@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
+source "${SCRIPT_DIR}/model-fallback.sh"
 
 readonly PROVIDER_NAME="xai"
 
@@ -46,6 +47,7 @@ ASPECT_RATIO=""
 RESOLUTION=""
 QUALITY=""
 MODEL="${XAI_IMAGE_MODEL:-grok-imagine-image-2.0}"
+FALLBACK_MODEL=$(model_fallback_for_default "$PROVIDER_NAME")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,7 +58,7 @@ while [[ $# -gt 0 ]]; do
     --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
     --resolution) RESOLUTION="$2"; shift 2 ;;
     --quality) QUALITY="$2"; shift 2 ;;
-    --model) MODEL="$2"; shift 2 ;;
+    --model) MODEL="$2"; FALLBACK_MODEL=""; shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
@@ -103,16 +105,16 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
+use_remembered_fallback
 echo "Calling xAI API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
 # Build request body. Generation posts to /v1/images/generations; edit mode switches the
-# target to /v1/images/edits below and attaches source images as an images[] array.
+# target to /v1/images/edits below and attaches source images as an images[] array. The model
+# is added by send_request, so a fallback reuses the body.
 REQUEST_BODY=$(jq -n \
-  --arg model "$MODEL" \
   --arg prompt "$PROMPT" \
   '{
-    "model": $model,
     "prompt": $prompt,
     "n": 1,
     "response_format": "b64_json"
@@ -147,13 +149,19 @@ if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -gt 0 ]]; then
   done
 fi
 
-# The body embeds the base64 image in edit mode, so it is streamed to curl on stdin
-# (--data-binary @-) instead of passed as -d, which would exceed ARG_MAX.
-RESPONSE=$(printf '%s' "$REQUEST_BODY" | curl_with_retry -s -w "\n%{http_code}" \
-  -X POST "${API_URL}" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${XAI_API_KEY}" \
-  --data-binary @-)
+# send_request <model> — posts the body with this model first in it and prints curl_with_retry's
+# body and status. The body embeds the base64 image in edit mode, so it is streamed to curl on
+# stdin (--data-binary @-) instead of passed as -d, which would exceed ARG_MAX.
+send_request() {
+  printf '%s' "$REQUEST_BODY" | jq --arg model "$1" '{"model": $model} + .' \
+    | curl_with_retry -s -w "\n%{http_code}" \
+      -X POST "${API_URL}" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${XAI_API_KEY}" \
+      --data-binary @-
+}
+
+request_with_model_fallback send_request
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')

@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
+source "${SCRIPT_DIR}/model-fallback.sh"
 
 readonly PROVIDER_NAME="openrouter"
 
@@ -41,6 +42,7 @@ PROMPT=""
 OUTPUT=""
 INPUT_IMAGES=()
 MODEL="${OPENROUTER_IMAGE_MODEL:-google/gemini-3.1-flash-image}"
+FALLBACK_MODEL=$(model_fallback_for_default "$PROVIDER_NAME")
 SITE_URL="${OPENROUTER_SITE_URL:-}"
 SITE_NAME="${OPENROUTER_SITE_NAME:-}"
 
@@ -50,7 +52,7 @@ while [[ $# -gt 0 ]]; do
     --prompt) PROMPT="$2"; shift 2 ;;
     --output) OUTPUT="$2"; shift 2 ;;
     --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
-    --model) MODEL="$2"; shift 2 ;;
+    --model) MODEL="$2"; FALLBACK_MODEL=""; shift 2 ;;
     --site-url) SITE_URL="$2"; shift 2 ;;
     --site-name) SITE_NAME="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
@@ -112,11 +114,10 @@ build_request_body() {
   fi
 
   # content can hold a multi-megabyte base64 image, so it enters jq on stdin as
-  # the main input rather than as --argjson, which would exceed ARG_MAX.
+  # the main input rather than as --argjson, which would exceed ARG_MAX. The model
+  # is added by send_request, so a fallback reuses the body.
   echo "$content" | jq \
-    --arg model "$MODEL" \
     '{
-      "model": $model,
       "modalities": ["image", "text"],
       "messages": [{"role": "user", "content": .}]
     }'
@@ -124,6 +125,7 @@ build_request_body() {
 
 REQUEST_BODY=$(build_request_body)
 
+use_remembered_fallback
 echo "Calling OpenRouter API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
@@ -131,12 +133,18 @@ CURL_HEADERS=(-H "Content-Type: application/json" -H "Authorization: Bearer ${OP
 [[ -n "$SITE_URL" ]] && CURL_HEADERS+=(-H "HTTP-Referer: ${SITE_URL}")
 [[ -n "$SITE_NAME" ]] && CURL_HEADERS+=(-H "X-Title: ${SITE_NAME}")
 
-# The body embeds the base64 image in edit mode, so it is streamed to curl on
+# send_request <model> — posts the body with this model first in it and prints curl_with_retry's
+# body and status. The body embeds the base64 image in edit mode, so it is streamed to curl on
 # stdin (--data-binary @-) instead of passed as -d, which would exceed ARG_MAX.
-RESPONSE=$(printf '%s' "$REQUEST_BODY" | curl_with_retry -s -w "\n%{http_code}" \
-  -X POST "https://openrouter.ai/api/v1/chat/completions" \
-  "${CURL_HEADERS[@]}" \
-  --data-binary @-)
+send_request() {
+  printf '%s' "$REQUEST_BODY" | jq --arg model "$1" '{"model": $model} + .' \
+    | curl_with_retry -s -w "\n%{http_code}" \
+      -X POST "https://openrouter.ai/api/v1/chat/completions" \
+      "${CURL_HEADERS[@]}" \
+      --data-binary @-
+}
+
+request_with_model_fallback send_request
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
