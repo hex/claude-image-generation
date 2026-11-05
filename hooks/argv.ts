@@ -23,9 +23,9 @@ const PROVIDERS = [...ALL, 'openrouter']
 const TAKES_ASPECT_RATIO = ['gemini', 'xai']
 // A prompt travels as one program argument at every step down to curl, and macOS caps a
 // program's arguments plus environment at 1048576 bytes. openai.sh sends its JSON body as an
-// argument, where a control character escapes to six bytes, so the largest prompt measured to
-// get through was 173059 bytes. This keeps clear of that, and of Linux's 131072-byte cap on
-// any single argument.
+// argument, where a control character escapes to six bytes: the largest prompt of control
+// characters measured to get through was 173059 bytes (1038371 of plain text). This keeps
+// clear of that, and of Linux's 131072-byte cap on any single argument.
 const PROMPT_LIMIT_BYTES = 100_000
 // Below U+0020, and DEL: a newline in a path would split the pane's one-line status records,
 // and a NUL cannot be passed in a program argument at all.
