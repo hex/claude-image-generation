@@ -127,9 +127,11 @@ use_remembered_fallback() {
 # request_with_model_fallback <send> — runs `<send> <model>`, which sends the request for that
 # model and prints curl_with_retry's output (body, newline, status), and leaves the output in
 # RESPONSE. When the answer says MODEL is unavailable and FALLBACK_MODEL is set, MODEL becomes the
-# fallback and the request goes once more. The verdict is remembered only when the fallback
-# answers 200: a refusal that covers the whole account fails both models, and must not be pinned
-# on the default for a whole IMAGE_AVAILABILITY_TTL.
+# fallback and the request goes once more. The verdict is recorded once the fallback answers HTTP
+# 200, whether or not that answer holds an image: the default's own unavailable answer is the
+# evidence, and the fallback's 200 shows the account and endpoint work. A fallback that fails
+# records nothing, since a refusal that covers the whole account fails both models and must not
+# be pinned on the default for a whole IMAGE_AVAILABILITY_TTL.
 request_with_model_fallback() {
   local send="$1" preferred="$MODEL" code body
   RESPONSE=$("$send" "$MODEL")

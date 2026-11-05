@@ -224,7 +224,7 @@ reset_stub() {
   stub_curl_answers "$@"
 }
 
-@test "openai: after a fallback draws, the next run sends the fallback first" {
+@test "openai: after the fallback answers HTTP 200, the next run sends the fallback first" {
   stub_curl_answers openai "$FIXTURES/unavailable/openai-unknown-400.json" ok
   run_provider openai
   assert_status 0
@@ -252,6 +252,28 @@ reset_stub() {
   run_provider openai
   assert_status 0
   assert_sent 1 gpt-image-2
+}
+
+@test "openrouter: a fallback that answers 200 with an error on the choice and no image still records the verdict" {
+  # The default's own unavailable answer is the evidence; the fallback's 200 shows the account
+  # and endpoint work, whatever the choice inside it holds.
+  local choice_error="${BATS_TEST_TMPDIR}/openrouter-choice-error-200.json"
+  printf '%s' '{"choices":[{"error":{"code":502,"message":"upstream boom"},"finish_reason":"error","message":{"content":""}}]}' > "$choice_error"
+  stub_curl_answers openrouter "$FIXTURES/unavailable/openrouter-deprecated-404.json" "$choice_error"
+  run_provider openrouter
+
+  assert_status 1
+  assert_calls 2
+  assert_sent 2 google/gemini-nano-banana-2.1
+  [[ "${lines[${#lines[@]}-1]}" == "OpenRouter provider error (502): upstream boom" ]] || {
+    echo "the run did not end naming the choice's error:"; echo "$output"; return 1; }
+  [[ -n "$(find "$XDG_CACHE_HOME" -name '*.json')" ]] || { echo "no verdict recorded"; return 1; }
+
+  reset_stub openrouter ok
+  run_provider openrouter
+  assert_status 0
+  assert_calls 1
+  assert_sent 1 google/gemini-nano-banana-2.1
 }
 
 @test "openai: a remembered verdict is ignored once it is older than IMAGE_AVAILABILITY_TTL" {

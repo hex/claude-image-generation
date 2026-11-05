@@ -477,7 +477,7 @@ The fallback runs only when the answer blames the model. That means HTTP 404, HT
 
 The switch shows in stderr, for example `gpt-image-2 is unavailable to this key (openai, HTTP 400); drawing with fallback gpt-image-2.5-sunburst`. The line leaves out the API's own message, since xAI's names your account's team ID and stderr reaches pane logs and the tool result. In a streaming pane the provider's banner names the fallback model that drew the image.
 
-Once the fallback has drawn an image, the script remembers that the default is unavailable to that key and sends the fallback first on later runs, printing `gpt-image-2 is remembered as unavailable to this key; drawing with fallback gpt-image-2.5-sunburst`. Verdicts live in `${XDG_CACHE_HOME:-~/.cache}/claude-image-generation/model-verdicts/`, one file per provider, default model and key digest; the key itself never touches disk. A failed fallback leaves no verdict, since a refusal that covers the whole account would fail both models.
+Once the fallback answers HTTP 200, the script records that the default is unavailable to that key, even when that answer holds no image: the default's own unavailable answer is the evidence, and the fallback's 200 shows the account and endpoint work. Later runs send the fallback first, printing `gpt-image-2 is remembered as unavailable to this key; drawing with fallback gpt-image-2.5-sunburst`. Verdicts live in `${XDG_CACHE_HOME:-~/.cache}/claude-image-generation/model-verdicts/`, one file per provider, default model and key digest; the key itself never touches disk. A fallback that answers with any other status leaves no verdict, since a refusal that covers the whole account would fail both models.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
