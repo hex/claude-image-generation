@@ -224,6 +224,22 @@ openai_list() {
   assert_row openrouter "openrouter|accepted|no answer (curl exit 28)|vendor/test-image (OPENROUTER_IMAGE_MODEL)"
 }
 
+@test "status: a model list that answers 200 with an empty body reads unreadable model list" {
+  use_all_keys
+  use_test_models
+  route "$GEMINI_URL" 200 ''
+  route "$OPENAI_URL" 200 ''
+  route "$XAI_URL" 200 ''
+  route "$OPENROUTER_KEY_URL" 200 '{"data":{"label":"sk-or-v1-abc...xyz","limit":null}}'
+  route "$OPENROUTER_LIST_URL" 200 ''
+  run "$SYSTEM_BASH" "$SCRIPT"
+  assert_status 0
+  assert_row gemini "gemini|accepted|unreadable model list|gemini-test-image (GEMINI_IMAGE_MODEL)"
+  assert_row openai "openai|accepted|unreadable model list|openai-test-image (OPENAI_IMAGE_MODEL)"
+  assert_row xai "xai|accepted|unreadable model list|xai-test-image (XAI_IMAGE_MODEL)"
+  assert_row openrouter "openrouter|accepted|unreadable model list|vendor/test-image (OPENROUTER_IMAGE_MODEL)"
+}
+
 @test "status: each key goes to curl as a header on stdin, never in its arguments" {
   use_all_keys
   use_test_models
