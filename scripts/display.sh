@@ -675,8 +675,10 @@ seen_providers=""
 drawn_order=""
 status_lines_processed=0
 manifest_shown=0
-# The manifest images shown so far, restored to their real paths, for the f and p keys.
-manifest_paths=()
+# Every image the pane was given, for the f and p keys: each completed provider's and each
+# manifest entry's, restored to its real path, in the order it arrived and each path once. A
+# provider that completes again, in a second batch sharing the pane, adds its new image.
+pane_images=()
 spinner_frame=0
 any_image_rendered=""
 SPINNERS=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
@@ -921,16 +923,14 @@ prompt_line() {
     printf '\r\033[K[f]inder [p]review [esc/ctrl-d] close '
 }
 
-# collect_pane_images — fills pane_images with every image the pane was given, each provider's
-# then the manifest's, one array element per path so open receives each path whole.
-collect_pane_images() {
-    pane_images=()
-    local p __path
-    for p in $seen_providers; do
-        map_get __path provider_path "$p"
-        [[ -n "$__path" ]] && pane_images+=("$__path")
+# note_image <path> — adds a path to pane_images unless it is there already, one array element
+# per path so open receives each path whole.
+note_image() {
+    local __seen
+    for __seen in ${pane_images[@]+"${pane_images[@]}"}; do
+        [[ "$__seen" == "$1" ]] && return 0
     done
-    pane_images+=(${manifest_paths[@]+"${manifest_paths[@]}"})
+    pane_images+=("$1")
 }
 
 # read_key <var> — one keypress with a one-second timeout. Returns 0 with a key, 1 on a
@@ -1021,6 +1021,7 @@ while true; do
             [[ -n "$ms" ]] && map_set provider_timing "$provider" "$ms"
             [[ -n "$model" ]] && map_set provider_model "$provider" "$model"
             [[ -n "$path" ]] && map_set provider_path "$provider" "$path"
+            [[ "$state" == "complete" && -n "$path" ]] && note_image "$path"
 
             map_get already_rendered rendered "$provider"
             if [[ "$state" == "complete" ]]; then
@@ -1055,7 +1056,7 @@ while true; do
             printf -v mpath '%b' "${manifest_lines[$manifest_shown]}"
             manifest_shown=$((manifest_shown + 1))
             [[ -z "$mpath" ]] && continue
-            manifest_paths+=("$mpath")
+            note_image "$mpath"
             clear_loading
             mname=$(basename "$mpath")
             printf '\n--- %s ---\n' "$mname"
@@ -1097,12 +1098,10 @@ while true; do
     esac
     if [ "$_key" = "$_esc" ]; then break; fi
     if [ "$_key" = "f" ] || [ "$_key" = "F" ]; then
-        collect_pane_images
         for __image in ${pane_images[@]+"${pane_images[@]}"}; do
             open -R "$__image" 2>/dev/null
         done
     elif [ "$_key" = "p" ] || [ "$_key" = "P" ]; then
-        collect_pane_images
         [[ ${#pane_images[@]} -gt 0 ]] && open -a Preview "${pane_images[@]}" 2>/dev/null
     fi
 done
