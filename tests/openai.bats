@@ -12,6 +12,12 @@ setup() {
   unset OPENAI_IMAGE_MODEL 2>/dev/null || true
 }
 
+teardown() {
+  [[ -n "${MOCK_DIR:-}" ]] && rm -rf "$MOCK_DIR"
+  [[ -n "${CAPTURE_FILE:-}" ]] && rm -f "$CAPTURE_FILE"
+  return 0
+}
+
 @test "openai: no arguments prints error and usage" {
   run "$OPENAI_SH"
   assert_status 1
@@ -112,6 +118,28 @@ setup() {
     --model dall-e-2 --input-image "/tmp/x.png" --input-image "/tmp/y.png"
   assert_status 1
   assert_output_contains "at most 1 input image for dall-e-2"
+}
+
+@test "openai: edit mode sends prompt via --form-string, not -F" {
+  # curl's -F treats a value starting with '@' or '<' as a file to read, so a prompt
+  # starting with either would leak local file contents to the API as the "prompt"
+  # field instead of being sent as text. --form-string sends it literally.
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  MOCK_DIR="${BATS_TMPDIR}/openai_curl_mock_$$"
+  CAPTURE_FILE="${BATS_TMPDIR}/openai_curl_args_$$"
+  mkdir -p "$MOCK_DIR"
+  cat > "$MOCK_DIR/curl" <<EOF
+#!/bin/bash
+printf '%s\n' "\$@" > "${CAPTURE_FILE}"
+printf '{"data":[{"b64_json":""}]}\n200\n'
+EOF
+  chmod +x "$MOCK_DIR/curl"
+
+  PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt '@/etc/passwd' \
+    --output "/tmp/bats-test-openai-out.png" --input-image "/tmp/x.png"
+
+  assert_output_contains_file "$CAPTURE_FILE" "--form-string"
+  assert_output_contains_file "$CAPTURE_FILE" "prompt=@/etc/passwd"
 }
 
 @test "openai: usage text includes all documented options" {

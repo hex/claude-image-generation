@@ -166,7 +166,10 @@ elif [[ "$MODE" == "edit" ]]; then
   echo "Calling OpenAI API (model: ${MODEL}, mode: edit)..." >&2
   display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
-  EDIT_ARGS=(-F "model=${MODEL}" -F "prompt=${PROMPT}" \
+  # --form-string (not -F) for prompt: curl's -F treats a value starting with '@' or '<'
+  # as a file to read, so a prompt beginning with either would leak local file contents
+  # to the API instead of being sent as text.
+  EDIT_ARGS=(-F "model=${MODEL}" --form-string "prompt=${PROMPT}" \
     -F "size=${SIZE}" -F "quality=${QUALITY}" -F "background=${BACKGROUND}" \
     -F "output_format=${OUTPUT_FORMAT}" -F "moderation=${MODERATION}")
 
