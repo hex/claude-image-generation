@@ -101,6 +101,8 @@ Pricing: 5,000 grounding prompts/month free across Gemini 3 models, then $14 per
 - `gemini-3.1-flash-lite-image`: "Nano Banana 2 Lite". Cheapest tier, about $0.034 per 1K image.
 - `gemini-3-pro-image-preview` and `gemini-3.1-flash-image-preview`: the pre-GA IDs. Still answer as of 2026-09-02 but passed their earliest shutdown date (2026-06-25) and are gone from the model tables.
 - `gemini-2.5-flash-image`: Previous generation, 1K only. **Scheduled shutdown 2026-10-02** — replacement is `gemini-3.1-flash-image`.
+- `gemini-nano-banana-2.1`: "Nano Banana 2.1", released 2026-10-06, Flash tier, Google's named replacement for `gemini-3.1-flash-image`. The plugin's fallback when the default is unavailable to the key.
+- An unknown or retired model answers HTTP 404 with `{"error": {"code": 404, "message": "models/<id> is not found for API version v1beta, or is not supported for generateContent. ...", "status": "NOT_FOUND"}}` (captured 2026-11-05).
 
 ### Pricing (gemini-3.1-flash-image, Standard tier)
 | Resolution | Cost per image | Output tokens |
@@ -231,6 +233,8 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 - `gpt-image-1-mini`: 3-4x cheaper, same API surface, only first image gets high fidelity on edits. **Shutdown 2026-12-01**
 - `gpt-image-1`: Older generation. **Shutdown 2026-10-23**
 - `chatgpt-image-latest`: GA alias. **Shutdown 2026-12-01**; replacement for all four is `gpt-image-2`
+- `gpt-image-2.5-sunburst`: "most capable model for image generation and editing", same per-token price as `gpt-image-2`, no announced shutdown. The plugin's fallback when the default is unavailable to the key.
+- An unknown or retired model answers HTTP 400 with `{"error": {"message": "The model '<id>' does not exist.", "type": "image_generation_user_error", "param": "model", "code": "invalid_value"}}` on both endpoints (captured 2026-11-05 for an unknown id and for `dall-e-3`).
 
 ### Pricing
 
@@ -364,6 +368,8 @@ When `response_format` is `"url"`, the response contains `url` instead of `b64_j
 - `grok-imagine-image-quality`: Quality mode launched 2026-05-06. Aliases `grok-imagine-image-quality-20260403`, `grok-imagine-image-quality-latest` and `grok-imagine-image-pro` (the pro slug was retired 2026-05-15 and redirects here).
 - `grok-imagine-image`: Standard tier. Versioned as `grok-imagine-image-2026-03-02`. 1K/2K resolution, 300 RPM.
 - `grok-2-image-1212` (aka `grok-2-image`): **Deprecated 2026-02-28**. Migration target is `grok-imagine-image`.
+- The plugin falls back to `grok-imagine-image` when the default is unavailable to the key.
+- An unknown or retired model answers HTTP 404 with `{"code": "not-found", "error": "The model <id> does not exist or your team <team id> does not have access to it. ..."}` on both endpoints (captured 2026-11-05 for an unknown id and for `grok-2-image`).
 
 ### Pricing
 | Model | Output per image | Image input |
@@ -447,6 +453,8 @@ The plugin reads `.choices[0].message.images[0].image_url.url`, strips the `data
 
 ### Models
 `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-3.1-flash-image`. Others include `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0` and `openai/gpt-image-2`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
+
+When the default is unavailable to the key, the plugin falls back to `google/gemini-nano-banana-2.1`. An unknown slug answers HTTP 400 with `{"error": {"message": "<slug> is not a valid model ID", "code": 400}}`; a deprecated model, or one with no endpoint for the requested modalities, answers HTTP 404 (`"Claude 3 Haiku was deprecated on Sep 10, 2026. ..."`, `"No endpoints found that support the requested output modalities: image, text"`). All three captured 2026-11-05.
 
 ### Constraints
 - Aspect ratio, resolution, and quality are model-dependent and driven by the prompt — there are no dedicated flags for them

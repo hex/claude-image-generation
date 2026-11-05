@@ -186,11 +186,13 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 - If multiple providers are used in parallel and one fails, report the error and present the successful results
 - Rate limit errors (HTTP 429) mean the provider's quota is exhausted. The script retries a 429 up to three times first; if it still fails, try again later or use another provider
 - The script automatically retries a 429 or 5xx status, or a network failure, up to three times with a doubling delay before giving up
+- When the default model is unavailable to the key (HTTP 404, a 403 outside OpenRouter, or a 400 saying the model does not exist), the script sends the request once more with the provider's fallback and says so on stderr: gemini `gemini-nano-banana-2.1`, openai `gpt-image-2.5-sunburst`, xai `grok-imagine-image`, openrouter `google/gemini-nano-banana-2.1`. Report which model drew the image. A model named with `--model` or `*_IMAGE_MODEL` never falls back. After a fallback draws, later runs send the fallback first until the verdict expires
 
 | Env var | Default | Purpose |
 |---------|---------|---------|
 | `IMAGE_MAX_RETRIES` | 3 | Retry attempts for a transient API failure before the script gives up |
 | `IMAGE_RETRY_DELAY` | 1 | Starting retry delay in seconds; doubles on each attempt |
+| `IMAGE_AVAILABILITY_TTL` | 86400 | Seconds a remembered "default model unavailable" verdict holds; 0 tries the default every run |
 | `DISPLAY_PANE_RETRY_WAIT` | 45 | Seconds the pane's retry offer stays open after a run-all.sh failure; 0 disables the offer |
 
 ## Script Options Reference
