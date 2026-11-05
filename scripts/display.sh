@@ -288,6 +288,20 @@ __pane_target_args() {
   return 0
 }
 
+# Populates __TMUX_WORDS with the given words for a tmux command line, each word that ends in ";"
+# written with "\;" in its place. tmux parses the words it is handed as argv too: a trailing ";"
+# ends the command there, and "\;" stands for a literal one (tmux(1), COMMAND PARSING AND
+# EXECUTION), so a path such as "picture.png;" would otherwise lose its semicolon or split the
+# command in two. A global for the same reason as __PANE_TARGET_ARGS. Usage: __tmux_words <word>...
+__tmux_words() {
+  __TMUX_WORDS=()
+  local word
+  for word in "$@"; do
+    [[ "$word" == *';' ]] && word="${word%;}\\;"
+    __TMUX_WORDS+=("$word")
+  done
+}
+
 # Opens a tmux split pane that displays an image and closes on keypress.
 # Usage: display_image_in_pane <file_path>
 display_image_in_pane() {
@@ -349,9 +363,10 @@ display_image_in_pane() {
 
   # tmux runs a command given as several words directly, with no shell parsing them, so the
   # path reaches the pane script as data: $1 is the image, the rest its display command.
-  tmux split-window -v -l '40%' ${target_args[@]+"${target_args[@]}"} \
+  __tmux_words \
     bash -c '_esc=$(printf "\033"); file=$1; shift; echo "--- ${file##*/} ---"; echo; "$@"; echo; printf "[f]inder [p]review [esc/ctrl-d] close "; while true; do read -n1 -s -r _key || break; if [ "$_key" = "$_esc" ]; then break; fi; if [ "$_key" = "f" ] || [ "$_key" = "F" ]; then open -R "$file" 2>/dev/null || xdg-open "$file" 2>/dev/null; elif [ "$_key" = "p" ] || [ "$_key" = "P" ]; then open -a Preview "$file" 2>/dev/null || xdg-open "$file" 2>/dev/null; fi; done' \
     bash "$file_path" "${display_cmd[@]}"
+  tmux split-window -v -l '40%' ${target_args[@]+"${target_args[@]}"} "${__TMUX_WORDS[@]}"
 }
 
 # ── Streaming Display Pane ────────────────────────────────────────────
@@ -1369,8 +1384,8 @@ display_images_in_pane() {
   local -a target_args=(${__PANE_TARGET_ARGS[@]+"${__PANE_TARGET_ARGS[@]}"})
 
   # tmux runs a command given as several words directly, with no shell parsing them.
-  tmux split-window -h -l "$pane_width" ${target_args[@]+"${target_args[@]}"} \
-    bash -c "$__IMAGES_PANE_SCRIPT" bash "$tool" "${DISPLAY_IMAGE_WIDTH:-512}" "$imgcat_path" "${paths[@]}"
+  __tmux_words bash -c "$__IMAGES_PANE_SCRIPT" bash "$tool" "${DISPLAY_IMAGE_WIDTH:-512}" "$imgcat_path" "${paths[@]}"
+  tmux split-window -h -l "$pane_width" ${target_args[@]+"${target_args[@]}"} "${__TMUX_WORDS[@]}"
 }
 
 # Displays multiple images using the best available method.
