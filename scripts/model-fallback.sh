@@ -63,12 +63,13 @@ model_unavailable_cached() {
 }
 
 # model_unavailable_remember <provider> <model> <key hash> — records the verdict through a temp
-# file and a rename, so a provider running alongside reads a whole verdict or none.
+# file and a rename, so a provider running alongside reads a whole verdict or none. mktemp
+# creates the temp file under a name no other process can guess, so nothing can wait there.
 model_unavailable_remember() {
   local file tmp
   file=$(__model_verdict_file "$1" "$2" "$3")
   mkdir -p "$(dirname "$file")" || return 1
-  tmp="${file}.$$"
+  tmp=$(mktemp "$(dirname "$file")/.verdict.XXXXXX") || return 1
   jq -n --arg p "$1" --arg m "$2" --argjson t "$(date +%s)" \
     '{provider: $p, model: $m, checked_at: $t}' > "$tmp" && mv -f "$tmp" "$file" \
     || { rm -f "$tmp"; return 1; }
