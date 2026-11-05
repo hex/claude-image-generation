@@ -105,3 +105,30 @@ cleanup_tmpdir() {
   [[ -n "${ISOLATED_TMPDIR:-}" ]] && rm -rf "$ISOLATED_TMPDIR"
   return 0
 }
+
+# Puts a curl first on PATH that answers every request the way a provider answers the dummy
+# keys above: HTTP 401 with an auth error. A provider test that gets as far as the API call
+# would otherwise send a real HTTPS request. The stub appends each address it is sent to
+# to $PROVIDER_API_STUB_DIR/url and keeps a body given as @- or @<file> (curl_with_retry
+# turns the first into the second) in $PROVIDER_API_STUB_DIR/body. A test that needs another
+# answer puts its own curl in front of PATH afterwards, and that one wins. Call from setup().
+# Usage: stub_provider_api
+stub_provider_api() {
+  PROVIDER_API_STUB_DIR="${BATS_TMPDIR}/provider_api_stub_$$_${BATS_TEST_NUMBER:-0}"
+  rm -rf "$PROVIDER_API_STUB_DIR"
+  mkdir -p "$PROVIDER_API_STUB_DIR"
+  cat > "$PROVIDER_API_STUB_DIR/curl" <<'STUB'
+#!/bin/bash
+d="$(dirname "$0")"
+for a in "$@"; do
+  case "$a" in
+    http://*|https://*) printf '%s\n' "$a" >> "$d/url" ;;
+    @-) cat > "$d/body" ;;
+    @*) cp "${a#@}" "$d/body" ;;
+  esac
+done
+printf '%s\n401\n' '{"error":{"message":"Incorrect API key provided"}}'
+STUB
+  chmod +x "$PROVIDER_API_STUB_DIR/curl"
+  export PATH="$PROVIDER_API_STUB_DIR:$PATH"
+}

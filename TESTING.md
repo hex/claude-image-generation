@@ -51,7 +51,7 @@ bats tests/openai.bats
 |-----------|-------------------|----------------|
 | `tests/gemini.bats` | `scripts/gemini.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 14 input images rejected |
 | `tests/openai.bats` | `scripts/openai.sh` | Argument validation, missing API key, required flags, model override, edit mode requires `--input-image`, more than 16 input images rejected, multiple images with `dall-e-2` rejected, a prompt starting with `@` passed to curl with `--form-string` |
-| `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 5 input images rejected, `--quality` validation |
+| `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 5 input images rejected and five sent in one edit request, `--quality` validation |
 | `tests/openrouter.bats` | `scripts/openrouter.sh` | Argument validation including an invalid `--mode`, missing API key, model override, usage text, a choice-level error on an HTTP 200 response reported by message |
 | `tests/retry.bats` | `scripts/retry.sh` | `curl_with_retry` on 429/5xx/network failures, delay doubling, `IMAGE_MAX_RETRIES` / `IMAGE_RETRY_DELAY`, attempt count handoff |
 | `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
@@ -63,7 +63,7 @@ bats tests/openai.bats
 | `tests/frontmatter.bats` | skill / agent / command | YAML frontmatter validation |
 | `tests/argv.test.ts` | `hooks/argv.ts` | The generate tool's input rules: blank prompt, unknown provider, wrong field types, `outputBase` with an extension, malformed aspect ratio, config defaults vs. call overrides, edit mode, prompt kept as one argv element |
 
-Tests do not make real API calls. They validate argument parsing, error messages, exit codes, and terminal protocol output.
+Tests do not make real API calls. They validate argument parsing, error messages, exit codes, and terminal protocol output. The four provider test files call `stub_provider_api` (in `tests/test_helper.bash`) from `setup()`, so a test that runs a script as far as the API call gets an HTTP 401 from a local curl stub instead of sending a request.
 
 `tests/argv.test.ts` runs under `claude plugin test .`, not bats. `tsc -p .` type-checks the hooks module once `/plugin-types` has written `.claude/types`. To try the tool itself, start `claude --plugin-dir .` with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`. Saving a hooks file reloads the module, but the tool is registered at `session.start`, so a change to its name, description or schema needs a fresh session.
 

@@ -7,6 +7,8 @@ setup() {
   # These tests run gemini.sh far enough to reach the display pane, which would join or
   # split a pane in the developer's own tmux session once per test.
   disable_display
+  # Some tests run gemini.sh as far as the API call, which would otherwise go to Google.
+  stub_provider_api
   # Clear API key by default; tests that need it set it explicitly
   unset GEMINI_API_KEY 2>/dev/null || true
   unset GEMINI_IMAGE_MODEL 2>/dev/null || true

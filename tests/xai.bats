@@ -7,6 +7,8 @@ setup() {
   # These tests run xai.sh far enough to reach the display pane, which would join or
   # split a pane in the developer's own tmux session once per test.
   disable_display
+  # Some tests run xai.sh as far as the API call, which would otherwise go to api.x.ai.
+  stub_provider_api
   # Clear API keys by default; tests that need them set them explicitly
   unset XAI_API_KEY 2>/dev/null || true
   unset GROK_API_KEY 2>/dev/null || true
@@ -98,12 +100,17 @@ setup() {
 @test "xai: five input images pass the cap" {
   export XAI_API_KEY="$DUMMY_XAI_KEY"
   local img="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
-  # grok-imagine-image-2.0 edits take up to five reference images. The dummy key fails at
-  # the API call, which is past the cap check.
+  # grok-imagine-image-2.0 edits take up to five reference images. The stubbed API refuses
+  # the dummy key, which is past the cap check.
   run "$XAI_SH" --mode edit --prompt "combine these" --output "/tmp/out.png" \
     --input-image "$img" --input-image "$img" --input-image "$img" \
     --input-image "$img" --input-image "$img"
   [[ "$output" != *"at most"* ]] || { echo "five images were rejected by the cap:"; echo "$output"; return 1; }
+  local url sent
+  url=$(cat "$PROVIDER_API_STUB_DIR/url" 2>/dev/null)
+  [[ "$url" == "https://api.x.ai/v1/images/edits" ]] || { echo "edit request went to '$url'"; echo "$output"; return 1; }
+  sent=$(jq '.images | length' "$PROVIDER_API_STUB_DIR/body")
+  [[ "$sent" == "5" ]] || { echo "edit request carried '$sent' images, want 5"; return 1; }
 }
 
 @test "xai: --quality rejects a value the API does not know" {
