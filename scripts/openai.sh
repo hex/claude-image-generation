@@ -7,6 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
+source "${SCRIPT_DIR}/input-images.sh"
 
 readonly PROVIDER_NAME="openai"
 
@@ -122,6 +123,8 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   echo "Error: OPENAI_API_KEY environment variable is not set" >&2
   exit 1
 fi
+
+read_input_mimes
 
 OUTPUT_DIR=$(dirname "$OUTPUT")
 if [[ ! -d "$OUTPUT_DIR" ]]; then

@@ -4,6 +4,8 @@
 setup() {
   load test_helper
   OPENAI_SH="${PLUGIN_ROOT}/scripts/openai.sh"
+  # A real PNG for tests that must get past the input-image check to the request.
+  PNG_FIXTURE="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
   # These tests run openai.sh far enough to reach the display pane, which would join or
   # split a pane in the developer's own tmux session once per test.
   disable_display
@@ -106,8 +108,12 @@ teardown() {
 
 @test "openai: --input-fidelity still reaches the API on gpt-image-1.5" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
-  run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "/tmp/out.png" \
-    --input-image "/tmp/x.png" --input-fidelity high --model gpt-image-1.5
+  MOCK_DIR="${BATS_TMPDIR}/openai_curl_mock_$$"
+  mkdir -p "$MOCK_DIR"
+  printf '#!/bin/bash\nprintf "{}\\n401\\n"\n' > "$MOCK_DIR/curl"
+  chmod +x "$MOCK_DIR/curl"
+  PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "/tmp/out.png" \
+    --input-image "$PNG_FIXTURE" --input-fidelity high --model gpt-image-1.5
   assert_output_contains "Calling OpenAI API (model: gpt-image-1.5, mode: edit)"
   [[ "$output" != *"not accepted by gpt-image-2"* ]] || { echo "refused a model that takes the flag: $output"; return 1; }
 }
@@ -136,7 +142,7 @@ EOF
   chmod +x "$MOCK_DIR/curl"
 
   PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt '@/etc/passwd' \
-    --output "/tmp/bats-test-openai-out.png" --input-image "/tmp/x.png"
+    --output "/tmp/bats-test-openai-out.png" --input-image "$PNG_FIXTURE"
 
   assert_output_contains_file "$CAPTURE_FILE" "--form-string"
   assert_output_contains_file "$CAPTURE_FILE" "prompt=@/etc/passwd"

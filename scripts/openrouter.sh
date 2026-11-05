@@ -7,6 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
+source "${SCRIPT_DIR}/input-images.sh"
 
 readonly PROVIDER_NAME="openrouter"
 
@@ -76,6 +77,8 @@ if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
   exit 1
 fi
 
+read_input_mimes
+
 OUTPUT_DIR=$(dirname "$OUTPUT")
 if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
@@ -89,21 +92,14 @@ build_request_body() {
 
   if [[ ${#INPUT_IMAGES[@]} -gt 0 ]]; then
     content="[]"
-    local img mime_type data_url_file
-    for img in "${INPUT_IMAGES[@]}"; do
-      case "${img##*.}" in
-        png) mime_type="image/png" ;;
-        jpg|jpeg) mime_type="image/jpeg" ;;
-        webp) mime_type="image/webp" ;;
-        gif) mime_type="image/gif" ;;
-        *) mime_type="image/png" ;;
-      esac
+    local i data_url_file
+    for i in "${!INPUT_IMAGES[@]}"; do
       # A normal image exceeds ARG_MAX, so the base64 payload is streamed into jq
       # via --rawfile rather than passed as an argument (mirrors gemini.sh). The
       # data: prefix is prepended into the same file so jq embeds a complete URL.
       data_url_file=$(mktemp -p "$tmpdir")
-      printf 'data:%s;base64,' "$mime_type" > "$data_url_file"
-      base64 < "$img" | tr -d '\n' >> "$data_url_file"
+      printf 'data:%s;base64,' "${INPUT_MIMES[$i]}" > "$data_url_file"
+      base64 < "${INPUT_IMAGES[$i]}" | tr -d '\n' >> "$data_url_file"
       content=$(echo "$content" | jq --rawfile url "$data_url_file" \
         '. + [{"type": "image_url", "image_url": {"url": $url}}]')
     done

@@ -272,6 +272,21 @@ run_provider_edit() {
   done
 }
 
+@test "every provider refuses a missing path or a device as an input image" {
+  # /dev/zero never ends, so reading it as an image would fill the disk with base64.
+  local p path
+  for p in gemini openai xai openrouter; do
+    for path in "$MOCK_DIR/missing.png" /dev/zero; do
+      rm -f "$MOCK_DIR/request.txt"
+      stub_curl "$(success_body "$p")"
+      run_provider_edit "$p" "$path"
+      [[ "$status" -eq 1 && "$output" == "Error: --input-image is not a readable file: ${path}" ]] || {
+        echo "$p ${path}: expected status 1 and the refusal, got status $status: $output"; return 1; }
+      [[ ! -e "$MOCK_DIR/request.txt" ]] || { echo "$p ${path}: called curl"; return 1; }
+    done
+  done
+}
+
 # stub_curl_once_503 <body> — first call answers 503 with an error body, later calls the
 # canned body with 200. Captures the request body the same way stub_curl does.
 stub_curl_once_503() {
@@ -288,7 +303,7 @@ STUB
 
 @test "every provider retries a 503 and reports the attempt to the pane" {
   local input_file="$MOCK_DIR/big-input.png"
-  head -c 3000000 /dev/urandom > "$input_file"
+  { printf '\211PNG\r\n\032\n'; head -c 3000000 /dev/urandom; } > "$input_file"
   local p
   for p in gemini openai xai openrouter; do
     rm -f "$MOCK_DIR/calls" "$DISPLAY_PANE_DIR/status"

@@ -365,6 +365,8 @@ bash scripts/openrouter.sh \
 
 #### Reference Images and Multi-Image Composition
 
+Each `--input-image` must be a PNG, JPEG, WebP or GIF file. The scripts read the type from the file's first bytes, not its name, and send it as that type. A path that is not a readable file, or a file of any other kind, exits with code 1 before any API call.
+
 `--input-image` is repeatable on all four scripts. Passing more images than a provider supports exits with code 1 before any API call:
 
 | Provider | Max images | Modes |
@@ -450,6 +452,7 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | xAI script | `scripts/xai.sh` | xAI API call execution |
 | OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
 | Retry helper | `scripts/retry.sh` | `curl_with_retry` for transient API failures |
+| Input image check | `scripts/input-images.sh` | Reads each `--input-image`'s type from its bytes and refuses anything that is not a PNG, JPEG, WebP or GIF file |
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |
 | Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
