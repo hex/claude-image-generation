@@ -313,11 +313,12 @@ reset_stub() {
   assert_sent 1 gpt-image-2.5-sunburst
   assert_output_not_contains "value too great for base"
 
-  # 010 read as octal is 8 seconds, which a 9-second-old verdict has outlived.
-  jq --argjson t "$(( $(date +%s) - 9 ))" '.checked_at = $t' "$verdict" > "$verdict.tmp"
+  # 0100 read as octal is 64 seconds, which an 80-second-old verdict has outlived; read as
+  # decimal it is 100, and the 20 seconds between them leave the test room for a slow run.
+  jq --argjson t "$(( $(date +%s) - 80 ))" '.checked_at = $t' "$verdict" > "$verdict.tmp"
   mv "$verdict.tmp" "$verdict"
   reset_stub openai ok
-  IMAGE_AVAILABILITY_TTL=010 run_provider openai
+  IMAGE_AVAILABILITY_TTL=0100 run_provider openai
   assert_status 0
   assert_sent 1 gpt-image-2.5-sunburst
 }
