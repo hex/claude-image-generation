@@ -135,7 +135,9 @@ request_with_model_fallback() {
   body="${RESPONSE%$'\n'*}"
   model_unavailable_response "$PROVIDER_NAME" "$code" "$body" || return 0
 
-  echo "${MODEL} is unavailable to this key (HTTP ${code}: $(__api_message "$body")); drawing with fallback ${FALLBACK_MODEL}" >&2
+  # The API's own message stays out: xAI's names the account's team id, and this line reaches
+  # pane logs and the tool result even when the fallback draws.
+  echo "${MODEL} is unavailable to this key (${PROVIDER_NAME}, HTTP ${code}); drawing with fallback ${FALLBACK_MODEL}" >&2
   MODEL="$FALLBACK_MODEL"
   FALLBACK_MODEL=""
   if [[ -n "${DISPLAY_PANE_DIR:-}" && -d "${DISPLAY_PANE_DIR:-}" ]]; then

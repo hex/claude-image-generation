@@ -217,7 +217,7 @@ ls "$work/cache/claude-image-generation/model-verdicts/"
 
 **Expected:**
 
-- Each run prints `no-such-image-model-x9 is unavailable to this key (HTTP <code>: <the API's message>); drawing with fallback <fallback>` and saves an image
+- Each run prints `no-such-image-model-x9 is unavailable to this key (<provider>, HTTP <code>); drawing with fallback <fallback>`, with none of the API's message, and saves an image
 - The verdict directory holds one file per provider; running a provider again prints `... is remembered as unavailable to this key; drawing with fallback ...` and sends one request
 
 ## 3. Feature Tests (Via Slash Command)
