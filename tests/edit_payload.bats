@@ -238,6 +238,40 @@ STUB
   }
 }
 
+# success_body <provider> — a 200 body that the provider decodes to the image "fake".
+success_body() {
+  case "$1" in
+    gemini)     echo '{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"ZmFrZQ=="}}]}}]}' ;;
+    openai|xai) echo '{"data":[{"b64_json":"ZmFrZQ=="}]}' ;;
+    openrouter) echo '{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}' ;;
+  esac
+}
+
+# run_provider_edit <provider> <input-image> — runs one provider's edit mode with every
+# dummy key set, so the same call works for all four scripts.
+run_provider_edit() {
+  GEMINI_API_KEY="$DUMMY_GEMINI_KEY" OPENAI_API_KEY="$DUMMY_OPENAI_KEY" \
+    XAI_API_KEY="$DUMMY_XAI_KEY" OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY" \
+    run bash "${PLUGIN_ROOT}/scripts/${1}.sh" --mode edit --prompt "add a rainbow" \
+    --input-image "$2" --output "$OUT"
+}
+
+@test "every provider refuses an input file that is not an image, before sending anything" {
+  # The model chooses the input path, so a file such as an SSH key must never be uploaded,
+  # even when it carries an image extension.
+  local not_image="$MOCK_DIR/key.png"
+  printf 'stand-in for a private key\n' > "$not_image"
+  local p
+  for p in gemini openai xai openrouter; do
+    rm -f "$MOCK_DIR/request.txt"
+    stub_curl "$(success_body "$p")"
+    run_provider_edit "$p" "$not_image"
+    [[ "$status" -eq 1 && "$output" == "Error: --input-image is not a PNG, JPEG, WebP or GIF image: ${not_image}" ]] || {
+      echo "$p: expected status 1 and the refusal, got status $status: $output"; return 1; }
+    [[ ! -e "$MOCK_DIR/request.txt" ]] || { echo "$p: called curl"; return 1; }
+  done
+}
+
 # stub_curl_once_503 <body> — first call answers 503 with an error body, later calls the
 # canned body with 200. Captures the request body the same way stub_curl does.
 stub_curl_once_503() {
@@ -255,15 +289,10 @@ STUB
 @test "every provider retries a 503 and reports the attempt to the pane" {
   local input_file="$MOCK_DIR/big-input.png"
   head -c 3000000 /dev/urandom > "$input_file"
-  local p body
+  local p
   for p in gemini openai xai openrouter; do
     rm -f "$MOCK_DIR/calls" "$DISPLAY_PANE_DIR/status"
-    case "$p" in
-      gemini)     body='{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"ZmFrZQ=="}}]}}]}' ;;
-      openai|xai) body='{"data":[{"b64_json":"ZmFrZQ=="}]}' ;;
-      openrouter) body='{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}' ;;
-    esac
-    stub_curl_once_503 "$body"
+    stub_curl_once_503 "$(success_body "$p")"
     IMAGE_RETRY_DELAY=0 GEMINI_API_KEY="$DUMMY_GEMINI_KEY" OPENAI_API_KEY="$DUMMY_OPENAI_KEY" \
       XAI_API_KEY="$DUMMY_XAI_KEY" OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY" \
       run bash "${PLUGIN_ROOT}/scripts/${p}.sh" --mode edit --prompt "add a rainbow" \
