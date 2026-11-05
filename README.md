@@ -201,7 +201,7 @@ The slash command, the agent and the skill use the tool whenever the session off
 
 Scripts are located in `scripts/` and can be invoked directly.
 
-A provider script never overwrites a file. It refuses an `--output` that already exists, as a file or as a symlink (a dangling one too), before it calls the API, and it writes the image only into a file it creates itself, so it also refuses a symlink that appears at the path while the request runs. `run-all.sh` gives each provider its own `<base>-<provider>.png`, so a provider whose file exists fails with that refusal while the others still run.
+A provider script never overwrites a file. It refuses an `--output` that already exists, as a file or as a symlink (a dangling one too), before it calls the API. It decodes the image into a hidden temp file in the output's folder and then gives that file the output's name with a hard link, which fails on anything that appeared at the path while the request ran (a file, a folder, a device, a named pipe, or a symlink to any of them) and never follows it. Such a run exits 1 with `Could not save the image to <path>: File exists`, and a failed save removes only its own temp file. A filesystem without hard links, such as FAT, cannot take the image: the save fails naming the path and the system's error (`Operation not supported` on macOS). `run-all.sh` gives each provider its own `<base>-<provider>.png`, so a provider whose file exists fails with that refusal while the others still run.
 
 #### gemini.sh
 
@@ -517,7 +517,7 @@ Delete the verdict directory to try the default again before the verdict expires
 | OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
 | Retry helper | `scripts/retry.sh` | `curl_with_retry` for transient API failures |
 | Input image check | `scripts/input-images.sh` | Copies each `--input-image` into a private temp folder, reads the copy's type from its bytes and refuses anything that is not a PNG, JPEG, WebP or GIF file |
-| Output image save | `scripts/output-image.sh` | Refuses an `--output` that already exists and decodes the image only into a file it creates, never through a symlink |
+| Output image save | `scripts/output-image.sh` | Refuses an `--output` that already exists, decodes the image into a temp file beside it and hard-links that to the output's name, so it never replaces or follows anything at the path |
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |
 | Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |

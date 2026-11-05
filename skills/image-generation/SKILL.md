@@ -187,7 +187,7 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 - Scripts exit with code 1 on failure and print error details to stderr
 - If an API key is missing, the script exits immediately with a clear message
 - `Error: --output already exists, refusing to overwrite it: <path>` means a file or a symlink holds the path, and the script sent no request. Rerun with a new path rather than deleting the file
-- `Could not save the image to <path>: <reason>` means the API answered but the script did not write the image, because something appeared at the path during the request or the image data did not decode. The script leaves no partial file behind
+- `Could not save the image to <path>: <reason>` means the API answered but the script did not write the image: `File exists` when something appeared at the path during the request, the system's error (`Operation not supported` on macOS) when the folder's filesystem has no hard links (FAT, for one), or the decoder's error when the image data did not decode. The script leaves no partial file behind and touches nothing at the path
 - HTTP errors include the status code and API error message
 - If multiple providers are used in parallel and one fails, report the error and present the successful results
 - Rate limit errors (HTTP 429) mean the provider's quota is exhausted. The script retries a 429 up to three times first; if it still fails, try again later or use another provider
