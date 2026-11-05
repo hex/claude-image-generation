@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
+source "${SCRIPT_DIR}/output-image.sh"
 
 readonly PROVIDER_NAME="gemini"
 
@@ -100,6 +101,7 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
   exit 1
 fi
 
+refuse_existing_output "$OUTPUT"
 snapshot_input_images
 
 API_URL="https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent"
@@ -203,11 +205,7 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
-if [[ "$(uname)" == "Darwin" ]]; then
-  echo "$IMAGE_DATA" | base64 -D > "$OUTPUT"
-else
-  echo "$IMAGE_DATA" | base64 -d > "$OUTPUT"
-fi
+save_image "$OUTPUT" <<< "$IMAGE_DATA"
 
 TEXT_RESPONSE=$(echo "$BODY" | jq -r '
   .candidates[0].content.parts[]

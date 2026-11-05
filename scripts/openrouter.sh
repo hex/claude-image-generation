@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
+source "${SCRIPT_DIR}/output-image.sh"
 
 readonly PROVIDER_NAME="openrouter"
 
@@ -77,6 +78,7 @@ if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
   exit 1
 fi
 
+refuse_existing_output "$OUTPUT"
 snapshot_input_images
 
 OUTPUT_DIR=$(dirname "$OUTPUT")
@@ -172,11 +174,7 @@ if [[ "$IMAGE_DATA" == "$DATA_URL" ]]; then
   provider_die "Unexpected image URL format (not a base64 data URL): ${DATA_URL:0:64}..."
 fi
 
-if [[ "$(uname)" == "Darwin" ]]; then
-  echo "$IMAGE_DATA" | base64 -D > "$OUTPUT"
-else
-  echo "$IMAGE_DATA" | base64 -d > "$OUTPUT"
-fi
+save_image "$OUTPUT" <<< "$IMAGE_DATA"
 
 echo "Image saved to: ${OUTPUT}" >&2
 echo "Model: ${MODEL}" >&2

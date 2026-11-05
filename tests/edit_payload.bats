@@ -299,6 +299,7 @@ run_provider_edit() {
       xai)        query=".images[].url | ${data_url}" ;;
       openrouter) query=".messages[0].content[] | select(.type == \"image_url\") | .image_url.url | ${data_url}" ;;
     esac
+    rm -f "$OUT"
     stub_curl "$(success_body "$p")"
     run_provider_edit "$p" "$first" "$second"
     assert_edit_succeeds
@@ -410,6 +411,7 @@ STUB
   for p in gemini openai xai openrouter; do
     for path in "${PLUGIN_ROOT}/tests/fixtures/oversized.png" "$MOCK_DIR/key.png"; do
       printf 'stand-in for a private key\n' > "$MOCK_DIR/key.png"
+      rm -f "$OUT"
       rm -rf "$scratch" && mkdir -p "$scratch"
       stub_curl "$(success_body "$p")"
       TMPDIR="$scratch" run_provider_edit "$p" "$path"
@@ -437,7 +439,7 @@ STUB
   { printf '\211PNG\r\n\032\n'; head -c 3000000 /dev/urandom; } > "$input_file"
   local p
   for p in gemini openai xai openrouter; do
-    rm -f "$MOCK_DIR/calls" "$DISPLAY_PANE_DIR/status"
+    rm -f "$MOCK_DIR/calls" "$DISPLAY_PANE_DIR/status" "$OUT"
     stub_curl_once_503 "$(success_body "$p")"
     IMAGE_RETRY_DELAY=0 GEMINI_API_KEY="$DUMMY_GEMINI_KEY" OPENAI_API_KEY="$DUMMY_OPENAI_KEY" \
       XAI_API_KEY="$DUMMY_XAI_KEY" OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY" \

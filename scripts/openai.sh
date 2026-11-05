@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/display.sh"
 source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
+source "${SCRIPT_DIR}/output-image.sh"
 
 readonly PROVIDER_NAME="openai"
 
@@ -124,6 +125,7 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   exit 1
 fi
 
+refuse_existing_output "$OUTPUT"
 snapshot_input_images
 
 OUTPUT_DIR=$(dirname "$OUTPUT")
@@ -212,11 +214,7 @@ if [[ -z "$IMAGE_DATA" || "$IMAGE_DATA" == "null" ]]; then
   provider_die "No image data in response: $(echo "$BODY" | jq -c '.' 2>/dev/null || echo "$BODY")"
 fi
 
-if [[ "$(uname)" == "Darwin" ]]; then
-  echo "$IMAGE_DATA" | base64 -D > "$OUTPUT"
-else
-  echo "$IMAGE_DATA" | base64 -d > "$OUTPUT"
-fi
+save_image "$OUTPUT" <<< "$IMAGE_DATA"
 
 echo "Image saved to: ${OUTPUT}" >&2
 echo "Format: ${OUTPUT_FORMAT}" >&2
