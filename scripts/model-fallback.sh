@@ -15,6 +15,8 @@ if [[ ! "$IMAGE_AVAILABILITY_TTL" =~ ^[0-9]+$ ]]; then
   echo "Error: IMAGE_AVAILABILITY_TTL must be a whole number of seconds, got '${IMAGE_AVAILABILITY_TTL}'" >&2
   exit 1
 fi
+# Shell arithmetic reads a leading zero as octal, so 010 would mean 8 seconds and 08 an error.
+IMAGE_AVAILABILITY_TTL=$(( 10#$IMAGE_AVAILABILITY_TTL ))
 
 # model_fallback_for_default <provider> — the model this run may fall back to: the provider's
 # configured fallback, or nothing when <PROVIDER>_IMAGE_MODEL names the model. A model the person
@@ -59,7 +61,8 @@ model_unavailable_cached() {
   [[ -f "$file" ]] || return 1
   checked_at=$(jq -r '.checked_at // 0' "$file" 2>/dev/null) || checked_at=0
   [[ "$checked_at" =~ ^[0-9]+$ ]] || checked_at=0
-  [[ $(( $(date +%s) - checked_at )) -lt $IMAGE_AVAILABILITY_TTL ]]
+  # 10# reads the digits as decimal: as octal, 08 is a shell error and 010 is 8.
+  [[ $(( $(date +%s) - 10#$checked_at )) -lt $IMAGE_AVAILABILITY_TTL ]]
 }
 
 # model_unavailable_remember <provider> <model> <key hash> — records the verdict through a temp
