@@ -274,6 +274,32 @@ reset_stub() {
   assert_sent 1 gpt-image-2.5-sunburst
 }
 
+@test "openai: a verdict timestamp and IMAGE_AVAILABILITY_TTL with leading zeros are read as decimal" {
+  stub_curl_answers openai "$FIXTURES/unavailable/openai-unknown-400.json" ok
+  run_provider openai
+  assert_status 0
+  local verdict
+  verdict=$(find "$XDG_CACHE_HOME" -name '*.json')
+
+  # Read as octal, a leading zero turns any 8 or 9 into a shell error and the rest into a date
+  # decades back, and either way the fresh verdict would count as stale.
+  jq --arg t "0$(date +%s)" '.checked_at = $t' "$verdict" > "$verdict.tmp"
+  mv "$verdict.tmp" "$verdict"
+  reset_stub openai ok
+  run_provider openai
+  assert_status 0
+  assert_sent 1 gpt-image-2.5-sunburst
+  assert_output_not_contains "value too great for base"
+
+  # 010 read as octal is 8 seconds, which a 9-second-old verdict has outlived.
+  jq --argjson t "$(( $(date +%s) - 9 ))" '.checked_at = $t' "$verdict" > "$verdict.tmp"
+  mv "$verdict.tmp" "$verdict"
+  reset_stub openai ok
+  IMAGE_AVAILABILITY_TTL=010 run_provider openai
+  assert_status 0
+  assert_sent 1 gpt-image-2.5-sunburst
+}
+
 @test "openai: IMAGE_AVAILABILITY_TTL=0 tries the default every run" {
   stub_curl_answers openai "$FIXTURES/unavailable/openai-unknown-400.json" ok
   run_provider openai
