@@ -10,6 +10,8 @@ setup() {
   disable_display
   # Some tests run openai.sh as far as the API call, which would otherwise go to OpenAI.
   stub_provider_api
+  # An output path of this test's own, so no file left by another run stands in for it.
+  OUT="${BATS_TEST_TMPDIR}/out.png"
   # Clear API key by default; tests that need it set it explicitly
   unset OPENAI_API_KEY 2>/dev/null || true
   unset OPENAI_IMAGE_MODEL 2>/dev/null || true
@@ -29,13 +31,13 @@ teardown() {
 }
 
 @test "openai: missing --mode prints error" {
-  run "$OPENAI_SH" --prompt "a cat" --output "/tmp/out.png"
+  run "$OPENAI_SH" --prompt "a cat" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --mode, --prompt, and --output are required"
 }
 
 @test "openai: missing --prompt prints error" {
-  run "$OPENAI_SH" --mode generate --output "/tmp/out.png"
+  run "$OPENAI_SH" --mode generate --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --mode, --prompt, and --output are required"
 }
@@ -48,14 +50,14 @@ teardown() {
 
 @test "openai: edit mode without --input-image prints error" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
-  run "$OPENAI_SH" --mode edit --prompt "make it blue" --output "/tmp/out.png"
+  run "$OPENAI_SH" --mode edit --prompt "make it blue" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: --input-image is required for edit mode"
 }
 
 @test "openai: missing OPENAI_API_KEY prints error" {
   unset OPENAI_API_KEY 2>/dev/null || true
-  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "/tmp/out.png"
+  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_status 1
   assert_output_contains "Error: OPENAI_API_KEY environment variable is not set"
 }
@@ -70,27 +72,27 @@ teardown() {
 @test "openai: default model is gpt-image-2" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
   # The script prints "Calling OpenAI API (model: ...)" before the curl call
-  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-openai-out.png"
+  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_output_contains "model: gpt-image-2"
 }
 
 @test "openai: OPENAI_IMAGE_MODEL env var overrides default model" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
   export OPENAI_IMAGE_MODEL="custom-openai-model"
-  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-openai-out.png"
+  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_output_contains "model: custom-openai-model"
 }
 
 @test "openai: --model flag overrides default and env var" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
   export OPENAI_IMAGE_MODEL="custom-openai-model"
-  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "/tmp/bats-test-openai-out.png" --model "flag-model"
+  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT" --model "flag-model"
   assert_output_contains "model: flag-model"
 }
 
 @test "openai: more than 16 input images is rejected" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
-  local args=(--mode edit --prompt "combine these" --output "/tmp/out.png")
+  local args=(--mode edit --prompt "combine these" --output "$OUT")
   for i in $(seq 1 17); do
     args+=(--input-image "/tmp/x.png")
   done
@@ -101,7 +103,7 @@ teardown() {
 
 @test "openai: --input-fidelity is refused on gpt-image-2, which always edits at high fidelity" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
-  run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "/tmp/out.png" \
+  run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "$OUT" \
     --input-image "/tmp/x.png" --input-fidelity high
   assert_status 1
   assert_output_contains "Error: --input-fidelity is not accepted by gpt-image-2"
@@ -113,7 +115,7 @@ teardown() {
   mkdir -p "$MOCK_DIR"
   printf '#!/bin/bash\nprintf "{}\\n401\\n"\n' > "$MOCK_DIR/curl"
   chmod +x "$MOCK_DIR/curl"
-  PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "/tmp/out.png" \
+  PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt "keep the face" --output "$OUT" \
     --input-image "$PNG_FIXTURE" --input-fidelity high --model gpt-image-1.5
   assert_output_contains "Calling OpenAI API (model: gpt-image-1.5, mode: edit)"
   [[ "$output" != *"not accepted by gpt-image-2"* ]] || { echo "refused a model that takes the flag: $output"; return 1; }
@@ -121,7 +123,7 @@ teardown() {
 
 @test "openai: dall-e-2 with multiple images rejected" {
   export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
-  run "$OPENAI_SH" --mode edit --prompt "combine these" --output "/tmp/out.png" \
+  run "$OPENAI_SH" --mode edit --prompt "combine these" --output "$OUT" \
     --model dall-e-2 --input-image "/tmp/x.png" --input-image "/tmp/y.png"
   assert_status 1
   assert_output_contains "at most 1 input image for dall-e-2"
@@ -143,7 +145,7 @@ EOF
   chmod +x "$MOCK_DIR/curl"
 
   PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt '@/etc/passwd' \
-    --output "/tmp/bats-test-openai-out.png" --input-image "$PNG_FIXTURE"
+    --output "$OUT" --input-image "$PNG_FIXTURE"
 
   local flag
   flag=$(grep -B1 -x 'prompt=@/etc/passwd' "$CAPTURE_FILE" | head -1)
