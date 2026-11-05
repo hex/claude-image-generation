@@ -287,6 +287,68 @@ run_provider_edit() {
   done
 }
 
+# route_curl_to_local_server <body> — installs a curl that runs the real curl against a
+# one-shot local listener in place of the provider's https URL. The listener saves the raw
+# request to $MOCK_DIR/request.raw and answers 200 with <body>, so a test reads exactly the
+# bytes curl would have sent.
+route_curl_to_local_server() {
+  local real_curl
+  real_curl=$(command -v curl)
+  printf '%s' "$1" > "$MOCK_DIR/response.body"
+  cat > "$MOCK_DIR/curl" <<STUB
+#!/bin/bash
+d="$MOCK_DIR"
+port=\$((20000 + RANDOM % 20000))
+body=\$(cat "\$d/response.body")
+printf 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' \
+  "\${#body}" "\$body" | nc -l 127.0.0.1 "\$port" > "\$d/request.raw" &
+nc_pid=\$!
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  lsof -nP -iTCP:"\$port" -sTCP:LISTEN >/dev/null 2>&1 && break
+  sleep 0.1
+done
+args=()
+for a in "\$@"; do
+  case "\$a" in https://*) a="http://127.0.0.1:\$port/\${a#https://*/}" ;; esac
+  args+=("\$a")
+done
+"$real_curl" --max-time 5 "\${args[@]}"
+curl_status=\$?
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  kill -0 "\$nc_pid" 2>/dev/null || break
+  sleep 0.1
+done
+kill "\$nc_pid" 2>/dev/null
+exit \$curl_status
+STUB
+  chmod +x "$MOCK_DIR/curl"
+  export PATH="$MOCK_DIR:$PATH"
+}
+
+@test "openai: the request carries text fields as typed and each image's own bytes" {
+  command -v nc >/dev/null && command -v lsof >/dev/null || skip "needs nc and lsof"
+  # curl's -F reads a value starting with '@' from a file, and splits an image path at ','
+  # and ';'. The prompt must arrive as typed, and an image whose name holds those characters
+  # must arrive as its own bytes, not as the files curl would split the name into.
+  local dir="$MOCK_DIR/odd"
+  mkdir -p "$dir"
+  printf 'canary from the prompt file\n' > "$dir/notes.txt"
+  printf 'canary from a split name\n' > "$dir/a"
+  local image="$dir/a,b;c\"d\\e.png"
+  { printf '\211PNG\r\n\032\n'; printf 'bytes of the oddly named image'; } > "$image"
+  route_curl_to_local_server "$(success_body openai)"
+
+  OPENAI_API_KEY="$DUMMY_OPENAI_KEY" run bash "${PLUGIN_ROOT}/scripts/openai.sh" \
+    --mode edit --prompt "@${dir}/notes.txt" --input-image "$image" --output "$OUT"
+
+  assert_edit_succeeds
+  local request="$MOCK_DIR/request.raw"
+  grep -qxF "@${dir}/notes.txt"$'\r' "$request" || { echo "prompt not sent as typed:"; cat "$request"; return 1; }
+  grep -qF 'bytes of the oddly named image' "$request" || { echo "image bytes missing:"; cat "$request"; return 1; }
+  grep -qxF $'Content-Type: image/png\r' "$request" || { echo "image part not typed image/png:"; cat "$request"; return 1; }
+  if grep -qF 'canary' "$request"; then echo "uploaded a file that is not the image:"; cat "$request"; return 1; fi
+}
+
 # stub_curl_once_503 <body> — first call answers 503 with an error body, later calls the
 # canned body with 200. Captures the request body the same way stub_curl does.
 stub_curl_once_503() {

@@ -169,23 +169,26 @@ elif [[ "$MODE" == "edit" ]]; then
   echo "Calling OpenAI API (model: ${MODEL}, mode: edit)..." >&2
   display_pane_begin "$PROVIDER_NAME" "$MODEL"
 
-  # --form-string (not -F) for prompt: curl's -F treats a value starting with '@' or '<'
-  # as a file to read, so a prompt beginning with either would leak local file contents
-  # to the API instead of being sent as text.
-  EDIT_ARGS=(-F "model=${MODEL}" --form-string "prompt=${PROMPT}" \
-    -F "size=${SIZE}" -F "quality=${QUALITY}" -F "background=${BACKGROUND}" \
-    -F "output_format=${OUTPUT_FORMAT}" -F "moderation=${MODERATION}")
+  # curl's -F reads a value that starts with '@' or '<' from a file, so every text field goes
+  # through --form-string, which sends it as typed. In an image's -F value curl also splits the
+  # path at ',' and ';' unless it is double-quoted, with '\' and '"' escaped inside the quotes.
+  EDIT_ARGS=(--form-string "model=${MODEL}" --form-string "prompt=${PROMPT}" \
+    --form-string "size=${SIZE}" --form-string "quality=${QUALITY}" \
+    --form-string "background=${BACKGROUND}" --form-string "output_format=${OUTPUT_FORMAT}" \
+    --form-string "moderation=${MODERATION}")
 
-  for img in "${INPUT_IMAGES[@]}"; do
-    EDIT_ARGS+=(-F "image[]=@${img}")
+  for i in "${!INPUT_IMAGES[@]}"; do
+    quoted_path=${INPUT_IMAGES[$i]//\\/\\\\}
+    quoted_path=${quoted_path//\"/\\\"}
+    EDIT_ARGS+=(-F "image[]=@\"${quoted_path}\";type=${INPUT_MIMES[$i]}")
   done
 
   if [[ -n "$OUTPUT_COMPRESSION" ]]; then
-    EDIT_ARGS+=(-F "output_compression=${OUTPUT_COMPRESSION}")
+    EDIT_ARGS+=(--form-string "output_compression=${OUTPUT_COMPRESSION}")
   fi
 
   if [[ -n "$INPUT_FIDELITY" ]]; then
-    EDIT_ARGS+=(-F "input_fidelity=${INPUT_FIDELITY}")
+    EDIT_ARGS+=(--form-string "input_fidelity=${INPUT_FIDELITY}")
   fi
 
   RESPONSE=$(curl_with_retry -s -w "\n%{http_code}" \

@@ -144,8 +144,9 @@ EOF
   PATH="$MOCK_DIR:$PATH" run "$OPENAI_SH" --mode edit --prompt '@/etc/passwd' \
     --output "/tmp/bats-test-openai-out.png" --input-image "$PNG_FIXTURE"
 
-  assert_output_contains_file "$CAPTURE_FILE" "--form-string"
-  assert_output_contains_file "$CAPTURE_FILE" "prompt=@/etc/passwd"
+  local flag
+  flag=$(grep -B1 -x 'prompt=@/etc/passwd' "$CAPTURE_FILE" | head -1)
+  [[ "$flag" == "--form-string" ]] || { echo "prompt was passed after '${flag}', not --form-string:"; cat "$CAPTURE_FILE"; return 1; }
 }
 
 @test "openai: usage text includes all documented options" {
