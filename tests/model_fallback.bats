@@ -214,9 +214,10 @@ classify_body() {
     _ "${PLUGIN_ROOT}/scripts/model-fallback.sh" "$1" "$2" "$3"
 }
 
-# reset_stub <provider> <answer>... — a fresh curl stub and call count for the next run.
+# reset_stub <provider> <answer>... — a fresh curl stub and call count for the next run, and no
+# image at $OUT, since a provider refuses an --output that already exists.
 reset_stub() {
-  rm -f "$MOCK_DIR"/calls "$MOCK_DIR"/argv.* "$MOCK_DIR"/body.* "$MOCK_DIR"/answer.* "$MOCK_DIR"/code.*
+  rm -f "$MOCK_DIR"/calls "$MOCK_DIR"/argv.* "$MOCK_DIR"/body.* "$MOCK_DIR"/answer.* "$MOCK_DIR"/code.* "$OUT"
   stub_curl_answers "$@"
 }
 
