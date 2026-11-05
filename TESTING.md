@@ -54,6 +54,7 @@ bats tests/openai.bats
 | `tests/xai.bats` | `scripts/xai.sh` | Argument validation, missing API key (XAI_API_KEY + GROK_API_KEY fallback), model override, edit mode, more than 5 input images rejected, `--quality` validation |
 | `tests/openrouter.bats` | `scripts/openrouter.sh` | Argument validation including an invalid `--mode`, missing API key, model override, usage text, a choice-level error on an HTTP 200 response reported by message |
 | `tests/check_status.bats` | `scripts/check-status.sh` | A stub curl that answers per URL: a missing key sends no request; each provider's rejected-key answer (Gemini and xAI 400, OpenAI and OpenRouter 401) reads rejected, and a Gemini or xAI 400 that does not name the key does not; a model in the list reads `yes`, through an xAI alias too, and a missing one `no`, as does an OpenRouter model without image output; a Gemini list with more pages reads `unknown`; a request with no answer names curl's exit code, and a non-JSON list reads unreadable; keys reach curl as a header on stdin, never in its arguments; xAI falls back to `GROK_API_KEY`; each row's model matches the model its provider script sends; a provider script without its `MODEL="${VAR:-default}"` line, or a missing jq, stops the check with exit 1; the check leaves no response body in `$TMPDIR`. Runs under `/bin/bash` (3.2) |
+| `tests/model_fallback.bats` | `scripts/model-fallback.sh`, provider scripts | Runtime model fallback under `/bin/bash`: every provider retrying an unavailable default once with its fallback (model read from the gemini URL, the openai edit form field, or the JSON body); the verdict kept only after the fallback draws, honoured by the next run, ignored past `IMAGE_AVAILABILITY_TTL` or with `0`, kept per key, stale when unreadable; a fallback that is unavailable too ending the run after two requests; no fallback for a bad key, a bad parameter, or a model named by `--model` or `*_IMAGE_MODEL`; a 503 retried on the default before a 404 moves to the fallback; the pane's status rows naming the fallback; the classifier over every captured answer in `tests/fixtures/model-fallback/` (`unavailable/` must classify unavailable, `other/` must not) |
 | `tests/retry.bats` | `scripts/retry.sh` | `curl_with_retry` on 429/5xx/network failures, delay doubling, `IMAGE_MAX_RETRIES` / `IMAGE_RETRY_DELAY`, attempt count handoff |
 | `tests/display.bats` | `scripts/display.sh` | iTerm2/Kitty/Sixel detection, escape sequence format, tmux detection, outer terminal detection, protocol priority, error handling |
 | `tests/pane_layout.bats` | `scripts/display.sh`, `scripts/run-all.sh` | Pane orientation (wide/tall split), image normalization to the display box + DPI pinning, empty-timing parse, the `waiting on` line (animated until the first image, then written once per block, clipped to the pane width), resize redraw and its replay order, retry labels on the waiting line, the retry offer (countdown, `r`, expiry, Esc, reprint after a resize) |
@@ -192,6 +193,32 @@ bash scripts/run-all.sh --mode edit --prompt "combine these" \
 - run-all.sh forwards both `--input-image` flags to every provider and produces three output files. Forwarding happens in edit mode only — a run-all `--mode generate` run does not pass input images to Gemini (call `scripts/gemini.sh` directly for generate-with-references)
 - xAI edit output is commonly JPEG data even when saved with a `.png` extension (verify with `file /tmp/multi-xai.png`)
 - Known limitation: `dall-e-2` edits remain non-functional even with a single image — the script sends form fields only the gpt-image models accept
+
+### Model Fallback Smoke Test (Real API Calls)
+
+**Setup:** API keys for the providers under test. Costs one image per provider. A model named by `*_IMAGE_MODEL` never falls back, so the test pins a model id that does not exist as the default in a copy of the scripts, which is what a retired default looks like to the script.
+
+```bash
+work=$(mktemp -d "${TMPDIR:-/tmp}/fallback.XXXXXX")
+cp -R scripts "$work/"
+sed -i '' 's/:-gemini-3-pro-image}/:-no-such-image-model-x9}/' "$work/scripts/gemini.sh"
+sed -i '' 's/:-gpt-image-2}/:-no-such-image-model-x9}/' "$work/scripts/openai.sh"
+sed -i '' 's/:-grok-imagine-image-2.0}/:-no-such-image-model-x9}/' "$work/scripts/xai.sh"
+sed -i '' 's#:-google/gemini-3.1-flash-image}#:-google/no-such-image-model-x9}#' "$work/scripts/openrouter.sh"
+export XDG_CACHE_HOME="$work/cache"
+unset GEMINI_IMAGE_MODEL OPENAI_IMAGE_MODEL XAI_IMAGE_MODEL OPENROUTER_IMAGE_MODEL
+for p in gemini openai xai openrouter; do
+  extra=(); [[ $p == openai ]] && extra=(--quality low)
+  env -u TMUX -u TMUX_PANE bash "$work/scripts/$p.sh" --mode generate \
+    --prompt "a small red paper boat on calm blue water" --output "$work/$p.png" "${extra[@]}"
+done
+ls "$work/cache/claude-image-generation/model-verdicts/"
+```
+
+**Expected:**
+
+- Each run prints `no-such-image-model-x9 is unavailable to this key (HTTP <code>: <the API's message>); drawing with fallback <fallback>` and saves an image
+- The verdict directory holds one file per provider; running a provider again prints `... is remembered as unavailable to this key; drawing with fallback ...` and sends one request
 
 ## 3. Feature Tests (Via Slash Command)
 

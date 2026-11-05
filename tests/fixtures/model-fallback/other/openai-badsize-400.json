@@ -1,0 +1,1 @@
+{"error":{"message":"Invalid size '7x7'. Width and height must both be divisible by 16.","type":"image_generation_user_error","param":"size","code":"invalid_value"}}

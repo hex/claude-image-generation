@@ -460,6 +460,31 @@ Each provider script retries a transient API error (429 or a 5xx status, or a ne
 
 When a provider run through `run-all.sh` fails outright, its error shows under a red `✗ provider error` heading, and if any provider failed the pane offers `[r] retry failed (xai) · [esc/ctrl-d] close 45s`. The offer counts down until the first image is on the pane; after that it shows the time budget once, as `[r] retry failed (xai) · [esc/ctrl-d] close (up to 45s)`, because a rewritten line erases the pane's images. Pressing `r` re-runs only the failed providers inside the same run; Esc closes the pane and the run returns with what it has. `DISPLAY_PANE_RETRY_WAIT` sets how long the offer stays open (default 45 seconds; 0 disables it), and a run with a failure can take that much longer plus one more provider round.
 
+### Model Fallback
+
+When a provider's default model is unavailable to your key (unknown, retired, or not enabled for it), the script sends the same request once more with that provider's fallback model:
+
+| Provider | Default | Fallback |
+|----------|---------|----------|
+| Gemini | `gemini-3-pro-image` | `gemini-nano-banana-2.1` |
+| OpenAI | `gpt-image-2` | `gpt-image-2.5-sunburst` |
+| xAI | `grok-imagine-image-2.0` | `grok-imagine-image` |
+| OpenRouter | `google/gemini-3.1-flash-image` | `google/gemini-nano-banana-2.1` |
+
+The script sends a model you name with `--model` or a `*_IMAGE_MODEL` variable as named and never falls back from it, so the error names the model to change.
+
+The fallback runs only when the answer blames the model. That means HTTP 404, HTTP 403 (except on OpenRouter, where 403 means its moderation flagged the prompt), or HTTP 400 with a message saying the model does not exist or is not a valid model ID. A bad key, a bad parameter or a refused prompt fails the same way on any model, so it ends the run. The script retries a 429 or 5xx on the same model (see [Retries](#retries)). A run sends at most two models; if the fallback fails too, the script reports the fallback's error.
+
+The switch shows in stderr, for example `gpt-image-2 is unavailable to this key (HTTP 400: The model 'gpt-image-2' does not exist.); drawing with fallback gpt-image-2.5-sunburst`. In a streaming pane the provider's banner names the fallback model that drew the image.
+
+Once the fallback has drawn an image, the script remembers that the default is unavailable to that key and sends the fallback first on later runs, printing `gpt-image-2 is remembered as unavailable to this key; drawing with fallback gpt-image-2.5-sunburst`. Verdicts live in `${XDG_CACHE_HOME:-~/.cache}/claude-image-generation/model-verdicts/`, one file per provider, default model and key digest; the key itself never touches disk. A failed fallback leaves no verdict, since a refusal that covers the whole account would fail both models.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `IMAGE_AVAILABILITY_TTL` | `86400` | Seconds a verdict holds. `0` makes every run try the default first. |
+
+Delete the verdict directory to try the default again before the verdict expires.
+
 ## Provider Comparison
 
 | Feature | Gemini | OpenAI | xAI | OpenRouter |
