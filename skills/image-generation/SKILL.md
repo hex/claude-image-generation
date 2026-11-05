@@ -1,7 +1,7 @@
 ---
 name: image-generation
 description: Generates and edits images using Google Gemini, OpenAI GPT Image, xAI Grok Image, and OpenRouter APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "generate with openrouter", "gpt image", "gemini image", "grok image", or "openrouter image".
-version: 2026.9.1
+version: 2026.11.1
 ---
 
 # Image Generation with Gemini, OpenAI, xAI, and OpenRouter
@@ -18,10 +18,10 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 - **Env var**: `GEMINI_API_KEY`
 
 ### OpenAI GPT Image 2
-- **Model**: `gpt-image-2.6-sunburst` (default); `gpt-image-2` (snapshot `gpt-image-2-2026-04-21`) and `gpt-image-1.5` (previous flagship) available via `--model`
+- **Model**: `gpt-image-2.6-sunburst` (default); `gpt-image-2.6-flare` (faster), `gpt-image-2.5-sunburst`, `gpt-image-2` (snapshot `gpt-image-2-2026-04-21`) and `gpt-image-1.5` (previous flagship) available via `--model`
 - **Strengths**: Superior text rendering, transparent backgrounds, up to 16 input images for editing, quality tiers
-- **Sizes**: on `gpt-image-2`, any `WxH` with both edges multiples of 16, longest edge up to 3840 and ratio at most 3:1 (such as 2048x1152, 3840x2160); older models take 1024x1024, 1536x1024 (landscape), 1024x1536 (portrait)
-- **Quality**: low (fast/cheap), medium, high (best fidelity)
+- **Sizes**: on `gpt-image-2` and the `gpt-image-2.5` models, any `WxH` with both edges multiples of 16, longest edge up to 3840 and ratio at most 3:1 (such as `2048x1152`, `3840x2160`). OpenAI states no size rules for `gpt-image-2.6-sunburst`; it drew `1536x864` in a 2026-11-05 test. Older models take `1024x1024`, `1536x1024` (landscape), `1024x1536` (portrait)
+- **Quality**: low (fast/cheap), medium, high; xhigh and max on the `gpt-image-2.5` and `2.6` models
 - **Env var**: `OPENAI_API_KEY`
 
 ### xAI Grok Image
@@ -224,9 +224,9 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
 | `--input-image` | file path, repeatable (max 16) | (edit only) |
-| `--size` | auto or WxH (gpt-image-2: edges multiples of 16, max edge 3840, ratio up to 3:1); older models: 1024x1024, 1536x1024, 1024x1536 | 1024x1024 |
-| `--quality` | auto, low, medium, high | high |
-| `--background` | auto, transparent, opaque | auto |
+| `--size` | auto or WxH (gpt-image-2 and the 2.5 models: edges multiples of 16, max edge 3840, ratio up to 3:1; gpt-image-2.6-sunburst drew `1536x864` in a 2026-11-05 test); older models: `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` |
+| `--quality` | auto, low, medium, high; xhigh and max on the 2.5 and 2.6 models | high |
+| `--background` | auto, transparent, opaque; transparent needs png or webp output | auto |
 | `--output-format` | png, jpeg, webp | png |
 | `--output-compression` | 0-100 (jpeg/webp only) | -- |
 | `--moderation` | auto, low | auto |

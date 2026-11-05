@@ -186,7 +186,7 @@ OpenAI (`openai.sh`):
 - `--moderation low` — less restrictive content filtering
 - `--output-format jpeg` for faster generation, `--output-format webp` for smaller files
 - `--output-compression 80` — compression level for jpeg/webp
-- `--background transparent` — transparent background (gpt-image-1.5; preview on gpt-image-2, with `--output-format` png or webp only)
+- `--background transparent` — transparent background, with `--output-format` png or webp only (the default gpt-image-2.6-sunburst, the 2.5 models and gpt-image-1.5; preview on gpt-image-2)
 - `--input-fidelity high` — preserves faces/logos/textures in edit mode; not accepted with gpt-image-2 (that model always uses high fidelity) or the default gpt-image-2.6-sunburst, and openai.sh refuses the flag for both
 - `--model gpt-image-1-mini` — 3-4x cheaper for drafts; `--model gpt-image-1.5` for previous flagship
 

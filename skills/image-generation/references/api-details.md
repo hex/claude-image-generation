@@ -100,7 +100,7 @@ Pricing: 5,000 grounding prompts/month free across Gemini 3 models, then $14 per
 - `gemini-3.1-flash-image`: "Nano Banana 2", GA 2026-05-28. 4K output, 14 aspect ratios (incl. extreme 1:4, 4:1, 1:8, 8:1), thinking, search grounding. Also supports `512` resolution.
 - `gemini-3.1-flash-lite-image`: "Nano Banana 2 Lite". Cheapest tier, about $0.034 per 1K image.
 - `gemini-3-pro-image-preview` and `gemini-3.1-flash-image-preview`: the pre-GA IDs. Still answer as of 2026-09-02 but passed their earliest shutdown date (2026-06-25) and are gone from the model tables.
-- `gemini-2.5-flash-image`: Previous generation, 1K only. **Scheduled shutdown 2026-10-02** — replacement is `gemini-3.1-flash-image`.
+- `gemini-2.5-flash-image`: Previous generation, 1K only. **Earliest shutdown 2027-03-15**. Google names `gemini-3.1-flash-lite-image` as its replacement.
 - `gemini-nano-banana-2.1`: "Nano Banana 2.1", released 2026-10-06, Flash tier, Google's named replacement for `gemini-3.1-flash-image`. The plugin's fallback when the default is unavailable to the key.
 - An unknown or retired model answers HTTP 404 with `{"error": {"code": 404, "message": "models/<id> is not found for API version v1beta, or is not supported for generateContent. ...", "status": "NOT_FOUND"}}` (captured 2026-11-05).
 
@@ -202,13 +202,13 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 
 | Parameter | Values | Notes |
 |-----------|--------|-------|
-| `size` | `auto` or `WxH` | Plugin default `1024x1024`. gpt-image-2 takes any size with both edges multiples of 16, max edge 3840, long-to-short ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`). Older models take `1024x1024`, `1536x1024`, `1024x1536` |
-| `quality` | `auto`, `low`, `medium`, `high` | Default `high` |
-| `background` | `auto`, `transparent`, `opaque` | `transparent` supported on gpt-image-1.5 and, in preview, on gpt-image-2 (`png` or `webp` output only; `jpeg` is not supported with it) |
+| `size` | `auto` or `WxH` | Plugin default `1024x1024`. gpt-image-2 and the two gpt-image-2.5 models take any size with both edges multiples of 16, max edge 3840, long-to-short ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`); OpenAI calls sizes above `2560x1440` experimental on the 2.5 models. OpenAI's guide states no size rules for the 2.6 models; `gpt-image-2.6-sunburst` drew a `1536x864` image on 2026-11-05. Older models take `1024x1024`, `1536x1024`, `1024x1536` |
+| `quality` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` | Plugin default `high`. `xhigh` and `max` exist only on the gpt-image-2.5 and 2.6 models; older models stop at `high` |
+| `background` | `auto`, `transparent`, `opaque` | `transparent` supported on gpt-image-1.5, on the two gpt-image-2.5 models and, in preview, on gpt-image-2 (`png` or `webp` output only; `jpeg` is not supported with it). OpenAI's guide does not state it for the 2.6 models; `gpt-image-2.6-sunburst` returned a PNG with transparent pixels on 2026-11-05 |
 | `output_format` | `png`, `jpeg`, `webp` | `jpeg` is faster than `png` |
 | `output_compression` | integer 0-100 | Only applies to `jpeg`/`webp` |
 | `moderation` | `auto` (default), `low` | Less restrictive filtering; gpt-image models only |
-| `input_fidelity` | `low` (default), `high` | Edit only; not accepted with gpt-image-2, which always uses high fidelity, or gpt-image-2.6-sunburst (`openai.sh` refuses the flag for both). `high` preserves faces/logos/textures. On 1.5 the first 5 images get high fidelity; on gpt-image-1 and mini only the first. |
+| `input_fidelity` | `low` (default), `high` | Edit only; not accepted with gpt-image-2, which always uses high fidelity, or gpt-image-2.6-sunburst (`openai.sh` refuses the flag for both). `high` preserves faces/logos/textures. On 1.5 the first 5 images get high fidelity; on gpt-image-1-mini only the first. |
 | `partial_images` | integer 0-3 | SSE streaming, +100 output tokens per partial |
 
 ### Response Format
@@ -232,8 +232,8 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 - `gpt-image-2`: Snapshot: `gpt-image-2-2026-04-21`
 - `gpt-image-1.5`: Previous flagship. Snapshot: `gpt-image-1.5-2025-12-16`. **Shutdown 2026-12-01**
 - `gpt-image-1-mini`: 3-4x cheaper, same API surface, only first image gets high fidelity on edits. **Shutdown 2026-12-01**
-- `gpt-image-1`: Older generation. **Shutdown 2026-10-23**
-- `chatgpt-image-latest`: GA alias. **Shutdown 2026-12-01**; replacement for all four is `gpt-image-2`
+- `gpt-image-1`: Retired 2026-10-23, and gone from `/v1/models` (checked 2026-11-05)
+- `chatgpt-image-latest`: GA alias. **Shutdown 2026-12-01**. OpenAI names `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare` as the replacement for these four models
 - `gpt-image-2.5-sunburst`: "most capable model for image generation and editing", same per-token price as `gpt-image-2`, no announced shutdown. The plugin's fallback when the default is unavailable to the key.
 - An unknown or retired model answers HTTP 400 with `{"error": {"message": "The model '<id>' does not exist.", "type": "image_generation_user_error", "param": "model", "code": "invalid_value"}}` on both endpoints (captured 2026-11-05 for an unknown id and for `dall-e-3`).
 

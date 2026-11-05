@@ -10,6 +10,9 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **Multi-image input** — repeatable `--input-image` for multi-image edits (all providers) and Gemini reference-based generation
 - **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners, and a `waiting on` line naming the pending providers (animated until the first image renders, then written once under each block)
 - **Interactive provider selection** via AskUserQuestion at runtime
+- **Generate tool** on Claude Code builds with function hooks, so the model calls one typed tool instead of writing a script line (see [Generate Tool](#generate-tool-function-hooks-early-access))
+- **Provider status** via `/claude-image-generation:status`, which checks each key and default model against the provider's live API without billing anything
+- **Model fallback** draws with a configured second model when a provider's default is unavailable to your key (see [Model Fallback](#model-fallback))
 - **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
 - **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code). Providers running at the same time share one pane, however they were launched
 - **Streaming display** -- images appear progressively in a shared pane during parallel generation, accumulating as each provider finishes
@@ -76,8 +79,10 @@ Control the terminal image display dimensions (in pixels):
 |----------|---------|---------|
 | `DISPLAY_IMAGE_WIDTH` | `512` | Max image width in pixels for terminal display |
 | `DISPLAY_IMAGE_HEIGHT` | `512` | Max image height in pixels for iTerm2 display |
+| `DISPLAY_PANE_IMAGE_PCT` | `30` | Image width in the streaming pane under iTerm2, as a percent of the pane width |
+| `DISPLAY_PANE_IMAGE_PX` | `240` | Longest edge, in pixels, of the preview copy the streaming pane draws; sets sharpness, not on-screen size |
 
-These apply to inline display (iTerm2, Sixel) and tmux pane display.
+The first two apply to inline display (iTerm2, Sixel), to the tmux panes a direct `display_image` or `display_images` call opens, and to Sixel in the streaming pane. Under iTerm2 the streaming pane sizes images with `DISPLAY_PANE_IMAGE_PCT` instead.
 
 ### Available Gemini Models
 
@@ -86,7 +91,7 @@ These apply to inline display (iTerm2, Sixel) and tmux pane display.
 | `gemini-3-pro-image` | Pro tier, premium quality, 10 aspect ratios, up to 14 reference images (default, "Nano Banana Pro", GA since 2026-05-28) |
 | `gemini-3.1-flash-image` | 14 aspect ratios (incl. extreme 1:4, 8:1), 512-4K resolution, thinking, Google Search grounding ("Nano Banana 2", GA since 2026-05-28) |
 | `gemini-3.1-flash-lite-image` | Cheapest tier ("Nano Banana 2 Lite") |
-| `gemini-2.5-flash-image` | Previous generation, 1K only (scheduled shutdown 2026-10-02) |
+| `gemini-2.5-flash-image` | Previous generation, 1K only (earliest shutdown 2027-03-15; Google's replacement is `gemini-3.1-flash-lite-image`) |
 
 The `-preview` IDs of the two GA models still answer but passed Google's earliest shutdown date (2026-06-25) and are gone from its model tables; pass the GA IDs.
 
@@ -95,10 +100,13 @@ The `-preview` IDs of the two GA models still answer but passed Google's earlies
 | Model | Characteristics |
 |-------|-----------------|
 | `gpt-image-2.6-sunburst` | Built for detailed work and precise edits (default) |
+| `gpt-image-2.6-flare` | The faster 2.6 model |
+| `gpt-image-2.5-sunburst` | The model the plugin falls back to when the default is unavailable to the key |
 | `gpt-image-2` | Snapshot `gpt-image-2-2026-04-21` |
 | `gpt-image-1.5` | Previous flagship, superior text rendering, transparent backgrounds, quality tiers (shutdown 2026-12-01) |
 | `gpt-image-1-mini` | 3-4x cheaper, cost-efficient for drafts and previews (shutdown 2026-12-01) |
-| `gpt-image-1` | Older generation (shutdown 2026-10-23) |
+
+OpenAI names `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare` as the replacement for the two models shutting down. `gpt-image-1` shut down on 2026-10-23.
 
 ### Available xAI Models
 
@@ -300,9 +308,9 @@ bash scripts/openai.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path, repeatable (max 16; `dall-e-2` allows 1) | -- | Edit mode only |
-| `--size` | `auto` or `WxH`. On `gpt-image-2`, any size with both edges multiples of 16, longest edge up to 3840, ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`); older models take `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` | No |
-| `--quality` | `auto`, `low`, `medium`, `high` | `high` | No |
-| `--background` | `auto`, `transparent`, `opaque` | `auto` | No |
+| `--size` | `auto` or `WxH`. On `gpt-image-2` and the `gpt-image-2.5` models, any size with both edges multiples of 16, longest edge up to 3840, ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`). OpenAI states no size rules for `gpt-image-2.6-sunburst`, which drew `1536x864` in a 2026-11-05 test. Older models take `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` | No |
+| `--quality` | `auto`, `low`, `medium`, `high`; also `xhigh` and `max` on the `gpt-image-2.5` and `2.6` models | `high` | No |
+| `--background` | `auto`, `transparent`, `opaque`; `transparent` needs `--output-format` `png` or `webp` | `auto` | No |
 | `--output-format` | `png`, `jpeg`, `webp` | `png` | No |
 | `--output-compression` | integer 0-100 (jpeg/webp only) | -- | No |
 | `--moderation` | `auto`, `low` | `auto` | No |
@@ -492,12 +500,12 @@ Delete the verdict directory to try the default again before the verdict expires
 | Feature | Gemini | OpenAI | xAI | OpenRouter |
 |---------|--------|--------|-----|------------|
 | Default model | gemini-3-pro-image | gpt-image-2.6-sunburst | grok-imagine-image-2.0 | google/gemini-nano-banana-2.1 |
-| Max resolution | 4K (via `--image-size`) | 3840 px long edge on gpt-image-2 (via `--size`); 1536x1024 on older models | 2K (via `--resolution`) | Model-dependent |
+| Max resolution | 4K (via `--image-size`) | 3840 px long edge on gpt-image-2 and the 2.5 models (via `--size`); `1536x1024` on older models | 2K (via `--resolution`) | Model-dependent |
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
-| Transparent BG | No | Yes (preview on gpt-image-2, png or webp only) | No | Model-dependent |
-| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | Any `WxH` up to 3:1 on gpt-image-2; 3 fixed sizes on older models | 16 options (incl. 21:9, 5:2, auto) | Prompt-driven |
+| Transparent BG | No | Yes (png or webp only; preview on gpt-image-2) | No | Model-dependent |
+| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | Any `WxH` up to 3:1 on gpt-image-2 and the 2.5 models; 3 fixed sizes on older models | 16 options (incl. 21:9, 5:2, auto) | Prompt-driven |
 | Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts (edit) |
-| Quality tiers | N/A | auto / low / medium / high | low / medium / auto (2.0 only) | Model-dependent |
+| Quality tiers | N/A | auto / low / medium / high, plus xhigh / max on the 2.5 and 2.6 models | low / medium / auto (2.0 only) | Model-dependent |
 | Thinking mode | Yes (`--thinking-level`) | No | No | Model-dependent |
 | Search grounding | Yes (Google Search) | No | No | Model-dependent |
 | Pricing | Token-based | Token-based | Flat per-image | Per OpenRouter model |
@@ -518,6 +526,7 @@ Delete the verdict directory to try the default again before the verdict expires
 | xAI script | `scripts/xai.sh` | xAI API call execution |
 | OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
 | Retry helper | `scripts/retry.sh` | `curl_with_retry` for transient API failures |
+| Model fallback | `scripts/model-fallback.sh` | Sends the request once more with the provider's fallback model when the default is unavailable to the key, and remembers that verdict per key |
 | Input image check | `scripts/input-images.sh` | Copies each `--input-image` into a private temp folder, reads the copy's type from its bytes and refuses anything that is not a PNG, JPEG, WebP or GIF file |
 | Output image save | `scripts/output-image.sh` | Refuses an `--output` that already exists, decodes the image into a temp file beside it and hard-links that to the output's name, so it never replaces or follows anything at the path |
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |

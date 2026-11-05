@@ -22,17 +22,21 @@ Options:
   --prompt            Text prompt describing the image (required)
   --output            Output file path (required)
   --input-image       Input image path for edit mode (required for edit, repeatable)
-  --size              Image size: auto, 1024x1024, 1536x1024, 1024x1536 (default: 1024x1024)
-  --quality           Quality: auto, low, medium, high (default: high)
+  --size              Image size: auto, 1024x1024, 1536x1024, 1024x1536 (default: 1024x1024);
+                      gpt-image-2, gpt-image-2.5-* and gpt-image-2.6-sunburst also take a
+                      custom WxH with edges multiples of 16
+  --quality           Quality: auto, low, medium, high (default: high); xhigh and max on
+                      gpt-image-2.5 and 2.6 models
   --background        Background: auto, transparent, opaque (default: auto)
   --output-format     Format: png, jpeg, webp (default: png; jpeg is faster)
   --output-compression  Compression 0-100 (for jpeg/webp only)
   --moderation        Moderation: auto, low (default: auto)
   --input-fidelity    Edit mode only: low, high (default: low); refused with gpt-image-2 and
                       gpt-image-2.6-sunburst. 'high' preserves faces/logos/textures on the first
-                      5 images on gpt-image-1.5, the first image only on gpt-image-1 and mini
+                      5 images on gpt-image-1.5, the first image only on gpt-image-1-mini
   --model             OpenAI model (default: gpt-image-2.6-sunburst)
-                      Alternatives: gpt-image-2, gpt-image-1.5, gpt-image-1-mini (3-4x cheaper), gpt-image-1
+                      Alternatives: gpt-image-2.6-flare (faster), gpt-image-2.5-sunburst,
+                      gpt-image-2, gpt-image-1.5, gpt-image-1-mini (3-4x cheaper)
 
 Environment:
   OPENAI_API_KEY      OpenAI API key (required)
