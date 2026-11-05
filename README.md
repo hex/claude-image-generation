@@ -131,6 +131,39 @@ Browse the full list at [openrouter.ai/models](https://openrouter.ai/models?fmt=
 
 Without the generate tool (see Generate Tool under Usage), the command prompts you to select a provider (Gemini, OpenAI, xAI, OpenRouter, or all in parallel) and an output path.
 
+### Provider Status
+
+```
+/claude-image-generation:status
+```
+
+Shows one row per provider: whether the environment holds its API key, whether the provider accepts the key, and whether the model the plugin would use is in the provider's live model list:
+
+```
+provider    key                           model listed  model
+gemini      accepted                      yes           gemini-3.1-flash-image (GEMINI_IMAGE_MODEL)
+openai      rejected (HTTP 401)           not checked   gpt-image-2
+xai         accepted                      yes           grok-imagine-image-2.0
+openrouter  not set (OPENROUTER_API_KEY)  not checked   google/gemini-3.1-flash-image
+```
+
+Claude Code has a `/status` command of its own, so type the full name. The command runs `scripts/check-status.sh`, which you can also run yourself with `bash scripts/check-status.sh`. It sends GET requests only, which bill nothing, and passes each key to curl on stdin, never in its arguments.
+
+| Column | Values |
+|--------|--------|
+| `key` | `not set (<variable>)`, `accepted`, `rejected (HTTP <code>)`, `no answer (curl exit <code>)`, `unexpected HTTP <code>` |
+| `model listed` | `yes`, `no`, `not checked` (no accepted key), `unknown (list has more pages)`, `unreadable model list`, `no answer (curl exit <code>)`, `unexpected HTTP <code>` |
+| `model` | The provider script's default model, or the `*_IMAGE_MODEL` override followed by the variable's name |
+
+What the script asks each provider:
+
+- **Gemini**: `GET /v1beta/models?pageSize=1000`. Gemini answers a bad key with HTTP 400, and other faults too, so a 400 counts as a rejected key only when `error.details[].reason` is `API_KEY_INVALID`.
+- **OpenAI**: `GET /v1/models`.
+- **xAI**: `GET /v1/image-generation-models`. The model may match an id or one of its aliases. xAI also answers a bad key with HTTP 400, which counts as rejected only when the error text names the API key.
+- **OpenRouter**: `GET /api/v1/key` proves the key, since the model list answers without one, then `GET /api/v1/models`. The model has to list `image` among its output modalities.
+
+The script reads each default model and its override variable from the provider script's own `MODEL="${VAR:-default}"` line, so the two can't disagree. When that line is missing, or jq is not installed, it stops with an error and exits 1; otherwise it exits 0, whatever the rows say.
+
 ### Agent (Automatic)
 
 The `image-generator` agent triggers automatically when conversation context involves image creation. It handles provider selection, parallel generation, and result delivery without requiring the slash command.
@@ -450,6 +483,8 @@ When a provider run through `run-all.sh` fails outright, its error shows under a
 | Plugin manifest | `.claude-plugin/plugin.json` | Plugin metadata, version and the /config rows (defaultProviders, outputDir) |
 | Skill | `skills/image-generation/SKILL.md` | API knowledge, prompting tips, script reference |
 | Command | `commands/generate-image.md` | `/generate-image` slash command |
+| Status command | `commands/status.md` | `/claude-image-generation:status` slash command |
+| Status script | `scripts/check-status.sh` | Per provider: key set, key accepted, model in the live model list |
 | Agent | `agents/image-generator.md` | Autonomous image generation |
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
