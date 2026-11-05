@@ -125,7 +125,7 @@ use_remembered_fallback() {
 # RESPONSE. When the answer says MODEL is unavailable and FALLBACK_MODEL is set, MODEL becomes the
 # fallback and the request goes once more. The verdict is remembered only when the fallback
 # answers 200: a refusal that covers the whole account fails both models, and must not be pinned
-# on the default for a day.
+# on the default for a whole IMAGE_AVAILABILITY_TTL.
 request_with_model_fallback() {
   local send="$1" preferred="$MODEL" code body
   RESPONSE=$("$send" "$MODEL")
