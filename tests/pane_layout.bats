@@ -188,6 +188,37 @@ STUB
   rm -rf "$mock"
 }
 
+@test "the close prompt's f and p keys open every image a provider completed in a shared pane, each once" {
+  local wd mock
+  make_named_render_watcher
+  printf '#!/bin/bash\n{ printf "%%s|" "$@"; echo; } >> "%s/open.log"\n' "$mock" > "$mock/open"
+  chmod +x "$mock/open"
+  local first="$mock/first.png" second="$mock/second.png" added="$mock/added.png"
+  cp "$OVERSIZED_FIXTURE" "$first"
+  cp "$OVERSIZED_FIXTURE" "$second"
+  cp "$OVERSIZED_FIXTURE" "$added"
+  source "$DISPLAY_SH"
+  # Two batches share the pane and gemini completes in each; the second batch's image is then
+  # reported twice, the way a retry that saves to the same path reports it.
+  DISPLAY_PANE_DIR="$wd" display_pane_status gemini complete 1200 gemini-3-pro-image "$first"
+  DISPLAY_PANE_DIR="$wd" display_pane_status gemini querying "" gemini-3-pro-image
+  DISPLAY_PANE_DIR="$wd" display_pane_status gemini complete 1100 gemini-3-pro-image "$second"
+  DISPLAY_PANE_DIR="$wd" display_pane_status gemini complete 1000 gemini-3-pro-image "$second"
+  DISPLAY_PANE_DIR="$wd" display_pane_add "$added"
+  touch "$wd/.done"
+  printf 'fp' > "$mock/keys"
+
+  HOME="$mock" PATH="$mock:$PATH" timeout 10 bash "$wd/watcher.sh" "$wd" < "$mock/keys" >/dev/null 2>&1
+  local opened
+  opened=$(cat "$mock/open.log" 2>/dev/null || true)
+  [[ "$opened" == "-R|${first}|"$'\n'"-R|${second}|"$'\n'"-R|${added}|"$'\n'"-a|Preview|${first}|${second}|${added}|" ]] || {
+    echo "f and p did not open every completed image once, in arrival order; open calls:"
+    echo "$opened"
+    return 1
+  }
+  rm -rf "$mock"
+}
+
 @test "the waiting line is written once per block while an image is up, never per tick" {
   local mock="${BATS_TMPDIR}/watcher_spinner_$$"
   mkdir -p "$mock/.iterm2"
