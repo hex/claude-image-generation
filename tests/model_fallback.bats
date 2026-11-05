@@ -360,6 +360,27 @@ reset_stub() {
   done
 }
 
+@test "recording a verdict writes a new file of its own, never through a symlink planted beside the verdict" {
+  # The planted link takes the temp name a writer keyed on its own PID would pick.
+  local canary="${BATS_TEST_TMPDIR}/canary" result
+  printf 'canary' > "$canary"
+  result=$("$SYSTEM_BASH" -c 'set -euo pipefail; source "$1"
+    file=$(__model_verdict_file openai gpt-image-2 0123456789abcdef)
+    mkdir -p "$(dirname "$file")"
+    ln -s "$2" "${file}.$$"
+    model_unavailable_remember openai gpt-image-2 0123456789abcdef
+    printf "%s\n" "$file" "${file}.$$"' _ "${PLUGIN_ROOT}/scripts/model-fallback.sh" "$canary")
+  local file planted
+  { IFS= read -r file; IFS= read -r planted; } <<<"$result"
+
+  [[ "$(cat "$canary")" == canary ]] || { echo "wrote through the planted link: $(cat "$canary")"; return 1; }
+  [[ -f "$file" && ! -L "$file" ]] || { echo "the verdict is not a regular file:"; ls -l "$file"; return 1; }
+  [[ "$(jq -r '.provider + " " + .model' "$file")" == "openai gpt-image-2" ]] || {
+    echo "verdict holds: $(cat "$file")"; return 1; }
+  [[ "$(ls -A "$(dirname "$file")")" == "$(basename "$file")"$'\n'"$(basename "$planted")" ]] || {
+    echo "the verdict folder holds:"; ls -lA "$(dirname "$file")"; return 1; }
+}
+
 @test "gemini: a transient error is retried on the default, and only the unavailable answer moves to the fallback" {
   local overloaded="${BATS_TEST_TMPDIR}/gemini-overloaded-503.json"
   printf '{"error":{"code":503,"message":"The model is overloaded.","status":"UNAVAILABLE"}}' > "$overloaded"
