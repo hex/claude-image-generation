@@ -274,8 +274,9 @@ def read_run(run_dir):
             offer_path = run_dir / "retry-offer"
             offer = read_text(offer_path).split("\n")
             retry = [n for n in offer[1:] if n]
-            # The offer stays open the seconds its first line names, from when run-all wrote it.
-            if re.fullmatch(r"[0-9]+", offer[0]):
+            # The offer stays open the seconds its first line names, from when run-all wrote it. A
+            # wait of more than six digits is not one run-all writes, and would overflow a float.
+            if re.fullmatch(r"[0-9]{1,6}", offer[0]):
                 retry_seconds = int(offer[0])
                 retry_ends_ms = int((offer_path.stat().st_mtime + retry_seconds) * 1000)
         except FileNotFoundError:

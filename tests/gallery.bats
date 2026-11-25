@@ -446,6 +446,19 @@ write_run() {
     $'interrupted\tinterrupted\tinterrupted\tinterrupted' ]] || { echo "$SNAPSHOT"; return 1; }
 }
 
+@test "a retry offer whose wait is too long to count still shows, with no countdown" {
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\terror\t\tmodel-a\t\n'
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C ps -o lstart= -p "$HOLDER_PID" > "$dir/active/run-all.$HOLDER_PID"
+  printf '%s\ngemini\n' "$(printf '9%.0s' $(seq 1 400))" > "$dir/retry-offer"
+  start_gallery
+  wait_for_snapshot '.runs[0].status == "live"'
+  [[ "$(jq -c '.runs[0] | [.retry, .retry_seconds, .retry_ends_ms]' <<< "$SNAPSHOT")" == '[["gemini"],null,null]' ]] || {
+    echo "$SNAPSHOT"; return 1; }
+}
+
 @test "a run directory that does not parse is left out with one line in server.log, and the server serves the rest" {
   write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' done
   local runs="$IMAGE_GALLERY_DIR/runs"
