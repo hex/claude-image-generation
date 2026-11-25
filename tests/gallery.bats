@@ -394,6 +394,37 @@ image gallery: skipping run $root/runs/20261125T100100Z-00000000b2: meta.json ho
     cat "$IMAGE_GALLERY_DIR/server.log"; return 1; }
 }
 
+# cpu_seconds <pid> — the CPU time, user and system, a process has used so far, in seconds.
+cpu_seconds() {
+  if [[ -r "/proc/$1/stat" ]]; then
+    awk -v tick="$(getconf CLK_TCK)" '{ printf "%.2f\n", ($14 + $15) / tick }' "/proc/$1/stat"
+  else
+    ps -o time= -p "$1" | awk -F: '{ printf "%.2f\n", $1 * 60 + $2 }'
+  fi
+}
+
+@test "a server holding 200 finished runs stays under a quarter CPU-second in five idle seconds" {
+  local i id dir
+  for i in $(seq 1 200); do
+    id=$(printf '20261125T%06dZ-%010x' "$i" "$i")
+    dir="$IMAGE_GALLERY_DIR/runs/$id"
+    mkdir -p "$dir/active" "$dir/errors"
+    printf '{"prompt": "a kettle", "cwd": "/work/alpha", "started_at": "2026-11-25T10:00:00Z", "providers": ["gemini", "openai"]}' > "$dir/meta.json"
+    printf 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\nopenai\terror\t\tmodel-b\t\n' > "$dir/status"
+    printf 'refused' > "$dir/errors/openai.txt"
+    touch "$dir/.done"
+  done
+  start_gallery
+  wait_for_snapshot '.runs | length == 200'
+  local pid before after
+  pid=$(server_field pid)
+  before=$(cpu_seconds "$pid")
+  sleep 5
+  after=$(cpu_seconds "$pid")
+  awk -v a="$before" -v b="$after" 'BEGIN { exit !(b - a < 0.25) }' || {
+    echo "the server used $before s before and $after s after five idle seconds"; return 1; }
+}
+
 @test "each run in the snapshot names its session by the last folder of its working directory" {
   write_run 20261125T100000Z-00000000a1 /work/projects/alpha 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' done
   write_run 20261125T100100Z-00000000b2 /work/beta 'gemini\tcomplete\t1000\tmodel-a\t/tmp/b.png\n' done

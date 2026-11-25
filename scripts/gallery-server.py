@@ -162,7 +162,7 @@ def run_is_held(run_dir):
     """True while any process holding a token on the run is still alive."""
     try:
         tokens = os.listdir(str(run_dir / "active"))
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
         return False
     for token in tokens:
         pid = token.rsplit(".", 1)[-1]
@@ -274,6 +274,23 @@ def read_run(run_dir):
     }
 
 
+# The files of a run whose change can change what the page shows of it.
+RUN_FILES = ("", "meta.json", "status", "errors", "active", ".done", "retry-offer")
+
+
+def run_files_state(run_dir):
+    """What identifies the current contents of a run's files: unchanged until one of them is."""
+    state = []
+    base = str(run_dir)
+    for name in RUN_FILES:
+        try:
+            st = os.stat(os.path.join(base, name))
+            state.append((st.st_ino, st.st_mtime_ns, st.st_size))
+        except OSError:
+            state.append(None)
+    return tuple(state)
+
+
 def add_usual_times(runs):
     """Gives each provider still at work usual_ms: the median time of the last USUAL_SAMPLES frames
     the same provider and model completed, runs being newest first. A provider whose model has
@@ -290,6 +307,8 @@ def add_usual_times(runs):
             times = samples.get((card["name"], card["model"]))
             if card["state"] in IN_FLIGHT and times:
                 card["usual_ms"] = int(statistics.median(times))
+            else:
+                card.pop("usual_ms", None)
 
 
 def image_path(runs_dir, run_id, provider, n):
@@ -340,13 +359,14 @@ class Gallery:
         self.clients = 0
         self.stop = threading.Event()
         self.last_open = 0.0
-        self.rejected = {}
+        self.read_runs = {}
         self.page = {}
         for route, (name, ctype) in PAGE_FILES.items():
             self.page[route] = ((PAGE_DIR / name).read_bytes(), ctype)
 
     def scan(self):
-        """Reads every run, newest first, prunes beyond KEEP_RUNS and publishes a change."""
+        """Reads every run whose files changed or whose holder went away, newest first, prunes
+        beyond KEEP_RUNS and publishes a change."""
         names = []
         now = time.time()
         for entry in os.scandir(str(self.runs_dir)):
@@ -364,18 +384,14 @@ class Gallery:
         runs = []
         for index, name in enumerate(names):
             run_dir = self.runs_dir / name
-            try:
-                if index >= KEEP_RUNS and not run_is_held(run_dir):
-                    shutil.rmtree(str(run_dir), ignore_errors=True)
-                    continue
-                runs.append(read_run(run_dir))
-                self.rejected.pop(name, None)
-            except RunRejected as e:
-                self.reject(run_dir, str(e))
-            except OSError as e:
-                self.reject(run_dir, "%s: %s" % (os.path.basename(e.filename or name), e.strerror))
-        for name in set(self.rejected) - set(names):
-            del self.rejected[name]
+            if index >= KEEP_RUNS and not run_is_held(run_dir):
+                shutil.rmtree(str(run_dir), ignore_errors=True)
+                continue
+            run = self.run(run_dir)
+            if run is not None:
+                runs.append(run)
+        for name in set(self.read_runs) - set(names):
+            del self.read_runs[name]
         add_usual_times(runs)
         snapshot = json.dumps({"instance": self.instance, "runs": runs})
         if snapshot != self.snapshot:
@@ -384,11 +400,30 @@ class Gallery:
                 self.changed.notify_all()
         return any(run["status"] == "live" for run in runs)
 
+    def run(self, run_dir):
+        """The page's view of a run, or None for a rejected one. A run is read again only once one
+        of its files changed, or, while it is live, once no process holds it any more."""
+        files = run_files_state(run_dir)
+        known = self.read_runs.get(run_dir.name)
+        if known is not None and known[0] == files:
+            run = known[1]
+            if run is None or run["status"] != "live" or run_is_held(run_dir):
+                return run
+        self.read_runs[run_dir.name] = (files, None)
+        try:
+            run = read_run(run_dir)
+        except RunRejected as e:
+            self.reject(run_dir, str(e))
+            return None
+        except OSError as e:
+            self.reject(run_dir, "%s: %s" % (os.path.basename(e.filename or run_dir.name), e.strerror))
+            return None
+        self.read_runs[run_dir.name] = (files, run)
+        return run
+
     def reject(self, run_dir, reason):
-        """Leaves a run directory out of the snapshot, naming it in server.log once per reason."""
-        if self.rejected.get(run_dir.name) != reason:
-            self.rejected[run_dir.name] = reason
-            print("image gallery: skipping run %s: %s" % (run_dir, reason), file=sys.stderr, flush=True)
+        """Leaves a run directory out of the snapshot, naming it in server.log."""
+        print("image gallery: skipping run %s: %s" % (run_dir, reason), file=sys.stderr, flush=True)
 
     def open_page(self):
         """Opens the page in the browser at most once per OPEN_INTERVAL_SECONDS. True when a
