@@ -25,6 +25,7 @@ import select
 import shutil
 import socket
 import socketserver
+import statistics
 import subprocess
 import sys
 import threading
@@ -43,6 +44,8 @@ OPEN_INTERVAL_SECONDS = 10
 START_WAIT_SECONDS = 5
 LOCK_WAIT_SECONDS = 5
 ERROR_TEXT_LIMIT = 8192
+USUAL_SAMPLES = 5
+IN_FLIGHT = ("waiting", "querying", "retrying")
 COOKIE = "gallery_token"
 RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{10}$")
 PROVIDER = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -229,12 +232,31 @@ def read_run(run_dir):
         "id": run_dir.name,
         "prompt": meta.get("prompt", ""),
         "cwd": meta.get("cwd", ""),
+        "session": os.path.basename(meta.get("cwd", "")),
         "started_at": meta.get("started_at", ""),
         "status": status,
         "retry": retry,
         "problem": problem,
         "providers": cards,
     }
+
+
+def add_usual_times(runs):
+    """Gives each provider still at work usual_ms: the median time of the last USUAL_SAMPLES frames
+    the same provider and model completed, runs being newest first. A provider whose model has
+    never completed a frame gets none."""
+    samples = {}
+    for run in runs:
+        for card in run["providers"]:
+            if card["state"] == "complete" and card["model"] and re.fullmatch(r"[0-9]+", card["ms"]):
+                times = samples.setdefault((card["name"], card["model"]), [])
+                if len(times) < USUAL_SAMPLES:
+                    times.append(int(card["ms"]))
+    for run in runs:
+        for card in run["providers"]:
+            times = samples.get((card["name"], card["model"]))
+            if card["state"] in IN_FLIGHT and times:
+                card["usual_ms"] = int(statistics.median(times))
 
 
 def image_path(runs_dir, run_id, provider, n):
@@ -310,6 +332,7 @@ class Gallery:
             run = read_run(run_dir)
             if run is not None:
                 runs.append(run)
+        add_usual_times(runs)
         snapshot = json.dumps({"instance": self.instance, "runs": runs})
         if snapshot != self.snapshot:
             with self.changed:

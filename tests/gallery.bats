@@ -28,6 +28,7 @@ setup() {
 
 teardown() {
   [[ -n "${EVENTS_PID:-}" ]] && kill "$EVENTS_PID" 2>/dev/null
+  [[ -n "${HOLDER_PID:-}" ]] && kill "$HOLDER_PID" 2>/dev/null
   stop_gallery
   cleanup_tmpdir
 }
@@ -350,4 +351,46 @@ run_all_gemini() {
     _ "$DISPLAY_SH" "${OUT_BASE}-gemini.png"
   assert_status 0
   [[ ! -s "$MOCK_DIR/tty" ]] || { echo "drew $(wc -c < "$MOCK_DIR/tty") bytes on the terminal"; return 1; }
+}
+
+# write_run <run-id> <cwd> <status lines> [done] — writes a run directory by hand the way display.sh
+# lays one out, the providers read from the status lines; "done" marks it finished.
+write_run() {
+  local dir="$IMAGE_GALLERY_DIR/runs/$1" providers
+  mkdir -p "$dir/active"
+  printf '%b' "$3" > "$dir/status"
+  providers=$(cut -f1 "$dir/status" | sort -u | jq -R . | jq -sc .)
+  jq -n --arg cwd "$2" --argjson providers "$providers" \
+    '{prompt: "a kettle", cwd: $cwd, started_at: "2026-11-25T10:00:00Z", providers: $providers}' > "$dir/meta.json"
+  [[ "${4:-}" == done ]] && touch "$dir/.done"
+  return 0
+}
+
+@test "each run in the snapshot names its session by the last folder of its working directory" {
+  write_run 20261125T100000Z-00000000a1 /work/projects/alpha 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' done
+  write_run 20261125T100100Z-00000000b2 /work/beta 'gemini\tcomplete\t1000\tmodel-a\t/tmp/b.png\n' done
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  [[ "$(jq -r '[.runs[].session] | @tsv' <<< "$SNAPSHOT")" == $'beta\talpha' ]] || { echo "$SNAPSHOT"; return 1; }
+}
+
+@test "a provider at work carries usual_ms, the median time of the last five frames its model completed" {
+  # Oldest first: the 100000 ms frame is sixth newest, so it falls outside the five that count.
+  local ms n=0
+  for ms in 100000 1000 3000 2000 4000 5000; do
+    n=$((n + 1))
+    write_run "20261125T10000${n}Z-000000000${n}" /work/alpha "gemini\tcomplete\t${ms}\tmodel-a\t/tmp/${n}.png\nopenai\tcomplete\t9000\tmodel-b\t/tmp/o${n}.png\n" done
+  done
+  write_run 20261125T110000Z-00000000ff /work/alpha 'gemini\tquerying\t\tmodel-a\t\nopenai\tquerying\t\tmodel-c\t\nxai\tretrying\t2/3\tmodel-a\t\n'
+  sleep 60 &
+  HOLDER_PID=$!
+  touch "$IMAGE_GALLERY_DIR/runs/20261125T110000Z-00000000ff/active/test.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs[0].status == "live"'
+  # gemini on model-a: median of 1000 3000 2000 4000 5000. openai has no history on model-c, and
+  # xai none at all, so theirs is absent; a finished frame carries none.
+  [[ "$(jq -c '.runs[0].providers | map({(.name): .usual_ms}) | add' <<< "$SNAPSHOT")" == \
+    '{"gemini":3000,"openai":null,"xai":null}' ]] || { echo "$SNAPSHOT"; return 1; }
+  [[ "$(jq -c '[.runs[0].providers[] | has("usual_ms")]' <<< "$SNAPSHOT")" == '[true,false,false]' ]]
+  [[ "$(jq -c '[.runs[1:][].providers[] | has("usual_ms")] | unique' <<< "$SNAPSHOT")" == '[false]' ]]
 }
