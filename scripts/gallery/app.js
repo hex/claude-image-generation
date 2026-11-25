@@ -89,7 +89,7 @@ function updatedAgo(ms) {
 }
 
 function imageUrl(run, card) {
-  return '/img/' + [run.id, card.name, String(card.image.n)].map(encodeURIComponent).join('/');
+  return 'img/' + [run.id, card.name, String(card.image.n)].map(encodeURIComponent).join('/');
 }
 
 async function post(url, button, note) {
@@ -110,7 +110,7 @@ async function post(url, button, note) {
 
 function revealButton(urlOf, note) {
   const button = el('button', { type: 'button', class: 'act', 'aria-label': REVEAL_LABEL, 'data-key': 'reveal' }, icon('folder-open'));
-  button.addEventListener('click', () => post(urlOf().replace('/img/', '/reveal/'), button, note));
+  button.addEventListener('click', () => post(urlOf().replace(/^img\//, 'reveal/'), button, note));
   return button;
 }
 
@@ -258,7 +258,7 @@ function headNode(run) {
     const note = el('span', { class: 'note', 'aria-live': 'polite' });
     const button = el('button', { type: 'button', class: 'retry', 'data-key': 'retry', 'aria-label': 'Retry failed: ' + run.retry.join(', ') },
       icon('arrow-clockwise'), el('span', { text: 'Retry failed' }), drain(run));
-    button.addEventListener('click', () => post('/retry/' + encodeURIComponent(run.id), button, note));
+    button.addEventListener('click', () => post('retry/' + encodeURIComponent(run.id), button, note));
     head.append(el('div', { class: 'offer' }, button, note));
   }
   if (run.problem) head.append(el('p', { class: 'problem', text: run.problem }));
@@ -578,7 +578,7 @@ setInterval(() => {
 }, 30000);
 
 function connect() {
-  const source = new EventSource('/events');
+  const source = new EventSource('events');
   source.onopen = () => { connection.textContent = ''; };
   source.onmessage = event => render(JSON.parse(event.data));
   source.onerror = () => {

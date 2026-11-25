@@ -41,13 +41,13 @@ PING_SECONDS = 15
 KEEP_RUNS = 200
 STALE_STAGING_SECONDS = 3600
 OPEN_INTERVAL_SECONDS = 10
+LAUNCH_SECONDS = 60
 START_WAIT_SECONDS = 5
 LOCK_WAIT_SECONDS = 5
 ERROR_TEXT_LIMIT = 8192
 USUAL_SAMPLES = 5
 HOLDER_CHECK_SECONDS = 10
 IN_FLIGHT = ("waiting", "querying", "retrying")
-COOKIE = "gallery_token"
 RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{10}$")
 PROVIDER = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 PAGE_FILES = {
@@ -395,12 +395,12 @@ class Gallery:
         self.port = port
         self.instance = secrets.token_hex(8)
         self.origin = "http://127.0.0.1:%d" % port
-        self.url = "%s/?t=%s" % (self.origin, token)
         self.changed = threading.Condition()
         self.snapshot = json.dumps({"instance": self.instance, "runs": []})
         self.clients = 0
         self.stop = threading.Event()
         self.last_open = 0.0
+        self.launch_codes = {}
         self.read_runs = {}
         self.page = {}
         for route, (name, ctype) in PAGE_FILES.items():
@@ -467,15 +467,27 @@ class Gallery:
         """Leaves a run directory out of the snapshot, naming it in server.log."""
         print("image gallery: skipping run %s: %s" % (run_dir, reason), file=sys.stderr, flush=True)
 
+    def launch_url(self):
+        """A one-time address that sends a browser on to the page. The browser is opened with this
+        instead of the page's own address, which carries the token, because a command's arguments
+        are visible to every user of the machine; the code is spent by the time anyone reads it."""
+        now = time.time()
+        for code, expires in list(self.launch_codes.items()):
+            if expires < now:
+                self.launch_codes.pop(code, None)
+        code = secrets.token_urlsafe(16)
+        self.launch_codes[code] = now + LAUNCH_SECONDS
+        return "%s/launch/%s" % (self.origin, code)
+
     def open_page(self):
         """Opens the page in the browser at most once per OPEN_INTERVAL_SECONDS. True when a
         browser was opened now or a moment ago."""
         if time.time() - self.last_open < OPEN_INTERVAL_SECONDS:
             return True
         if sys.platform == "darwin":
-            command = ["open", "-g", self.url]
+            command = ["open", "-g", self.launch_url()]
         elif shutil.which("xdg-open") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-            command = ["xdg-open", self.url]
+            command = ["xdg-open", self.launch_url()]
         else:
             return False
         try:
@@ -515,41 +527,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header(k, v)
         super().end_headers()
 
-    def token_given(self):
-        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-        if query.get("t"):
-            return query["t"][0]
-        for part in self.headers.get("Cookie", "").split(";"):
-            name, _, value = part.strip().partition("=")
-            if name == COOKIE:
-                return value
-        return ""
-
-    def allowed(self, post):
-        """Answers 403 and returns False unless the request is for this server, from this user."""
+    def host_allowed(self):
+        """Answers 403 and returns False unless the request is addressed to this server."""
         if self.headers.get("Host") != "127.0.0.1:%d" % self.gallery.port:
             self.send_json(403, {"error": "wrong Host header; open the page at %s" % self.gallery.origin})
             return False
-        if not hmac.compare_digest(self.token_given().encode(), self.gallery.token.encode()):
-            self.send_json(403, {"error": "missing or wrong token; open the address the image tool printed"})
-            return False
-        if post and self.headers.get("Origin") != self.gallery.origin:
-            self.send_json(403, {"error": "wrong Origin header"})
-            return False
         return True
 
+    def route(self, post):
+        """The path below /<token>/, or None after a 403 when the request does not come from this
+        user's page: the path must start with the token, and a POST must carry the page's Origin."""
+        given, slash, rest = urllib.parse.urlsplit(self.path).path[1:].partition("/")
+        if not slash or not hmac.compare_digest(given.encode(), self.gallery.token.encode()):
+            self.send_json(403, {"error": "missing or wrong token; open the address the image tool printed"})
+            return None
+        if post and self.headers.get("Origin") != self.gallery.origin:
+            self.send_json(403, {"error": "wrong Origin header"})
+            return None
+        return "/" + rest
+
     def do_GET(self):
-        if not self.allowed(post=False):
+        if not self.host_allowed():
             return
-        parts = urllib.parse.urlsplit(self.path)
-        route = parts.path
-        if route == "/" and "t" in urllib.parse.parse_qs(parts.query):
-            self.send_response(303)
-            self.send_header("Location", "/")
-            self.send_header("Set-Cookie", "%s=%s; Path=/; HttpOnly; SameSite=Strict" % (COOKIE, self.gallery.token))
-            self.send_header("Content-Length", "0")
+        path = urllib.parse.urlsplit(self.path).path
+        if path == "/favicon.ico":
+            self.send_response(204)
             self.end_headers()
-        elif route in self.gallery.page:
+            return
+        if path.startswith("/launch/"):
+            self.launch(path[len("/launch/"):])
+            return
+        route = self.route(post=False)
+        if route is None:
+            return
+        if route in self.gallery.page:
             body, ctype = self.gallery.page[route]
             self.send_response(200)
             self.send_header("Content-Type", ctype)
@@ -557,9 +568,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
-        elif route == "/favicon.ico":
-            self.send_response(204)
-            self.end_headers()
         elif route == "/health":
             self.send_json(200, {"instance": self.gallery.instance, "version": self.gallery.version,
                                  "clients": self.gallery.clients})
@@ -574,9 +582,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length:
             self.rfile.read(length)
-        if not self.allowed(post=True):
+        if not self.host_allowed():
             return
-        route = urllib.parse.urlsplit(self.path).path
+        route = self.route(post=True)
+        if route is None:
+            return
         segments = route.strip("/").split("/")
         if segments[0] == "reveal" and len(segments) == 4:
             self.reveal(segments[1:])
@@ -589,6 +599,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.gallery.stop.set()
         else:
             self.send_json(404, {"error": "no such action: %s" % route})
+
+    def launch(self, code):
+        """Sends a browser opened at a one-time address on to the page, once."""
+        expires = self.gallery.launch_codes.pop(code, None)
+        if expires is None or expires < time.time():
+            self.send_json(403, {"error": "this address opens the page once, within a minute; "
+                                          "the next image run opens a fresh one"})
+            return
+        self.send_response(303)
+        self.send_header("Location", "/%s/" % self.gallery.token)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
 
     def events(self):
         self.send_response(200)
@@ -811,10 +834,10 @@ def request(info, method, path, timeout=2):
     """Sends one request to the server server.json describes; returns (status, parsed JSON)."""
     conn = http.client.HTTPConnection("127.0.0.1", info["port"], timeout=timeout)
     try:
-        headers = {"Cookie": "%s=%s" % (COOKIE, info["token"])}
+        headers = {}
         if method == "POST":
             headers["Origin"] = "http://127.0.0.1:%d" % info["port"]
-        conn.request(method, path, headers=headers)
+        conn.request(method, "/%s%s" % (info["token"], path), headers=headers)
         response = conn.getresponse()
         return response.status, json.loads(response.read() or b"null")
     finally:
@@ -877,7 +900,7 @@ def ensure(root):
             return 1
     pages = health["clients"] + (old_pages if info["port"] == old_port else 0)
     if pages == 0 and os.environ.get("IMAGE_GALLERY_NO_OPEN") != "1":
-        url = "http://127.0.0.1:%d/?t=%s" % (info["port"], info["token"])
+        url = "http://127.0.0.1:%d/%s/" % (info["port"], info["token"])
         opened = False
         if not in_ssh_session():
             status, answer = request(info, "POST", "/open", timeout=15)

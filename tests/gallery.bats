@@ -47,11 +47,10 @@ stop_gallery() {
 
 server_field() { jq -r ".$1" "$IMAGE_GALLERY_DIR/server.json" 2>/dev/null; }
 
-# gallery_curl [curl args...] <path> — curl at the running server with the page's cookie.
+# gallery_curl [curl args...] <path> — curl at the running server, the path under the page's token.
 gallery_curl() {
   local path="${*: -1}"
-  curl -s --max-time 5 -H "Cookie: gallery_token=$(server_field token)" "${@:1:$#-1}" \
-    "http://127.0.0.1:$(server_field port)${path}"
+  curl -s --max-time 5 "${@:1:$#-1}" "http://127.0.0.1:$(server_field port)/$(server_field token)${path}"
 }
 
 origin() { printf 'Origin: http://127.0.0.1:%s' "$(server_field port)"; }
@@ -120,8 +119,7 @@ STUB
 # in EVENTS_PID, and waits until the server counts it.
 connect_page() {
   local i
-  curl -s -N --max-time 60 -H "Cookie: gallery_token=$(server_field token)" \
-    "http://127.0.0.1:$(server_field port)/events" > /dev/null &
+  curl -s -N --max-time 60 "http://127.0.0.1:$(server_field port)/$(server_field token)/events" > /dev/null &
   EVENTS_PID=$!
   for i in $(seq 1 50); do
     [[ "$(gallery_curl /health | jq -r .clients)" == 1 ]] && return 0
@@ -168,7 +166,7 @@ run_all_gemini() {
   [[ ! -e "$(ls -d "$IMAGE_GALLERY_DIR"/runs/*)/logs" ]]
 }
 
-@test "the server answers 403 to a wrong Host, a missing token and a POST from another Origin" {
+@test "the server answers 403 to a wrong Host, a missing or wrong token, a token in a cookie and a POST from another Origin" {
   start_gallery
   local port url
   port=$(server_field port)
@@ -177,21 +175,23 @@ run_all_gemini() {
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -H "Host: 127.0.0.1" /health)" == 403 ]]
   [[ "$(curl -s -o /dev/null -w '%{http_code}' "${url}/health")" == 403 ]]
   [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "${url}/events")" == 403 ]]
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: gallery_token=wrong" "${url}/health")" == 403 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "${url}/wrong/health")" == 403 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: gallery_token=$(server_field token)" "${url}/health")" == 403 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://localhost:${port}" /open)" == 403 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST /open)" == 403 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' /health)" == 200 ]]
 }
 
-@test "the token in the address sets the page's cookie and sends it to the page" {
+@test "the page and its files are served under the token's path, and the server sets no cookie" {
   start_gallery
-  local headers
-  headers=$(curl -s -D - -o /dev/null "http://127.0.0.1:$(server_field port)/?t=$(server_field token)" | tr -d '\r')
-  [[ "$headers" == *$'\nLocation: /\n'* ]] || { echo "$headers"; return 1; }
-  [[ "$headers" == *$'\nSet-Cookie: gallery_token='"$(server_field token)"$'; Path=/; HttpOnly; SameSite=Strict\n'* ]] || {
-    echo "$headers"; return 1; }
+  local base headers
+  base="http://127.0.0.1:$(server_field port)/$(server_field token)"
+  headers=$(curl -s -D - -o /dev/null -w '%{http_code} %{content_type}' "${base}/" | tr -d '\r')
+  [[ "$headers" == *$'\n\n200 text/html; charset=utf-8' && "$headers" != *Set-Cookie* ]] || { echo "$headers"; return 1; }
   [[ "$headers" == *$'\nContent-Security-Policy: default-src \'self\'; frame-ancestors \'none\'; base-uri \'none\'; form-action \'none\'\n'* ]] || {
     echo "$headers"; return 1; }
+  [[ "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "${base}/app.js")" == "200 text/javascript; charset=utf-8" ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "${base}/app.css")" == "200 text/css; charset=utf-8" ]]
 }
 
 @test "an image, reveal or retry of a run or provider the gallery does not have is a 404" {
@@ -297,6 +297,28 @@ serve_other_version() {
   start_gallery
   # The page reconnects to the server that replaced it on the same port, so no second tab opens.
   [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
+}
+
+@test "the browser is opened at a one-time address without the token, which sends it on to the page once" {
+  stub_browser
+  start_gallery
+  local opened url location
+  opened=$(cat "$MOCK_DIR/opened")
+  [[ "$opened" != *"$(server_field token)"* ]] || { echo "opened with: $opened"; return 1; }
+  url=${opened##* }
+  location=$(curl -s -D - -o /dev/null "$url" | tr -d '\r' | sed -n 's/^Location: //p')
+  [[ "$location" == "/$(server_field token)/" ]] || { echo "$url sent the browser to: $location"; return 1; }
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "$url")" == 403 ]]
+}
+
+@test "over SSH the run prints the page's address, token included, instead of opening a browser" {
+  stub_browser
+  export SSH_CONNECTION="198.51.100.7 50000 192.0.2.1 22"
+  run start_gallery
+  assert_status 0
+  [[ "$output" == "image gallery: open http://127.0.0.1:$(server_field port)/$(server_field token)/ to watch the images" ]] || {
+    echo "output: $output"; return 1; }
+  [[ ! -e "$MOCK_DIR/opened" ]]
 }
 
 @test "the Retry button's POST /retry runs the failed provider again" {
