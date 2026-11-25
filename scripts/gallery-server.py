@@ -176,16 +176,31 @@ def read_text(path, limit=None):
         return f.read() if limit is None else f.read(limit)
 
 
-def read_run(run_dir):
-    """The page's view of one run, or None when the run is not readable yet."""
+class RunRejected(Exception):
+    """A run directory that cannot be read as a run; the message says why."""
+
+
+def read_meta(run_dir):
+    """meta.json parsed into the fields display.sh writes, or RunRejected naming the field."""
     try:
         meta = json.loads(read_text(run_dir / "meta.json"))
-    except (FileNotFoundError, ValueError):
-        return None
-    providers = {}
-    for name in meta.get("providers", []):
-        if isinstance(name, str):
-            providers[name] = new_provider(name)
+    except ValueError as e:
+        raise RunRejected("meta.json is not JSON: %s" % e)
+    if not isinstance(meta, dict):
+        raise RunRejected("meta.json holds %s, not an object" % json.dumps(meta)[:80])
+    for key in ("prompt", "cwd", "started_at"):
+        if not isinstance(meta.get(key), str):
+            raise RunRejected("meta.json's %s is %s, not a string" % (key, json.dumps(meta.get(key))[:80]))
+    names = meta.get("providers")
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        raise RunRejected("meta.json's providers is %s, not a list of names" % json.dumps(names)[:80])
+    return meta
+
+
+def read_run(run_dir):
+    """The page's view of one run. Raises RunRejected or OSError when the directory is not one."""
+    meta = read_meta(run_dir)
+    providers = {name: new_provider(name) for name in meta["providers"]}
     problem = None
     try:
         reduce_status(read_text(run_dir / "status"), providers)
@@ -207,7 +222,12 @@ def read_run(run_dir):
     updated_ms = None
     if status == "live":
         # When the run last moved: its status log's last record, or its start before the first one.
-        updated_ms = int(max(p.stat().st_mtime for p in (run_dir / "meta.json", run_dir / "status") if p.exists()) * 1000)
+        mtime = (run_dir / "meta.json").stat().st_mtime
+        try:
+            mtime = max(mtime, (run_dir / "status").stat().st_mtime)
+        except FileNotFoundError:
+            pass
+        updated_ms = int(mtime * 1000)
         try:
             offer_path = run_dir / "retry-offer"
             offer = read_text(offer_path).split("\n")
@@ -240,10 +260,10 @@ def read_run(run_dir):
         })
     return {
         "id": run_dir.name,
-        "prompt": meta.get("prompt", ""),
-        "cwd": meta.get("cwd", ""),
-        "session": os.path.basename(meta.get("cwd", "")),
-        "started_at": meta.get("started_at", ""),
+        "prompt": meta["prompt"],
+        "cwd": meta["cwd"],
+        "session": os.path.basename(meta["cwd"]),
+        "started_at": meta["started_at"],
         "status": status,
         "retry": retry,
         "retry_seconds": retry_seconds,
@@ -320,6 +340,7 @@ class Gallery:
         self.clients = 0
         self.stop = threading.Event()
         self.last_open = 0.0
+        self.rejected = {}
         self.page = {}
         for route, (name, ctype) in PAGE_FILES.items():
             self.page[route] = ((PAGE_DIR / name).read_bytes(), ctype)
@@ -333,18 +354,28 @@ class Gallery:
                 names.append(entry.name)
             elif entry.name.startswith(".") and RUN_ID.match(entry.name[1:]):
                 # A run that never finished being assembled: its creator died before the rename.
-                if now - entry.stat().st_mtime > STALE_STAGING_SECONDS:
-                    shutil.rmtree(entry.path, ignore_errors=True)
+                # It can also be renamed into place between the listing and the stat.
+                try:
+                    if now - entry.stat().st_mtime > STALE_STAGING_SECONDS:
+                        shutil.rmtree(entry.path, ignore_errors=True)
+                except FileNotFoundError:
+                    pass
         names.sort(reverse=True)
         runs = []
         for index, name in enumerate(names):
             run_dir = self.runs_dir / name
-            if index >= KEEP_RUNS and not run_is_held(run_dir):
-                shutil.rmtree(str(run_dir), ignore_errors=True)
-                continue
-            run = read_run(run_dir)
-            if run is not None:
-                runs.append(run)
+            try:
+                if index >= KEEP_RUNS and not run_is_held(run_dir):
+                    shutil.rmtree(str(run_dir), ignore_errors=True)
+                    continue
+                runs.append(read_run(run_dir))
+                self.rejected.pop(name, None)
+            except RunRejected as e:
+                self.reject(run_dir, str(e))
+            except OSError as e:
+                self.reject(run_dir, "%s: %s" % (os.path.basename(e.filename or name), e.strerror))
+        for name in set(self.rejected) - set(names):
+            del self.rejected[name]
         add_usual_times(runs)
         snapshot = json.dumps({"instance": self.instance, "runs": runs})
         if snapshot != self.snapshot:
@@ -352,6 +383,12 @@ class Gallery:
                 self.snapshot = snapshot
                 self.changed.notify_all()
         return any(run["status"] == "live" for run in runs)
+
+    def reject(self, run_dir, reason):
+        """Leaves a run directory out of the snapshot, naming it in server.log once per reason."""
+        if self.rejected.get(run_dir.name) != reason:
+            self.rejected[run_dir.name] = reason
+            print("image gallery: skipping run %s: %s" % (run_dir, reason), file=sys.stderr, flush=True)
 
     def open_page(self):
         """Opens the page in the browser at most once per OPEN_INTERVAL_SECONDS. True when a

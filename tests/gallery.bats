@@ -372,6 +372,28 @@ write_run() {
   return 0
 }
 
+@test "a run directory that does not parse is left out with one line in server.log, and the server serves the rest" {
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' done
+  local runs="$IMAGE_GALLERY_DIR/runs"
+  mkdir -p "$runs/20261125T100100Z-00000000b2" "$runs/20261125T100200Z-00000000c3"
+  printf '[]' > "$runs/20261125T100100Z-00000000b2/meta.json"
+  printf '{"prompt": "a kettle", "cwd": 5, "started_at": "", "providers": []}' > "$runs/20261125T100200Z-00000000c3/meta.json"
+  printf 'not a run' > "$runs/20261125T100300Z-00000000d4"
+  # A run still being assembled under its dot name that is gone by the time the server looks.
+  ln -s "$runs/nowhere" "$runs/.20261125T100400Z-00000000e5"
+  start_gallery
+  wait_for_snapshot '.runs | length == 1'
+  [[ "$(jq -r '.runs[0].id' <<< "$SNAPSHOT")" == 20261125T100000Z-00000000a1 ]] || { echo "$SNAPSHOT"; return 1; }
+  # Each rejected run is named once, however many scans have passed.
+  sleep 1
+  local root
+  root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
+  [[ "$(cat "$IMAGE_GALLERY_DIR/server.log")" == "image gallery: skipping run $root/runs/20261125T100300Z-00000000d4: meta.json: Not a directory
+image gallery: skipping run $root/runs/20261125T100200Z-00000000c3: meta.json's cwd is 5, not a string
+image gallery: skipping run $root/runs/20261125T100100Z-00000000b2: meta.json holds [], not an object" ]] || {
+    cat "$IMAGE_GALLERY_DIR/server.log"; return 1; }
+}
+
 @test "each run in the snapshot names its session by the last folder of its working directory" {
   write_run 20261125T100000Z-00000000a1 /work/projects/alpha 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' done
   write_run 20261125T100100Z-00000000b2 /work/beta 'gemini\tcomplete\t1000\tmodel-a\t/tmp/b.png\n' done
