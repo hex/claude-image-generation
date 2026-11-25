@@ -471,7 +471,9 @@ class Gallery:
     def launch_url(self):
         """A one-time address that sends a browser on to the page. The browser is opened with this
         instead of the page's own address, which carries the token, because a command's arguments
-        are visible to every user of the machine; the code is spent by the time anyone reads it."""
+        are visible to every user of the machine. Whoever fetches the code first gets the page: a
+        process that reads it from the arguments and beats the browser to it leaves the browser a
+        403, which the user sees."""
         now = time.time()
         for code, expires in list(self.launch_codes.items()):
             if expires < now:
