@@ -205,7 +205,7 @@ with none open, a failed run returns at once.
 | `IMAGE_MAX_RETRIES` | 3 | Retry attempts for a transient API failure before the script gives up |
 | `IMAGE_RETRY_DELAY` | 1 | Starting retry delay in seconds; doubles on each attempt |
 | `IMAGE_AVAILABILITY_TTL` | 86400 | Seconds a remembered "default model unavailable" verdict holds; 0 tries the default every run |
-| `DISPLAY_PANE_RETRY_WAIT` | 45 | Seconds the retry offer (the pane's, or the gallery's Retry button) stays open after a run-all.sh failure; 0 disables the offer |
+| `DISPLAY_PANE_RETRY_WAIT` | 45 | Seconds the retry offer (the pane's, or the gallery's Retry failed button) stays open after a run-all.sh failure; 0 disables the offer |
 | `IMAGE_DISPLAY` | gallery | Where images show: `gallery` (browser page), `pane` (tmux pane, or inline outside tmux), `none` |
 
 ## Script Options Reference
