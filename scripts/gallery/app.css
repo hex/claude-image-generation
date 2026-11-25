@@ -4,8 +4,11 @@
 :root {
   color-scheme: light dark;
   --bg: #f2f2f7; --fg: #1c1c1e; --dim: #6c6c70; --rule: #e5e5ea;
-  /* A frame still waiting for its image; a picture that arrived sits on the canvas itself. */
+  /* The skip link's surface, raised above the page when it takes focus. */
   --card: #ffffff;
+  /* An empty slot on the sheet, a frame still waiting for its image: a shade below the canvas,
+     so it recedes behind the pictures instead of glowing brighter than them. */
+  --slot: color-mix(in srgb, var(--fg) 4%, var(--bg));
   /* --hot: live, and the one accent. --alert: a failed frame. --warn: a retry under way. */
   --hot: #2a6fd6; --warn: #a8420a; --alert: #c2410c;
   /* A row tint for anything list-shaped, a control tint for buttons. */
@@ -26,6 +29,7 @@
   :root {
     --bg: #1c1c1e; --fg: #f2f2f7; --dim: #98989d; --rule: #3a3a3c;
     --card: #2c2c2e;
+    --slot: color-mix(in srgb, var(--fg) 4%, var(--bg));
     --hot: #81a2be; --warn: #de935f; --alert: #fb8b5e;
     --card-edge: 0 0 0 1px var(--rule);
   }
@@ -266,8 +270,8 @@ body {
   position: relative;
   aspect-ratio: 1;
   border-radius: 3px;
-  background: var(--card);
-  box-shadow: var(--card-edge);
+  background: var(--slot);
+  box-shadow: inset 0 0 0 var(--hair) var(--rule);
   overflow: hidden;
 }
 .frame[data-state="complete"]:not(.missing) .plate { background: transparent; box-shadow: none; }
