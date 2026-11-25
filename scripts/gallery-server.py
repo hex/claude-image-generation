@@ -45,6 +45,7 @@ START_WAIT_SECONDS = 5
 LOCK_WAIT_SECONDS = 5
 ERROR_TEXT_LIMIT = 8192
 USUAL_SAMPLES = 5
+HOLDER_CHECK_SECONDS = 10
 IN_FLIGHT = ("waiting", "querying", "retrying")
 COOKIE = "gallery_token"
 RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{10}$")
@@ -149,24 +150,65 @@ def reduce_status(text, providers):
 
 
 def pid_alive(pid):
+    """True while a process of this user runs as pid. Another user's process there is not ours."""
     try:
         os.kill(pid, 0)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return False
-    except PermissionError:
-        return True
     return True
 
 
-def run_is_held(run_dir):
-    """True while any process holding a token on the run is still alive."""
+def process_started(pid):
+    """When pid started, as ps -o lstart= prints it in the C locale with its spaces collapsed, the
+    way display.sh writes it into a token; None when ps knows no such process."""
     try:
-        tokens = os.listdir(str(run_dir / "active"))
+        result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], env=dict(os.environ, LC_ALL="C"),
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print("image gallery: cannot run ps to check a run's holder: %s" % e, file=sys.stderr, flush=True)
+        return None
+    started = " ".join(result.stdout.decode(errors="replace").split())
+    return started if result.returncode == 0 and started else None
+
+
+# (pid, start time) of each token holder ps last confirmed, and when it did.
+confirmed_holders = {}
+
+
+def holder_alive(pid, started):
+    """True while pid is still the process that wrote the token: this user's, and started when the
+    token says. ps confirms the start time on first sight and every HOLDER_CHECK_SECONDS after."""
+    key = (pid, started)
+    if not started or not pid_alive(pid):
+        confirmed_holders.pop(key, None)
+        return False
+    if time.monotonic() - confirmed_holders.get(key, -HOLDER_CHECK_SECONDS) < HOLDER_CHECK_SECONDS:
+        return True
+    if process_started(pid) == started:
+        confirmed_holders[key] = time.monotonic()
+        return True
+    confirmed_holders.pop(key, None)
+    return False
+
+
+def run_is_held(run_dir):
+    """True while any process holding a token on the run is still alive. A token is named
+    <name>.<pid> and holds its process's start time; a dot name is one still being written."""
+    active = run_dir / "active"
+    try:
+        tokens = os.listdir(str(active))
     except (FileNotFoundError, NotADirectoryError):
         return False
     for token in tokens:
         pid = token.rsplit(".", 1)[-1]
-        if pid.isdigit() and pid_alive(int(pid)):
+        if token.startswith(".") or not pid.isdigit():
+            continue
+        try:
+            started = " ".join(read_text(active / token).split())
+        except FileNotFoundError:
+            continue
+        if holder_alive(int(pid), started):
             return True
     return False
 

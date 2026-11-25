@@ -71,6 +71,8 @@ wait_for_snapshot() {
       SNAPSHOT="$snap"
       return 0
     fi
+    # No server to answer yet returns at once; wait out the second a snapshot would have taken.
+    [[ -n "$snap" ]] || sleep 1
   done
   echo "no snapshot matched $1; the last one was: $snap"
   return 1
@@ -372,6 +374,20 @@ write_run() {
   return 0
 }
 
+@test "a token whose pid now belongs to another process, of this user or another, does not keep its run live" {
+  # pid 1 is another user's process; the sleep is this user's, started after the token's time.
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
+  printf 'Thu Jan  1 00:00:00 1970\n' > "$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1/active/gemini.1"
+  sleep 60 &
+  HOLDER_PID=$!
+  write_run 20261125T100100Z-00000000b2 /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
+  printf 'Thu Jan  1 00:00:00 1970\n' > "$IMAGE_GALLERY_DIR/runs/20261125T100100Z-00000000b2/active/gemini.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  [[ "$(jq -r '[.runs[] | .status, .providers[0].state] | @tsv' <<< "$SNAPSHOT")" == \
+    $'interrupted\tinterrupted\tinterrupted\tinterrupted' ]] || { echo "$SNAPSHOT"; return 1; }
+}
+
 @test "a run directory that does not parse is left out with one line in server.log, and the server serves the rest" {
   write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' done
   local runs="$IMAGE_GALLERY_DIR/runs"
@@ -443,7 +459,7 @@ cpu_seconds() {
   write_run 20261125T110000Z-00000000ff /work/alpha 'gemini\tquerying\t\tmodel-a\t\nopenai\tquerying\t\tmodel-c\t\nxai\tretrying\t2/3\tmodel-a\t\n'
   sleep 60 &
   HOLDER_PID=$!
-  touch "$IMAGE_GALLERY_DIR/runs/20261125T110000Z-00000000ff/active/test.$HOLDER_PID"
+  LC_ALL=C ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/20261125T110000Z-00000000ff/active/test.$HOLDER_PID"
   start_gallery
   wait_for_snapshot '.runs[0].status == "live"'
   # gemini on model-a: median of 1000 3000 2000 4000 5000. openai has no history on model-c, and
