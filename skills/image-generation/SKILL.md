@@ -122,7 +122,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter.sh" \
 
 Use `scripts/run-all.sh` — a single Bash call that forks all providers in parallel as one run.
 By default (`IMAGE_DISPLAY=gallery`) the run shows on the browser gallery page every session
-shares: a card per provider, filled in as each finishes, with nothing drawn in the terminal.
+shares: a strip with one frame per provider, filled in as each finishes, with nothing drawn in the terminal.
 With `IMAGE_DISPLAY=pane` it streams into one shared tmux pane instead, whose watcher renders per-provider colored banners (gemini
 blue / openai gray / xai red / openrouter indigo) with model + timing, plus a bottom `waiting on`
 line naming the pending providers. It animates until the first image renders; after that it is
