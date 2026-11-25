@@ -162,6 +162,7 @@ describe('generate tool', () => {
 
   test('free output paths run once, and the answer lists what the run saved and what it did not', async ($, on) => {
     mock.clock(on)
+    mock.env(on, {})
     let written = ''
     const runs: (readonly string[])[] = []
     on('fs.exists', async ($, e) => ({ value: written !== '' && isAt(e.path, written) }))
@@ -180,5 +181,24 @@ describe('generate tool', () => {
       result: 'saved art/hero-openai.png\nmissing art/hero-xai.png\nrun-all.sh exited 1\n\nstderr:\nxAI API returned HTTP 401: bad key',
     })
     expect(runs).toEqual([['bash', expect.any(String), '--mode', 'generate', '--prompt', 'x', '--output-base', 'art/hero', '--providers', 'openai,xai']])
+  })
+
+  test("the run shows on the /config display unless Claude Code's environment sets IMAGE_DISPLAY", async ($, on) => {
+    mock.clock(on)
+    const displays: (string | undefined)[] = []
+    let environment: Record<string, string> = {}
+    on('env.get', async ($, e) => ({ value: environment[e.name] }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async ($, e) => ({ deny: `$.fs.stat(${e.path}) failed: ENOENT` }))
+    on('process.run', async ($, e) => {
+      displays.push(e.init?.env?.IMAGE_DISPLAY)
+      return { value: { exitCode: 1, stdout: '', stderr: '' } }
+    })
+
+    await $.tool.call({ tool: TOOL, prompt: 'x', providers: ['gemini'], outputBase: 'art/a' })
+    environment = { IMAGE_DISPLAY: 'pane' }
+    await $.tool.call({ tool: TOOL, prompt: 'x', providers: ['gemini'], outputBase: 'art/b' })
+
+    expect(displays).toEqual(['gallery', 'pane'])
   })
 })
