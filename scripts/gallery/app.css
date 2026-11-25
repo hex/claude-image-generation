@@ -8,6 +8,9 @@
   /* A run is a card on the canvas. */
   --card: #ffffff; --card-hover: #f9f9fb; --card-border: #e5e5ea;
   --finished-bg: #e8f5ec;
+  /* An empty frame's well: a shade of ink over whatever card holds it, so it sinks into the Done
+     card's green as it does into white. The dark cards are lighter than the canvas, which sinks. */
+  --well: color-mix(in srgb, var(--fg) 5%, transparent);
   --hot: #2a6fd6; --warn: #a8420a;
   /* Ink on a filled accent: white only where white reads; the dark theme's fills are pale. */
   --accent-ink: #ffffff;
@@ -35,6 +38,7 @@
     --bg: #1c1c1e; --fg: #f2f2f7; --dim: #98989d; --rule: #3a3a3c;
     --card: #2c2c2e; --card-hover: #323236; --card-border: #3a3a3c;
     --finished-bg: #1f2e22;
+    --well: var(--bg);
     --hot: #81a2be; --warn: #de935f;
     --accent-ink: #1c1c1e;
     --lit: #8ec07c; --alert: #fb8b5e; --lit-ink: #8ec07c;
@@ -215,12 +219,17 @@ body {
 .word.failed { color: var(--alert); background: color-mix(in srgb, var(--alert) 16%, transparent); }
 .word.done { padding: 0 8px; color: var(--accent-ink); background: var(--sev-ok); }
 
-/* The prompt where the sidebar puts the task title: two lines, then clipped; the whole of it is in
-   the loupe. A stopped run's title rests in the dim ink, as an idle session's name does. */
+/* The prompt where the sidebar puts the task title: two lines, then an ellipsis; the whole of it is
+   in the loupe. The clamp is the stylesheet's alone, so a live card's title holds its height through
+   every update. A stopped run's title rests in the dim ink, as an idle session's name does. */
 .prompt {
-  max-width: 100%; max-height: 2.48em;
+  max-width: 100%;
   font-size: 17px; line-height: 1.24; font-weight: 600; letter-spacing: -.025em;
-  overflow: hidden; overflow-wrap: anywhere;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .card[data-state="stopped"] .prompt { color: var(--dim); font-weight: 500; }
 
@@ -299,12 +308,12 @@ body {
 .frame { min-width: 0; }
 
 /* Every frame of a run is the same square, so the providers compare at a glance whatever shape
-   each image is. An empty frame is a well of the canvas tone in the card. */
+   each image is. A frame without a picture, waiting or failed, is a well in the card. */
 .plate {
   position: relative;
   aspect-ratio: 1;
   border-radius: 6px;
-  background: var(--bg);
+  background: var(--well);
   overflow: hidden;
 }
 .frame[data-state="complete"]:not(.missing) .plate { background: transparent; }
