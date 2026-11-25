@@ -25,6 +25,7 @@ import select
 import shutil
 import socket
 import socketserver
+import stat
 import statistics
 import subprocess
 import sys
@@ -159,10 +160,10 @@ def pid_alive(pid):
 
 
 def process_started(pid):
-    """When pid started, as ps -o lstart= prints it in the C locale with its spaces collapsed, the
-    way display.sh writes it into a token; None when ps knows no such process."""
+    """When pid started, as ps -o lstart= prints it in the C locale and in UTC with its spaces
+    collapsed, the way display.sh writes it into a token; None when ps knows no such process."""
     try:
-        result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], env=dict(os.environ, LC_ALL="C"),
+        result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], env=dict(os.environ, LC_ALL="C", TZ="UTC0"),
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 timeout=5)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -204,7 +205,11 @@ def run_is_held(run_dir):
         pid = token.rsplit(".", 1)[-1]
         if token.startswith(".") or not pid.isdigit():
             continue
+        # Only a regular file is a token. Anything else under the name is skipped before it is
+        # opened: reading a directory raises, and reading a FIFO would block the scan for good.
         try:
+            if not stat.S_ISREG(os.lstat(str(active / token)).st_mode):
+                continue
             started = " ".join(read_text(active / token).split())
         except FileNotFoundError:
             continue

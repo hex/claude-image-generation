@@ -596,10 +596,11 @@ __pane_acquire() {
   __PANE_SELF_ATTACHED=1
   mkdir -p "$DISPLAY_PANE_DIR/active"
   # The token holds this process's start time, so the gallery can tell this process from another
-  # that later gets the same pid. It is written under a dot name and renamed into place, so the
+  # that later gets the same pid. It is read in UTC, as the gallery server reads it, whatever
+  # timezone this session or the server's runs in. It is written under a dot name and renamed into place, so the
   # gallery never reads one half written.
   local started=""
-  started=$(LC_ALL=C ps -o lstart= -p $$ 2>/dev/null) || started=""
+  started=$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$ 2>/dev/null) || started=""
   printf '%s\n' "$started" > "$DISPLAY_PANE_DIR/active/.${1}.$$"
   mv -f "$DISPLAY_PANE_DIR/active/.${1}.$$" "$DISPLAY_PANE_DIR/active/${1}.$$"
 }

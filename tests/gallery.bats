@@ -451,7 +451,7 @@ write_run() {
   local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
   sleep 60 &
   HOLDER_PID=$!
-  LC_ALL=C ps -o lstart= -p "$HOLDER_PID" > "$dir/active/run-all.$HOLDER_PID"
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$dir/active/run-all.$HOLDER_PID"
   printf '%s\ngemini\n' "$(printf '9%.0s' $(seq 1 400))" > "$dir/retry-offer"
   start_gallery
   wait_for_snapshot '.runs[0].status == "live"'
@@ -530,7 +530,7 @@ cpu_seconds() {
   write_run 20261125T110000Z-00000000ff /work/alpha 'gemini\tquerying\t\tmodel-a\t\nopenai\tquerying\t\tmodel-c\t\nxai\tretrying\t2/3\tmodel-a\t\n'
   sleep 60 &
   HOLDER_PID=$!
-  LC_ALL=C ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/20261125T110000Z-00000000ff/active/test.$HOLDER_PID"
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/20261125T110000Z-00000000ff/active/test.$HOLDER_PID"
   start_gallery
   wait_for_snapshot '.runs[0].status == "live"'
   # gemini on model-a: median of 1000 3000 2000 4000 5000. openai has no history on model-c, and
@@ -539,4 +539,30 @@ cpu_seconds() {
     '{"gemini":3000,"openai":null,"xai":null}' ]] || { echo "$SNAPSHOT"; return 1; }
   [[ "$(jq -c '[.runs[0].providers[] | has("usual_ms")]' <<< "$SNAPSHOT")" == '[true,false,false]' ]]
   [[ "$(jq -c '[.runs[1:][].providers[] | has("usual_ms")] | unique' <<< "$SNAPSHOT")" == '[false]' ]]
+}
+
+@test "a run held by a session in another timezone stays live on a server started in UTC" {
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  TZ=Pacific/Kiritimati bash -c 'source "$1/scripts/display.sh"; DISPLAY_PANE_DIR="$2"; __pane_acquire run-all; sleep 60' _ "$PLUGIN_ROOT" "$dir" &
+  HOLDER_PID=$!
+  local waited=0
+  until compgen -G "$dir/active/run-all.*" > /dev/null; do sleep 0.1; waited=$((waited + 1)); [[ $waited -lt 50 ]]; done
+  TZ=UTC start_gallery
+  wait_for_snapshot '.runs[0].status == "live"'
+  [[ "$(jq -r '.runs[0].providers[0].state' <<< "$SNAPSHOT")" == querying ]] || { echo "$SNAPSHOT"; return 1; }
+}
+
+@test "an entry in active/ that is not a file neither holds a run nor stops the server" {
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$dir/active/run-all.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs[0].status == "live"'
+  kill "$HOLDER_PID"
+  wait "$HOLDER_PID" 2>/dev/null || true
+  mkdir "$dir/active/run-all.123"
+  wait_for_snapshot '.runs[0].status == "interrupted"'
 }
