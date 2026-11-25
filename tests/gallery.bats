@@ -263,6 +263,42 @@ run_all_gemini() {
   ! kill -0 "$old" 2>/dev/null
 }
 
+# stub_browser — puts an open and an xdg-open first on PATH that record each call in
+# $MOCK_DIR/opened instead of opening a browser, and lets ensure try to open one.
+stub_browser() {
+  mkdir -p "$MOCK_DIR/browser"
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> %q\n' "$MOCK_DIR/opened" > "$MOCK_DIR/browser/open"
+  cp "$MOCK_DIR/browser/open" "$MOCK_DIR/browser/xdg-open"
+  chmod +x "$MOCK_DIR/browser/open" "$MOCK_DIR/browser/xdg-open"
+  export PATH="$MOCK_DIR/browser:$PATH" DISPLAY=:99
+  unset IMAGE_GALLERY_NO_OPEN SSH_CONNECTION SSH_TTY
+}
+
+# serve_other_version — starts a server that reports another version, the way an older install's does.
+serve_other_version() {
+  local i
+  python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version 0.0.0-other
+  for i in $(seq 1 50); do
+    [[ "$(server_field version)" == 0.0.0-other ]] && return 0
+    sleep 0.1
+  done
+  echo "the server of another version never wrote server.json"
+  return 1
+}
+
+@test "replacing a server of another version opens the page only when no page was connected to it" {
+  stub_browser
+  serve_other_version
+  start_gallery
+  [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
+  stop_gallery
+  serve_other_version
+  connect_page
+  start_gallery
+  # The page reconnects to the server that replaced it on the same port, so no second tab opens.
+  [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
+}
+
 @test "the Retry button's POST /retry runs the failed provider again" {
   answer_provider_with "$GEMINI_REFUSAL" "$GEMINI_IMAGE"
   start_gallery

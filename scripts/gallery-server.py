@@ -862,7 +862,10 @@ def ensure(root):
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(str(root), 0o700)
     info, health = running_server(root)
+    # Pages of a server this one replaces reconnect to its successor when it binds the same port.
+    old_port, old_pages = None, 0
     if info is not None and health.get("version") != version:
+        old_port, old_pages = info["port"], health["clients"]
         request(info, "POST", "/shutdown")
         wait_for_exit(info["pid"], LOCK_WAIT_SECONDS)
         info = None
@@ -872,7 +875,8 @@ def ensure(root):
             print("image gallery: the server did not start within %d s; see %s" %
                   (START_WAIT_SECONDS, root / "server.log"), file=sys.stderr)
             return 1
-    if health["clients"] == 0 and os.environ.get("IMAGE_GALLERY_NO_OPEN") != "1":
+    pages = health["clients"] + (old_pages if info["port"] == old_port else 0)
+    if pages == 0 and os.environ.get("IMAGE_GALLERY_NO_OPEN") != "1":
         url = "http://127.0.0.1:%d/?t=%s" % (info["port"], info["token"])
         opened = False
         if not in_ssh_session():
