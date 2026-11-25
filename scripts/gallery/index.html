@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Image gallery</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#runs">Skip to the runs</a>
+<header class="top">
+  <h1>Image gallery</h1>
+  <p id="connection" class="connection" role="status" aria-live="polite">Connecting…</p>
+</header>
+<main id="runs" tabindex="-1">
+  <p id="empty" class="empty" hidden>No image runs yet. Images from Claude Code show up here while they generate.</p>
+  <ol id="run-list" class="runs"></ol>
+</main>
+</body>
+</html>
