@@ -18,7 +18,8 @@ Generate or edit an image based on the user's request.
    - Pass `providers`, `outputBase` or `aspectRatio` only when the arguments name them. Leave
      them out otherwise: the tool falls back to the person's `/config` defaults, so don't ask
      which provider to use or where to save.
-   - The tool opens the same streaming pane and retry offer as `run-all.sh`.
+   - The tool shows the run where `run-all.sh` does (the browser gallery by default, the
+     streaming pane with `IMAGE_DISPLAY=pane`) and makes the same retry offer.
    - Its result lists each expected file as `saved` or `missing`; go to step 6 with it. If it
      refuses the call, show its message and fix the input rather than retrying unchanged.
      It never overwrites: when the refusal says a file `already exists`, call it again with an
@@ -62,9 +63,10 @@ Generate or edit an image based on the user's request.
       - subject: "Generate image with all providers in parallel"
       - activeForm: "Generating with Gemini, OpenAI, and xAI..."
    b. Mark it in_progress with TaskUpdate.
-   c. Run `scripts/run-all.sh` in a single Bash call — it opens the streaming pane, forks all
-      providers in parallel, captures their stdio under `$DISPLAY_PANE_DIR/logs/`, and closes
-      the pane when every provider has returned:
+   c. Run `scripts/run-all.sh` in a single Bash call. It shows the run on the browser gallery
+      (with `IMAGE_DISPLAY=pane`, it opens the streaming pane and captures provider stdio under
+      `$DISPLAY_PANE_DIR/logs/`), forks all providers in parallel, and finishes the run when
+      every provider has returned:
       ```bash
       bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
         --mode <generate|edit> \
@@ -78,11 +80,13 @@ Generate or edit an image based on the user's request.
       `--openai-extra "..."`, `--xai-extra "..."`, `--openrouter-extra "..."` (e.g.
       `--openrouter-extra "--model openai/gpt-image-2"`).
    d. Mark the task completed when run-all.sh exits. Its exit status reports whether any
-      provider failed, and each provider's error shows inline in the streaming pane as a red
-      banner. The per-provider logs under `$DISPLAY_PANE_DIR/logs/` exist only while the pane
-      is open: the pane deletes them when it closes.
-      When a provider fails, the pane offers a retry for up to 45 seconds, so the call can
-      return later than the slowest provider.
+      provider failed. Each provider's error shows on its gallery card, or inline in the
+      streaming pane as a red banner; in the gallery the providers' output also stays in the
+      Bash call's output. The per-provider logs under `$DISPLAY_PANE_DIR/logs/` exist only in
+      pane mode, while the pane is open: the pane deletes them when it closes.
+      When a provider fails, the pane, or the gallery's Retry button while a gallery page is
+      open, offers a retry for up to 45 seconds, so the call can return later than the
+      slowest provider.
 
 6. After generation completes, confirm the output path(s) to the user.
    If multiple were generated, let the user know all files are available so they can compare.

@@ -49,8 +49,8 @@ When `mcp__claude-image-generation__generate` is available (Claude Code builds w
 hooks), prefer it over the scripts below. It takes `prompt`, and optionally `providers`,
 `outputBase` (a path without extension), `inputImages` (switches to edit mode) and
 `aspectRatio` (whole-number `W:H`, gemini and xai only). Leave `providers` and `outputBase` out unless the request
-gives them: the tool uses the person's `/config` defaults. It runs `run-all.sh`, so the pane
-and the retry offer behave as described under Parallel Generation, and it answers with each
+gives them: the tool uses the person's `/config` defaults. It runs `run-all.sh`, so the gallery
+or pane and the retry offer behave as described under Parallel Generation, and it answers with each
 expected file marked `saved` or `missing`. It never overwrites: when any
 `<outputBase>-<provider>.png` already exists it refuses the call and names each path, so pick
 an unused `outputBase` (add `-2`, `-3`) rather than deleting the old files. Use the scripts instead when the request needs an
@@ -120,8 +120,10 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter.sh" \
 
 ### Parallel Generation
 
-Use `scripts/run-all.sh` — a single Bash call that forks all providers in parallel into one
-shared streaming pane. The watcher renders per-provider colored banners (gemini
+Use `scripts/run-all.sh` — a single Bash call that forks all providers in parallel as one run.
+By default (`IMAGE_DISPLAY=gallery`) the run shows on the browser gallery page every session
+shares: a card per provider, filled in as each finishes, with nothing drawn in the terminal.
+With `IMAGE_DISPLAY=pane` it streams into one shared tmux pane instead, whose watcher renders per-provider colored banners (gemini
 blue / openai gray / xai red / openrouter indigo) with model + timing, plus a bottom `waiting on`
 line naming the pending providers. It animates until the first image renders; after that it is
 written once under each new block and never rewritten, so the inline images accumulate (a
@@ -147,21 +149,25 @@ Optional flags:
 - `--xai-extra "--resolution 2k"` — pass-through args to xai.sh
 - `--openrouter-extra "--model openai/gpt-image-2"` — pass-through args to openrouter.sh
 
-Providers share a pane only while they overlap in time: each finds this tmux window's pane
+In pane mode, providers share a pane only while they overlap in time: each finds this tmux window's pane
 through a registry entry and joins it, and the pane closes once the last provider sharing it
 has finished. Running the provider scripts as separate sequential Bash calls therefore gives a
-pane per call, which is why `run-all.sh` is the way to reach more than one provider at once.
+pane (or a gallery run) per call, which is why `run-all.sh` is the way to reach more than one provider at once.
 
-Per-provider stderr/stdout is captured under `$DISPLAY_PANE_DIR/logs/<provider>.{out,err}`
-while the pane is open. Errors render as a red error banner inline. After all providers
-finish, run-all.sh closes the pane and exits with status 0 if every provider succeeded, 1
+In pane mode, run-all.sh captures each provider's stderr/stdout under
+`$DISPLAY_PANE_DIR/logs/<provider>.{out,err}` while the pane is open, and errors render as a
+red error banner inline. In the gallery, provider output stays on run-all.sh's own output and
+errors show on the provider's card. After all providers finish, run-all.sh closes the pane (or
+marks the gallery run finished) and exits with status 0 if every provider succeeded, 1
 otherwise.
 
 If any provider failed, the pane offers a retry (`[r] retry failed (xai) · [esc/ctrl-d] close 45s`)
 before run-all.sh exits; pressing `r` re-runs just the failed providers in the same call, and
 letting the offer expire or pressing Esc closes the pane and returns the run's existing result.
 The offer counts down until the first image is on the pane; after that it shows the time budget
-once (`close (up to 45s)`), because a rewritten line erases the pane's images.
+once (`close (up to 45s)`), because a rewritten line erases the pane's images. In the gallery
+the offer is the run's Retry button, and run-all.sh makes it only while a gallery page is open;
+with none open, a failed run returns at once.
 
 ## Prompting Tips
 
@@ -199,7 +205,8 @@ once (`close (up to 45s)`), because a rewritten line erases the pane's images.
 | `IMAGE_MAX_RETRIES` | 3 | Retry attempts for a transient API failure before the script gives up |
 | `IMAGE_RETRY_DELAY` | 1 | Starting retry delay in seconds; doubles on each attempt |
 | `IMAGE_AVAILABILITY_TTL` | 86400 | Seconds a remembered "default model unavailable" verdict holds; 0 tries the default every run |
-| `DISPLAY_PANE_RETRY_WAIT` | 45 | Seconds the pane's retry offer stays open after a run-all.sh failure; 0 disables the offer |
+| `DISPLAY_PANE_RETRY_WAIT` | 45 | Seconds the retry offer (the pane's, or the gallery's Retry button) stays open after a run-all.sh failure; 0 disables the offer |
+| `IMAGE_DISPLAY` | gallery | Where images show: `gallery` (browser page), `pane` (tmux pane, or inline outside tmux), `none` |
 
 ## Script Options Reference
 

@@ -8,13 +8,14 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 - **OpenRouter gateway** — reach any OpenRouter image model (Gemini, GPT Image, and more) through one key via the chat-completions API
 - **Image editing** with text instructions (all providers)
 - **Multi-image input** — repeatable `--input-image` for multi-image edits (all providers) and Gemini reference-based generation
-- **Parallel generation** across all providers via `scripts/run-all.sh` — one shared streaming pane, council-style colored banners, and a `waiting on` line naming the pending providers (animated until the first image renders, then written once under each block)
+- **Parallel generation** across all providers via `scripts/run-all.sh`, shown as one run: a card per provider on the browser gallery, or one shared streaming pane with council-style colored banners and a `waiting on` line naming the pending providers (animated until the first image renders, then written once under each block)
 - **Interactive provider selection** via AskUserQuestion at runtime
 - **Generate tool** on Claude Code builds with function hooks, so the model calls one typed tool instead of writing a script line (see [Generate Tool](#generate-tool-function-hooks-early-access))
 - **Provider status** via `/claude-image-generation:status`, which checks each key and default model against the provider's live API without billing anything
 - **Model fallback** draws with a configured second model when a provider's default is unavailable to your key (see [Model Fallback](#model-fallback))
-- **Inline image preview** -- generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
-- **Tmux pane display** -- opens a split pane for image preview when running inside tmux (works with Claude Code). Providers running at the same time share one pane, however they were launched
+- **Browser gallery** (the default display) -- every image run from every Claude Code session shows on one local page, newest first, with a card per provider that fills in as it finishes, a Retry button for failed providers and Show in Finder per image. Nothing splits the chat's pane (see [Image Display](#image-display))
+- **Inline image preview** -- with `IMAGE_DISPLAY=pane`, generated images display directly in the terminal (iTerm2, Kitty, Ghostty, WezTerm, Sixel terminals)
+- **Tmux pane display** -- with `IMAGE_DISPLAY=pane`, opens a split pane for image preview when running inside tmux (works with Claude Code). Providers running at the same time share one pane, however they were launched
 - **Streaming display** -- images appear progressively in a shared pane during parallel generation, accumulating as each provider finishes
 - **Open in Finder/Preview** -- press 'f' for Finder or 'p' for Preview in the display pane
 
@@ -70,6 +71,32 @@ Override the default model per provider via environment variables:
 | `OPENROUTER_IMAGE_MODEL` | `google/gemini-nano-banana-2.1` | OpenRouter model slug used for generation and editing |
 
 Command-line `--model` flag on the scripts takes precedence over environment variables.
+
+### Image Display
+
+`IMAGE_DISPLAY` chooses where images show while they generate. The generate tool takes it from the **Image display** row in `/config`. An `IMAGE_DISPLAY` already set in Claude Code's environment wins over that row, and the scripts read the variable directly.
+
+| Value | Where images show |
+|-------|-------------------|
+| `gallery` (default) | One browser page that every Claude Code session shares. Nothing draws in the terminal |
+| `pane` | The tmux pane beside the chat, or inline in the terminal outside tmux (see [Terminal Image Display](#terminal-image-display)) |
+| `none` | Nowhere; the images are only saved. `SKIP_DISPLAY=1` means the same |
+
+Any other value stops the run before it calls any provider, with `IMAGE_DISPLAY must be gallery, pane or none, got '<value>'`.
+
+The gallery needs `python3` 3.9 or later. Without it the run uses `pane` and says so on stderr. On macOS, `/usr/bin/python3` counts only after you install the Command Line Tools (`xcode-select -p` names a path), because running it before that opens an install dialog.
+
+The first run starts a small server, `scripts/gallery-server.py`, on 127.0.0.1 and opens the page in the default browser (`open -g` on macOS, so the browser does not take focus; `xdg-open` on Linux). Later runs reuse that server, and open the page again only when no page is open, at most once every 10 seconds. Over SSH, or where the run cannot open a browser, it prints the page's address on stderr instead: `image gallery: open http://127.0.0.1:<port>/?t=<token> to watch the images`. The generate tool's result carries that line. A server that cannot start costs one line on stderr; the images are still saved.
+
+The page lists runs newest first. Each run shows its prompt, start time, working directory and a card per provider: a spinner while the provider generates or retries, then its image with the model and time, or its error. A provider whose process died shows as stopped. When a `run-all.sh` run has a failed provider and a page is open, the run waits up to `DISPLAY_PANE_RETRY_WAIT` seconds (45) for the page's **Retry** button, which re-runs only the failed providers. With no page open it makes no offer and returns at once. **Show in Finder** (**Show in folder** on Linux) reveals an image's file, and clicking an image opens it full size.
+
+The server binds 127.0.0.1 only. It answers only requests whose Host header is `127.0.0.1:<port>` and that carry its token, which the address sets as a cookie (HttpOnly, SameSite=Strict); buttons must post with the page's own Origin. The page renders run data as text under a `default-src 'self'` Content-Security-Policy. The token stays the same across restarts, so an open page reconnects after one. The server stops after 30 minutes with no image run going and no page open. It keeps the newest 200 runs and never removes the image files themselves. After a plugin update, the next run replaces a server of the old version.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `IMAGE_DISPLAY` | `gallery` | `gallery`, `pane` or `none` |
+| `IMAGE_GALLERY_DIR` | `$XDG_STATE_HOME/claude-image-generation/gallery`, else `~/.local/state/claude-image-generation/gallery` | The server's files (`server.json`, `token`, `server.log`) and one folder per run under `runs/`; readable by you only |
+| `IMAGE_GALLERY_NO_OPEN` | unset | `1` never opens the browser and prints no address |
 
 ### Display Size
 
@@ -190,19 +217,20 @@ On Claude Code builds with function hooks, the plugin also registers a tool, `mc
 | `inputImages` | no | Images to edit; any entry switches to edit mode |
 | `aspectRatio` | no | Whole-number `W:H` such as `16:9`; passed to gemini and xai only |
 
-The tool runs `scripts/run-all.sh`, so the streaming pane and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check before anything runs: a blank prompt, a prompt over 100,000 bytes or with a null character (U+0000), a field of the wrong type, an unknown provider or one named twice, an `outputBase` that is blank, ends in `/`, or ends in `.png`, `.jpg`, `.jpeg` or `.webp` (any case), a control character in `outputBase` or an `inputImages` path, or an aspect ratio that is not whole-number `W:H` with both sides above zero (so xAI's `auto`, `19.5:9` and `9:19.5` need the scripts).
+The tool runs `scripts/run-all.sh`, so the gallery (or the streaming pane) and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check before anything runs: a blank prompt, a prompt over 100,000 bytes or with a null character (U+0000), a field of the wrong type, an unknown provider or one named twice, an `outputBase` that is blank, ends in `/`, or ends in `.png`, `.jpg`, `.jpeg` or `.webp` (any case), a control character in `outputBase` or an `inputImages` path, or an aspect ratio that is not whole-number `W:H` with both sides above zero (so xAI's `auto`, `19.5:9` and `9:19.5` need the scripts).
 
 The tool never overwrites a file. When any `<outputBase>-<provider>.png` it would save already exists, as a file or as a symlink (a dangling one too), it refuses the call before any provider runs and names each such path. Choose another `outputBase`, or move the old files away first. The scripts keep the same rule on their own (see Direct Script Usage).
 
 A call runs for at most ten minutes, the most the engine allows a process. That covers the slowest provider plus the 45-second retry offer.
 
-Outside tmux the tool shows no inline preview: it sends the providers' terminal image output to `/dev/null` (through `DISPLAY_IMAGE_TARGET`), so the images do not land on Claude Code's own screen. Inside tmux they stream into the pane as usual.
+With `IMAGE_DISPLAY=pane`, outside tmux the tool shows no inline preview: it sends the providers' terminal image output to `/dev/null` (through `DISPLAY_IMAGE_TARGET`), so the images do not land on Claude Code's own screen. Inside tmux they stream into the pane as usual.
 
-Two rows in `/config` set its defaults:
+Three rows in `/config` set its defaults:
 
 | Setting | Values | Default |
 |---------|--------|---------|
 | Default providers | `all` (gemini, openai, xai), `gemini`, `openai`, `xai`, `openrouter` | `all` |
+| Image display | `gallery`, `pane`, `none` (see [Image Display](#image-display)) | `gallery` |
 | Output directory | any path, relative to the session's working directory | `.` |
 
 The slash command, the agent and the skill use the tool whenever the session offers it, and skip the provider and path questions. They fall back to running the scripts through Bash on builds without it, or when a request needs an option the tool does not take (image size, quality, transparent background, a specific model, or another per-provider flag).
@@ -468,7 +496,7 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 
 Each provider script retries a transient API error (429 or a 5xx status, or a network failure) up to three times, with a delay that doubles each attempt (1 second, 2 seconds, 4 seconds). `IMAGE_MAX_RETRIES` and `IMAGE_RETRY_DELAY` tune the count and the starting delay. Inside a streaming pane, a retry shows on the `waiting on` line as `(retry 2/3)`; once an image is on the pane that line is only written when the next block lands, so a retry that starts between blocks shows only in the final banner or error text.
 
-When a provider run through `run-all.sh` fails outright, its error shows under a red `✗ provider error` heading, and if any provider failed the pane offers `[r] retry failed (xai) · [esc/ctrl-d] close 45s`. The offer counts down until the first image is on the pane; after that it shows the time budget once, as `[r] retry failed (xai) · [esc/ctrl-d] close (up to 45s)`, because a rewritten line erases the pane's images. Pressing `r` re-runs only the failed providers inside the same run; Esc closes the pane and the run returns with what it has. `DISPLAY_PANE_RETRY_WAIT` sets how long the offer stays open (default 45 seconds; 0 disables it), and a run with a failure can take that much longer plus one more provider round.
+When a provider run through `run-all.sh` fails outright, its error shows under a red `✗ provider error` heading, and if any provider failed the pane offers `[r] retry failed (xai) · [esc/ctrl-d] close 45s`. The offer counts down until the first image is on the pane; after that it shows the time budget once, as `[r] retry failed (xai) · [esc/ctrl-d] close (up to 45s)`, because a rewritten line erases the pane's images. Pressing `r` re-runs only the failed providers inside the same run; Esc closes the pane and the run returns with what it has. `DISPLAY_PANE_RETRY_WAIT` sets how long the offer stays open (default 45 seconds; 0 disables it), and a run with a failure can take that much longer plus one more provider round. In the gallery the offer is the run's **Retry** button, made only while a page is open (see [Image Display](#image-display)).
 
 ### Model Fallback
 
@@ -515,7 +543,7 @@ Delete the verdict directory to try the default again before the verdict expires
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Plugin manifest | `.claude-plugin/plugin.json` | Plugin metadata, version and the /config rows (defaultProviders, outputDir) |
+| Plugin manifest | `.claude-plugin/plugin.json` | Plugin metadata, version and the /config rows (defaultProviders, display, outputDir) |
 | Skill | `skills/image-generation/SKILL.md` | API knowledge, prompting tips, script reference |
 | Command | `commands/generate-image.md` | `/generate-image` slash command |
 | Status command | `commands/status.md` | `/claude-image-generation:status` slash command |
@@ -529,8 +557,10 @@ Delete the verdict directory to try the default again before the verdict expires
 | Model fallback | `scripts/model-fallback.sh` | Sends the request once more with the provider's fallback model when the default is unavailable to the key, and remembers that verdict per key |
 | Input image check | `scripts/input-images.sh` | Copies each `--input-image` into a private temp folder, reads the copy's type from its bytes and refuses anything that is not a PNG, JPEG, WebP or GIF file |
 | Output image save | `scripts/output-image.sh` | Refuses an `--output` that already exists, decodes the image into a temp file beside it and hard-links that to the output's name, so it never replaces or follows anything at the path |
-| Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel under one streaming pane; holds a pane token for the batch |
-| Display utility | `scripts/display.sh` | Multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
+| Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel as one gallery run or under one streaming pane; holds a token for the batch |
+| Display utility | `scripts/display.sh` | Decides the display mode, writes gallery runs, and does multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
+| Gallery server | `scripts/gallery-server.py` | Serves the gallery's runs on 127.0.0.1, and starts, reuses or replaces that server for `display.sh` |
+| Gallery page | `scripts/gallery/` | The page, script and stylesheet the gallery server serves |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 | Skill evals | `skills/image-generation/evals/evals.json` | Trigger prompts for the skill's eval suite |
 | Hooks module | `hooks/index.ts` | Registers the `generate` tool and serves its calls through `run-all.sh` |
@@ -584,6 +614,8 @@ The scripts (`gemini.sh`, `openai.sh`, `xai.sh`, `openrouter.sh`) are standalone
 
 ### Terminal Image Display
 
+This section describes `IMAGE_DISPLAY=pane`.
+
 | Terminal | Protocol | Detection |
 |----------|----------|-----------|
 | iTerm2 | OSC 1337 | `TERM_PROGRAM`, `LC_TERMINAL` |
@@ -603,6 +635,7 @@ Providers find that pane through a registry entry under `$TMPDIR` keyed by tmux 
 - `curl` -- HTTP requests to provider APIs
 - `jq` -- JSON construction and parsing
 - `base64` -- Image data encoding/decoding (included in macOS and most Linux distributions)
+- `python3` 3.9 or later -- the browser gallery (without it, images show as with `IMAGE_DISPLAY=pane`)
 - At least one API key: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GROK_API_KEY`, or `OPENROUTER_API_KEY`
 
 **Optional (for Sixel image display):**
