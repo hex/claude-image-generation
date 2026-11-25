@@ -125,9 +125,11 @@ function waitingPlate(run, card, frame) {
   return [fill];
 }
 
+// A provider can finish without naming a file; its frame then stays empty.
 function imagePlate(run, card, frame) {
+  if (!card.image) return [];
   const url = imageUrl(run, card);
-  const image = el('img', { alt: card.name + ' image for: ' + run.prompt, decoding: 'async' });
+  const image = el('img', { alt: card.name + ' image for: ' + run.prompt, loading: 'lazy', decoding: 'async' });
   image.addEventListener('load', () => image.classList.add('shown'), { once: true });
   image.addEventListener('error', () => {
     frame.node.classList.add('missing');
