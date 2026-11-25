@@ -204,7 +204,10 @@ def read_run(run_dir):
     retry = None
     retry_seconds = None
     retry_ends_ms = None
+    updated_ms = None
     if status == "live":
+        # When the run last moved: its status log's last record, or its start before the first one.
+        updated_ms = int(max(p.stat().st_mtime for p in (run_dir / "meta.json", run_dir / "status") if p.exists()) * 1000)
         try:
             offer_path = run_dir / "retry-offer"
             offer = read_text(offer_path).split("\n")
@@ -245,6 +248,7 @@ def read_run(run_dir):
         "retry": retry,
         "retry_seconds": retry_seconds,
         "retry_ends_ms": retry_ends_ms,
+        "updated_ms": updated_ms,
         "problem": problem,
         "providers": cards,
     }

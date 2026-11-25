@@ -6,8 +6,11 @@
 // snapshot rebuilds only the parts that changed and an image already shown never reloads.
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-// Phosphor regular icons, the path data read out of @phosphor-icons/core 2.1.1 (assets/regular).
+// Phosphor regular icons, the path data read out of @phosphor-icons/core 2.1.1 (assets/regular). The folder
+// and the clock are the Agents sidebar's own marks, as its page draws them.
 const ICONS = {
+  'folder': 'M216,72H130.67L102.93,51.2a16.12,16.12,0,0,0-9.6-3.2H40A16,16,0,0,0,24,64V200a16,16,0,0,0,16,16H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72ZM40,64H93.33l21.34,16L93.33,96H40ZM216,200H40V112H93.33a16.12,16.12,0,0,0,9.6-3.2L130.67,88H216Z',
+  'clock': 'M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm64-88a8,8,0,0,1-8,8H128a8,8,0,0,1-8-8V72a8,8,0,0,1,16,0v48h48A8,8,0,0,1,192,128Z',
   'folder-open': 'M245,110.64A16,16,0,0,0,232,104H216V88a16,16,0,0,0-16-16H130.67L102.94,51.2a16.14,16.14,0,0,0-9.6-3.2H40A16,16,0,0,0,24,64V208h0a8,8,0,0,0,8,8H211.1a8,8,0,0,0,7.59-5.47l28.49-85.47A16.05,16.05,0,0,0,245,110.64ZM93.34,64,123.2,86.4A8,8,0,0,0,128,88h72v16H69.77a16,16,0,0,0-15.18,10.94L40,158.7V64Zm112,136H43.1l26.67-80H232Z',
   'arrows-out': 'M216,48V96a8,8,0,0,1-16,0V67.31l-42.34,42.35a8,8,0,0,1-11.32-11.32L188.69,56H160a8,8,0,0,1,0-16h48A8,8,0,0,1,216,48ZM98.34,146.34,56,188.69V160a8,8,0,0,0-16,0v48a8,8,0,0,0,8,8H96a8,8,0,0,0,0-16H67.31l42.35-42.34a8,8,0,0,0-11.32-11.32ZM208,152a8,8,0,0,0-8,8v28.69l-42.34-42.35a8,8,0,0,0-11.32,11.32L188.69,200H160a8,8,0,0,0,0,16h48a8,8,0,0,0,8-8V160A8,8,0,0,0,208,152ZM67.31,56H96a8,8,0,0,0,0-16H48a8,8,0,0,0-8,8V96a8,8,0,0,0,16,0V67.31l42.34,42.35a8,8,0,0,0,11.32-11.32Z',
   'arrow-clockwise': 'M240,56v48a8,8,0,0,1-8,8H184a8,8,0,0,1,0-16H211.4L184.81,71.64l-.25-.24a80,80,0,1,0-1.67,114.78,8,8,0,0,1,11,11.63A95.44,95.44,0,0,1,128,224h-1.32A96,96,0,1,1,195.75,60L224,85.8V56a8,8,0,1,1,16,0Z',
@@ -32,7 +35,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const dayAndClock = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
-// run id -> { run, node, head, headKey, frameList, frames: Map(provider -> { key, node }), roundSeen }
+// run id -> { run, node, head, headKey, recency, frameList, frames: Map(provider -> { key, node }), roundSeen }
 const strips = new Map();
 let runs = [];
 let railKey = '';
@@ -78,6 +81,13 @@ function relative(iso) {
   return dayAndClock.format(at);
 }
 
+// "Updated 10 s ago", from when a live run last moved, as the sidebar's recency line reads.
+function updatedAgo(ms) {
+  const seconds = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  const age = seconds < 60 ? seconds + ' s' : seconds < 3600 ? Math.floor(seconds / 60) + ' m' : Math.floor(seconds / 3600) + ' h';
+  return 'Updated ' + age + ' ago';
+}
+
 function imageUrl(run, card) {
   return '/img/' + [run.id, card.name, String(card.image.n)].map(encodeURIComponent).join('/');
 }
@@ -118,11 +128,11 @@ function waitingPlate(run, card, frame) {
   if (!frame.entry.roundSeen.has(round)) frame.entry.roundSeen.set(round, card.round > 0 ? Date.now() : Date.parse(run.started_at));
   const began = frame.entry.roundSeen.get(round);
   const elapsed = Number.isNaN(began) ? 0 : Math.max(0, Date.now() - began);
-  const fill = el('span', { class: 'fill', 'aria-hidden': 'true' });
+  const fill = el('span', { class: 'fill' });
   fill.style.setProperty('--usual', card.usual_ms + 'ms');
   fill.style.setProperty('--delay', -elapsed + 'ms');
   fill.style.setProperty('--at', String(Math.min(0.92, elapsed / card.usual_ms)));
-  return [fill];
+  return [el('span', { class: 'bar', 'aria-hidden': 'true' }, fill)];
 }
 
 // A provider can finish without naming a file; its frame then stays empty.
@@ -181,7 +191,7 @@ function printParts(run, card) {
   return [
     el('span', { class: 'provider', text: card.name }),
     card.model ? el('span', { class: 'model', text: card.model }) : null,
-    word ? el('span', { class: 'word', text: word }) : null,
+    word ? el('span', { class: 'outcome', text: word }) : null,
     state.atWork ? el('span', { class: 'sr', text: 'generating' }) : null,
   ].filter(Boolean);
 }
@@ -212,14 +222,38 @@ function drain(run) {
   return line;
 }
 
+// A run's state, as the pill at the right of its folder line says it. A finished run failed when no
+// provider brought back an image and at least one said why; one with any image is done, its failed
+// frames marked on their own.
+const RUN_STATES = {
+  working: { word: 'Working' },
+  done: { word: 'Done' },
+  failed: { word: 'Failed' },
+  stopped: { word: 'Stopped' },
+};
+
+function runState(run) {
+  if (run.status === 'live') return 'working';
+  if (run.status === 'interrupted') return 'stopped';
+  if (run.status !== 'done') throw new Error('unknown run status "' + run.status + '" for run ' + run.id);
+  const failed = run.providers.some(card => card.state === 'error') && !run.providers.some(card => card.image);
+  return failed ? 'failed' : 'done';
+}
+
+// The card's head, in the sidebar's order: the folder line with the state pill at its right, the
+// prompt as the title, how long ago a live run last moved, then the facts line.
 function headNode(run) {
+  const state = runState(run);
   const when = relative(run.started_at);
   const head = el('header', { class: 'head' },
-    el('p', { class: 'where' },
-      run.session ? el('span', { class: 'session', text: run.session }) : null,
-      run.cwd ? el('span', { class: 'cwd', text: run.cwd }) : null,
-      when ? el('time', { class: 'when', datetime: run.started_at, text: when }) : null),
-    run.prompt ? el('p', { class: 'prompt', id: 'prompt-' + run.id, text: run.prompt }) : null);
+    el('p', { class: 'identity' },
+      el('span', { class: 'folder' }, icon('folder'), el('span', { class: 'folder-name', text: run.session || run.id })),
+      el('span', { class: 'word ' + state, text: RUN_STATES[state].word })),
+    run.prompt ? el('p', { class: 'prompt', id: 'prompt-' + run.id, text: run.prompt }) : null,
+    run.updated_ms ? el('p', { class: 'recency', text: updatedAgo(run.updated_ms) }) : null,
+    el('p', { class: 'facts' },
+      when ? el('span', { class: 'chip' }, icon('clock'), el('time', { class: 'when', datetime: run.started_at, text: when })) : null,
+      run.cwd ? el('span', { class: 'chip cwd', text: run.cwd }) : null));
   if (run.retry && run.retry.length) {
     const note = el('span', { class: 'note', 'aria-live': 'polite' });
     const button = el('button', { type: 'button', class: 'retry', 'data-key': 'retry', 'aria-label': 'Retry failed: ' + run.retry.join(', ') },
@@ -243,7 +277,7 @@ function swap(old, next) {
 
 function newStrip(run) {
   const frameList = el('ol', { class: 'frames' });
-  const node = el('li', { class: 'strip', 'data-id': run.id });
+  const node = el('li', { class: 'strip card', 'data-id': run.id });
   const entry = { run, node, head: null, headKey: '', frameList, frames: new Map(), roundSeen: new Map() };
   node.append(el('article', run.prompt ? { 'aria-labelledby': 'prompt-' + run.id } : { 'aria-label': run.session || run.id }, frameList));
   updateStrip(entry, run);
@@ -252,7 +286,9 @@ function newStrip(run) {
 
 function updateStrip(entry, run) {
   entry.run = run;
-  const headKey = JSON.stringify([run.prompt, run.session, run.cwd, run.started_at, run.retry, run.retry_ends_ms, run.problem]);
+  const state = runState(run);
+  entry.node.dataset.state = state;
+  const headKey = JSON.stringify([state, run.prompt, run.session, run.cwd, run.started_at, run.retry, run.retry_ends_ms, run.problem]);
   if (headKey !== entry.headKey) {
     const head = headNode(run);
     if (entry.head) swap(entry.head, head);
@@ -260,6 +296,8 @@ function updateStrip(entry, run) {
     entry.head = head;
     entry.headKey = headKey;
   }
+  const recency = entry.head.querySelector('.recency');
+  if (recency && run.updated_ms) recency.textContent = updatedAgo(run.updated_ms);
   const seen = new Set();
   let previous = null;
   for (const card of run.providers) {
@@ -533,6 +571,10 @@ window.addEventListener('hashchange', () => {
 
 setInterval(() => {
   for (const time of stripList.querySelectorAll('time.when')) time.textContent = relative(time.dateTime);
+  for (const entry of strips.values()) {
+    const recency = entry.head.querySelector('.recency');
+    if (recency && entry.run.updated_ms) recency.textContent = updatedAgo(entry.run.updated_ms);
+  }
 }, 30000);
 
 function connect() {
