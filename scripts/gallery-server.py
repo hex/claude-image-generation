@@ -303,13 +303,13 @@ class Gallery:
         names.sort(reverse=True)
         runs = []
         for index, name in enumerate(names):
-            run = read_run(self.runs_dir / name)
-            if run is None:
+            run_dir = self.runs_dir / name
+            if index >= KEEP_RUNS and not run_is_held(run_dir):
+                shutil.rmtree(str(run_dir), ignore_errors=True)
                 continue
-            if index >= KEEP_RUNS and run["status"] != "live":
-                shutil.rmtree(str(self.runs_dir / name), ignore_errors=True)
-                continue
-            runs.append(run)
+            run = read_run(run_dir)
+            if run is not None:
+                runs.append(run)
         snapshot = json.dumps({"instance": self.instance, "runs": runs})
         if snapshot != self.snapshot:
             with self.changed:
