@@ -428,24 +428,22 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 12px;
   transform: scale(.98);
 }
 .loupe.open .loupe-frame { transform: none; }
-.loupe-stage { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; }
+/* The image at its own size or smaller, never stretched, leaving room for the caption under it. */
 .loupe-image {
-  position: absolute;
-  inset: 0;
-  margin: auto;
   max-width: 100%;
-  max-height: 100%;
+  max-height: calc(100vh - 176px);
   box-shadow: var(--card-edge);
 }
 .loupe-caption { width: min(640px, 100%); }
 .loupe-caption .print { margin: 0; }
 .loupe-prompt {
   margin: 6px 0 0;
-  max-height: 20vh;
+  max-height: 58px;
   overflow-y: auto;
   font: 400 12px/1.45 -apple-system, BlinkMacSystemFont, sans-serif;
   white-space: pre-wrap;
