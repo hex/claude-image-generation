@@ -142,7 +142,7 @@ fi
 
 use_remembered_fallback
 echo "Calling OpenAI API (model: ${MODEL}, mode: ${MODE})..." >&2
-display_pane_begin "$PROVIDER_NAME" "$MODEL"
+display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 
 # send_request <model> — posts the generate or edit request for this model and prints
 # curl_with_retry's body and status.

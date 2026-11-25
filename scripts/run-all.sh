@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: Runs image provider scripts (Gemini, OpenAI, xAI, and opt-in OpenRouter)
-# ABOUTME: in parallel under one streaming tmux pane with colored banners + spinner.
+# ABOUTME: Runs image provider scripts (Gemini, OpenAI, xAI, and opt-in OpenRouter) in parallel,
+# ABOUTME: showing them as one run in the browser gallery or one streaming tmux pane (IMAGE_DISPLAY).
 
 set -euo pipefail
 
@@ -11,12 +11,16 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output-base <base> [options]
 
-Runs Gemini, OpenAI, and xAI in parallel and streams their output into a single
-tmux pane with per-provider colored banners (blue / gray / red) and an animated
-spinner showing which providers are still working.
+Runs Gemini, OpenAI, and xAI in parallel and shows them as one run. Where the
+run shows is IMAGE_DISPLAY's choice:
+  gallery (default)  one card per provider on the browser gallery page
+  pane               a single tmux pane with per-provider colored banners
+                     (blue / gray / red) and an animated spinner
+  none               nowhere; the images are only saved
 
-Each provider writes <base>-<provider>.png. Per-provider stderr/stdout is
-captured under \$DISPLAY_PANE_DIR/logs/<provider>.{out,err} for debugging.
+Each provider writes <base>-<provider>.png. In the tmux pane, per-provider
+stderr/stdout is captured under \$DISPLAY_PANE_DIR/logs/<provider>.{out,err} for
+debugging; in the gallery and with none it stays on this script's own output.
 
 Options:
   --mode           generate or edit (required)
@@ -30,8 +34,8 @@ Options:
   --xai-extra        extra args passed to xai.sh        (single shell-split string)
   --openrouter-extra extra args passed to openrouter.sh (single shell-split string)
 
-Outside tmux, the streaming pane cannot open and providers fall back to direct
-terminal display in this shell (sequential output, but functional).
+With pane, outside tmux the streaming pane cannot open and providers fall back to
+direct terminal display in this shell (sequential output, but functional).
 EOF
   exit 1
 }
@@ -72,21 +76,42 @@ if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   usage
 fi
 
-# Join this tmux window's streaming pane, opening it when nothing is streaming yet. run-all
-# holds a token for the whole batch and releases it once every provider has been waited on, so
-# the pane outlives any single provider and closes on the same last-one-out rule everyone uses.
-if [[ -z "${DISPLAY_PANE_DIR:-}" ]] && pane_dir=$(display_pane_attach_or_open 2>/dev/null); then
-  export DISPLAY_PANE_DIR="$pane_dir"
-  mkdir -p "$DISPLAY_PANE_DIR/logs"
-  __pane_acquire run-all
+IFS=',' read -ra provider_list <<< "$PROVIDERS"
+for i in "${!provider_list[@]}"; do
+  provider_list[$i]="${provider_list[$i]// /}"
+done
+
+# Decided once here and handed down, so the providers neither probe python3 again nor repeat
+# the fallback notice. A bad IMAGE_DISPLAY ends the run here, before any provider is paid.
+DISPLAY_MODE=$(display_mode)
+export IMAGE_DISPLAY="$DISPLAY_MODE"
+
+# Either way run-all holds a token for the whole batch and releases it once every provider has
+# been waited on, so the surface outlives any single provider and is finished on the same
+# last-one-out rule everyone uses.
+if [[ "$DISPLAY_MODE" == pane ]]; then
+  # Join this tmux window's streaming pane, opening it when nothing is streaming yet.
+  if [[ -z "${DISPLAY_PANE_DIR:-}" ]] && pane_dir=$(display_pane_attach_or_open 2>/dev/null); then
+    export DISPLAY_PANE_DIR="$pane_dir"
+    mkdir -p "$DISPLAY_PANE_DIR/logs"
+    __pane_acquire run-all
+  fi
+elif [[ "$DISPLAY_MODE" == gallery && -z "${DISPLAY_PANE_DIR:-}" ]]; then
+  # The run directory comes first, so a server deciding whether it is idle already sees a live run.
+  if gallery_begin_run run-all "$PROMPT" "${provider_list[@]}"; then
+    export DISPLAY_PANE_DIR
+    trap '__pane_release run-all' EXIT
+    gallery_ensure
+  fi
 fi
 
-# Routes a provider's stdio to per-provider log files when the pane is open;
-# otherwise inherits this shell's stdio so users can still see what's happening.
+# Routes a provider's stdio to per-provider log files when the pane is open, where nothing
+# but the pane may write to the terminal; otherwise inherits this shell's stdio, so whoever
+# ran this (the generate tool, a person) still sees what's happening.
 spawn_provider() {
   local name="$1" script="$2"
   shift 2
-  if [[ -n "${DISPLAY_PANE_DIR:-}" ]]; then
+  if [[ "$DISPLAY_MODE" == pane && -n "${DISPLAY_PANE_DIR:-}" ]]; then
     bash "$script" "$@" \
       >>"$DISPLAY_PANE_DIR/logs/${name}.out" \
       2>>"$DISPLAY_PANE_DIR/logs/${name}.err" &
@@ -148,6 +173,10 @@ offer_retry() {
   [[ ${#FAILED[@]} -gt 0 ]] || return 1
   [[ "$wait" =~ ^[0-9]+$ && $wait -gt 0 ]] || return 1
   [[ -n "$dir" && -d "$dir" ]] || return 1
+  # Nobody answers an offer on a gallery no page shows, and the generate tool would sit out the wait.
+  if [[ "$DISPLAY_MODE" == gallery ]]; then
+    gallery_page_connected || return 1
+  fi
   { printf '%s\n' "$wait"; printf '%s\n' "${FAILED[@]}"; } > "$dir/.retry-offer.tmp" 2>/dev/null || return 1
   mv -f "$dir/.retry-offer.tmp" "$dir/retry-offer" 2>/dev/null || return 1
   local deadline=$((SECONDS + wait))
@@ -173,11 +202,6 @@ offer_retry() {
   return 1
 }
 
-IFS=',' read -ra provider_list <<< "$PROVIDERS"
-for i in "${!provider_list[@]}"; do
-  provider_list[$i]="${provider_list[$i]// /}"
-done
-
 declare -a FAILED=()
 overall_status=0
 run_round "${provider_list[@]}" || overall_status=1
@@ -188,8 +212,9 @@ if [[ $overall_status -eq 1 ]] && offer_retry; then
   run_round "${FAILED[@]}" || overall_status=1
 fi
 
-# A pane closed at the retry offer has already removed its directory; there is nothing left to release.
-if [[ -n "${DISPLAY_PANE_DIR:-}" && -d "$DISPLAY_PANE_DIR" ]]; then
+# A pane closed at the retry offer has already removed its directory; there is nothing left to
+# release. A gallery run is released by the EXIT trap set where it began.
+if [[ "$DISPLAY_MODE" == pane && -n "${DISPLAY_PANE_DIR:-}" && -d "$DISPLAY_PANE_DIR" ]]; then
   __pane_release run-all
 fi
 

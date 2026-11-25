@@ -129,7 +129,7 @@ REQUEST_BODY=$(build_request_body)
 
 use_remembered_fallback
 echo "Calling OpenRouter API (model: ${MODEL}, mode: ${MODE})..." >&2
-display_pane_begin "$PROVIDER_NAME" "$MODEL"
+display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 
 CURL_HEADERS=(-H "Content-Type: application/json" -H "Authorization: Bearer ${OPENROUTER_API_KEY}")
 [[ -n "$SITE_URL" ]] && CURL_HEADERS+=(-H "HTTP-Referer: ${SITE_URL}")
