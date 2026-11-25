@@ -13,7 +13,7 @@ Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output-base <ba
 
 Runs Gemini, OpenAI, and xAI in parallel and shows them as one run. Where the
 run shows is IMAGE_DISPLAY's choice:
-  gallery (default)  one card per provider on the browser gallery page
+  gallery (default)  one card on the browser gallery page, a frame per provider
   pane               a single tmux pane with per-provider colored banners
                      (blue / gray / red) and an animated spinner
   none               nowhere; the images are only saved

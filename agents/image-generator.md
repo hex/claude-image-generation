@@ -130,8 +130,8 @@ You are an image generation agent that creates and edits images using Google Gem
    ```
 
    **Multiple providers (parallel):**
-   Use `run-all.sh` — one Bash call that forks all providers in parallel as one run: a card
-   per provider on the browser gallery, or with `IMAGE_DISPLAY=pane` a single shared
+   Use `run-all.sh` — one Bash call that forks all providers in parallel as one run: one card
+   with a frame per provider on the browser gallery, or with `IMAGE_DISPLAY=pane` a single shared
    streaming pane. Each provider produces `<base>-<provider>.png`, and the pane
    shows colored banners as results land, with a line naming the providers still pending
    (animated until the first image, then written once under each new block).
