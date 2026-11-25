@@ -227,6 +227,16 @@ body {
 .retry:hover { background: color-mix(in srgb, var(--hot) 18%, transparent); }
 .retry:disabled { opacity: .5; }
 .retry svg { width: 12px; height: 12px; }
+.drain {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.5px;
+  background: var(--hot);
+  transform-origin: left center;
+  transform: scaleX(var(--from));
+}
 
 .note {
   margin: 4px 0 0;
@@ -459,11 +469,16 @@ body {
   gap: 2px;
 }
 
-/* ── Motion: the image developing, the loupe, the wait fill ────── */
+/* ── Motion: the image developing, the loupe, the wait fill, the retry drain ── */
 
 @media (prefers-reduced-motion: no-preference) {
   .view img { transition: opacity 140ms linear; }
   .fill { animation: wait var(--usual) linear var(--delay) both; }
+  .drain { animation: drain var(--left) linear both; }
+  @keyframes drain {
+    from { transform: scaleX(var(--from)); }
+    to { transform: scaleX(0); }
+  }
   @keyframes wait {
     from { transform: scaleX(0); }
     to { transform: scaleX(.92); }

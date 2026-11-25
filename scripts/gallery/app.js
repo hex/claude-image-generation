@@ -200,6 +200,16 @@ function hasImage(entry, card) {
 
 // ── Strips ───────────────────────────────────────────────────────
 
+// The time left on the retry offer, as a hairline that drains to nothing as the offer closes.
+function drain(run) {
+  if (!run.retry_seconds || !run.retry_ends_ms) return null;
+  const left = Math.max(0, run.retry_ends_ms - Date.now());
+  const line = el('span', { class: 'drain', 'aria-hidden': 'true' });
+  line.style.setProperty('--from', String(Math.min(1, left / (run.retry_seconds * 1000))));
+  line.style.setProperty('--left', left + 'ms');
+  return line;
+}
+
 function headNode(run) {
   const when = relative(run.started_at);
   const head = el('header', { class: 'head' },
@@ -211,7 +221,7 @@ function headNode(run) {
   if (run.retry && run.retry.length) {
     const note = el('span', { class: 'note', 'aria-live': 'polite' });
     const button = el('button', { type: 'button', class: 'retry', 'data-key': 'retry', 'aria-label': 'Retry failed: ' + run.retry.join(', ') },
-      icon('arrow-clockwise'), el('span', { text: 'Retry failed' }));
+      icon('arrow-clockwise'), el('span', { text: 'Retry failed' }), drain(run));
     button.addEventListener('click', () => post('/retry/' + encodeURIComponent(run.id), button, note));
     head.append(el('div', { class: 'offer' }, button, note));
   }
@@ -240,7 +250,7 @@ function newStrip(run) {
 
 function updateStrip(entry, run) {
   entry.run = run;
-  const headKey = JSON.stringify([run.prompt, run.session, run.cwd, run.started_at, run.retry, run.problem]);
+  const headKey = JSON.stringify([run.prompt, run.session, run.cwd, run.started_at, run.retry, run.retry_ends_ms, run.problem]);
   if (headKey !== entry.headKey) {
     const head = headNode(run);
     if (entry.head) swap(entry.head, head);

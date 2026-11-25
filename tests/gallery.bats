@@ -271,6 +271,12 @@ run_all_gemini() {
   wait_for_snapshot '.runs[0].retry == ["gemini"]'
   [[ "$(jq -r '.runs[0].providers[0] | [.state, .error] | @tsv' <<< "$SNAPSHOT")" == \
     $'error\tNo image data in response. Model said: no picture today' ]] || { echo "$SNAPSHOT"; return 1; }
+  # The offer closes DISPLAY_PANE_RETRY_WAIT seconds after it opened, which was moments ago.
+  local now_ms left_ms
+  now_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
+  left_ms=$(( $(jq -r '.runs[0].retry_ends_ms' <<< "$SNAPSHOT") - now_ms ))
+  [[ "$(jq -r '.runs[0].retry_seconds' <<< "$SNAPSHOT")" == 30 && $left_ms -gt 15000 && $left_ms -le 30000 ]] || {
+    echo "left_ms=$left_ms; $SNAPSHOT"; return 1; }
   local id
   id=$(jq -r '.runs[0].id' <<< "$SNAPSHOT")
   [[ "$(gallery_curl -X POST -H "$(origin)" "/retry/${id}")" == "{\"retrying\": \"${id}\"}" ]]

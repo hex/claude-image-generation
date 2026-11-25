@@ -202,10 +202,17 @@ def read_run(run_dir):
         status = "interrupted"
 
     retry = None
+    retry_seconds = None
+    retry_ends_ms = None
     if status == "live":
         try:
-            offer = read_text(run_dir / "retry-offer").split("\n")
+            offer_path = run_dir / "retry-offer"
+            offer = read_text(offer_path).split("\n")
             retry = [n for n in offer[1:] if n]
+            # The offer stays open the seconds its first line names, from when run-all wrote it.
+            if re.fullmatch(r"[0-9]+", offer[0]):
+                retry_seconds = int(offer[0])
+                retry_ends_ms = int((offer_path.stat().st_mtime + retry_seconds) * 1000)
         except FileNotFoundError:
             pass
 
@@ -236,6 +243,8 @@ def read_run(run_dir):
         "started_at": meta.get("started_at", ""),
         "status": status,
         "retry": retry,
+        "retry_seconds": retry_seconds,
+        "retry_ends_ms": retry_ends_ms,
         "problem": problem,
         "providers": cards,
     }
