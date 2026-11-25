@@ -648,4 +648,5 @@ Providers find that pane through a registry entry under `$TMPDIR` keyed by tmux 
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The gallery's icons are others' work, credited in
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
