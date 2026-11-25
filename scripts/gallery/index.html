@@ -9,14 +9,27 @@
 <script src="/app.js" defer></script>
 </head>
 <body>
-<a class="skip" href="#runs">Skip to the runs</a>
-<header class="top">
-  <h1>Image gallery</h1>
-  <p id="connection" class="connection" role="status" aria-live="polite">Connecting…</p>
-</header>
-<main id="runs" tabindex="-1">
-  <p id="empty" class="empty" hidden>No image runs yet. Images from Claude Code show up here while they generate.</p>
-  <ol id="run-list" class="runs"></ol>
+<a class="skip" href="#strips">Skip to the runs</a>
+<nav class="rail" aria-label="Sessions">
+  <ul id="sessions" class="sessions"></ul>
+  <p id="connection" class="connection" role="status" aria-live="polite"></p>
+</nav>
+<main id="strips" class="canvas" tabindex="-1">
+  <h1 class="sr">Image gallery</h1>
+  <button id="fresh" class="fresh slab" type="button" hidden></button>
+  <p id="empty" class="empty" hidden></p>
+  <ol id="strip-list" class="strips"></ol>
 </main>
+<div id="loupe" class="loupe slab" role="dialog" aria-modal="true" aria-labelledby="loupe-print" tabindex="-1" hidden>
+  <div id="loupe-actions" class="loupe-actions"></div>
+  <figure class="loupe-frame">
+    <div class="loupe-stage"><img id="loupe-image" class="loupe-image" alt=""></div>
+    <figcaption class="loupe-caption">
+      <p id="loupe-print" class="print"></p>
+      <p id="loupe-note" class="note" aria-live="polite"></p>
+      <p id="loupe-prompt" class="loupe-prompt"></p>
+    </figcaption>
+  </figure>
+</div>
 </body>
 </html>
