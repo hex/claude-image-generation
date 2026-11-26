@@ -884,3 +884,88 @@ resend() {
   [[ "$(cat "$MOCK_DIR/calls")" == 3 ]]
   [[ -z "$(grep -rIlF --devices=skip "$DUMMY_GEMINI_KEY" "$IMAGE_GALLERY_DIR")" && "$answer" != *"$DUMMY_GEMINI_KEY"* ]]
 }
+
+# write_resendable_run <run-id> <cwd> <image> [<mode> <input image>...] — a finished run whose gemini
+# saved image, with the arguments a gallery-mode run-all records: generate mode unless one is given.
+write_resendable_run() {
+  local id="$1" cwd="$2" image="$3" mode="${4:-generate}" meta
+  shift 3
+  [[ $# -gt 0 ]] && shift
+  write_run "$id" "$cwd" "gemini\tcomplete\t1000\tmodel-a\t$image\n" done
+  meta="$IMAGE_GALLERY_DIR/runs/$id/meta.json"
+  jq --arg mode "$mode" --arg base "${image%-gemini.png}" \
+    '. + {arguments: {mode: $mode, output_base: $base, input_images: $ARGS.positional,
+                      extras: {gemini: "", openai: "", xai: "", openrouter: ""}}}' \
+    "$meta" --args "$@" > "$meta.tmp"
+  mv "$meta.tmp" "$meta"
+}
+
+@test "a run that did not record its arguments cannot be resent: the page is told so, and a resend is refused" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1
+  printf 'png' > "$out/hero-gemini.png"
+  write_run "$a" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\n" done
+  start_gallery
+  wait_for_snapshot '.runs | length == 1'
+  [[ "$(jq -r '.runs[0].resendable' <<< "$SNAPSHOT")" == false ]] || { echo "$SNAPSHOT"; return 1; }
+  [[ "$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini"]}')" == \
+    "{\"error\": \"run $a did not record the arguments it was started with, so it cannot be resent\"} 409" ]]
+  [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && "$(ls "$out")" == hero-gemini.png ]]
+}
+
+@test "a resend whose output path is taken, even by a dangling symlink, is refused and starts nothing" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 stamp answer
+  printf 'png' > "$out/hero-gemini.png"
+  write_resendable_run "$a" "$out" "$out/hero-gemini.png"
+  start_gallery
+  wait_for_snapshot '.runs[0].resendable'
+  # The resend's base is stamped with the second it starts in; every second it could start in is taken.
+  for stamp in $(python3 -I -c 'import time; [print(time.strftime("%Y%m%d-%H%M%S", time.localtime(time.time() + s))) for s in range(10)]'); do
+    ln -s nowhere "$out/image-$stamp-gemini.png"
+  done
+  answer=$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini"]}')
+  [[ "$answer" =~ ^\{\"error\":\ \"$out/image-[0-9]{8}-[0-9]{6}-gemini\.png\ already\ exists,\ and\ nothing\ is\ overwritten\"\}\ 409$ ]] || {
+    echo "answer: $answer"; return 1; }
+  [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" ]]
+  [[ "$(snapshot | jq '.runs | length')" == 1 ]]
+}
+
+@test "a resend is refused for an unknown provider, none, a blank prompt, a working folder or input image that is gone" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 \
+    c=20261125T100200Z-00000000c3
+  printf 'png' > "$out/hero-gemini.png"
+  printf 'png' > "$out/sketch.png"
+  write_resendable_run "$a" "$out" "$out/hero-gemini.png"
+  write_resendable_run "$b" "${BATS_TEST_TMPDIR}/gone" "$out/hero-gemini.png"
+  write_resendable_run "$c" "$out" "$out/hero-gemini.png" edit "$out/sketch.png" "$out/erased.png"
+  start_gallery
+  wait_for_snapshot '[.runs[].resendable] == [true, true, true]'
+  [[ "$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini", "dalle"]}')" == \
+    '{"error": "unknown provider \"dalle\"; choose from gemini, openai, xai, openrouter"} 400' ]]
+  [[ "$(resend "$a" '{"prompt": "a kettle", "providers": []}')" == '{"error": "choose at least one provider"} 400' ]]
+  [[ "$(resend "$a" '{"prompt": " \n ", "providers": ["gemini"]}')" == '{"error": "the prompt is blank"} 400' ]]
+  [[ "$(resend "$b" '{"prompt": "a kettle", "providers": ["gemini"]}')" == \
+    "{\"error\": \"run $b's working folder ${BATS_TEST_TMPDIR}/gone is gone\"} 409" ]]
+  [[ "$(resend "$c" '{"prompt": "a kettle", "providers": ["gemini"]}')" == \
+    "{\"error\": \"run $c's input image $out/erased.png is gone\"} 409" ]]
+  [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" ]]
+  [[ "$(snapshot | jq '.runs | length')" == 3 ]]
+}
+
+@test "a resent run-all that exits before it starts a run is answered with its exit status and last lines, keys hidden" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1
+  printf 'png' > "$out/hero-gemini.png"
+  write_resendable_run "$a" "$out" "$out/hero-gemini.png"
+  start_gallery
+  wait_for_snapshot '.runs[0].resendable'
+  # The server finds bash on its PATH when it starts the run; this one fails at once, printing the key.
+  printf '#!/bin/sh\necho "using key $GEMINI_API_KEY" >&2\necho "no run today" >&2\nexit 3\n' > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  [[ "$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini"]}')" == \
+    '{"error": "run-all.sh exited 3 before it started a run: using key [GEMINI_API_KEY]\nno run today"} 502' ]]
+  rm "$MOCK_DIR/bash"
+  [[ "$(snapshot | jq '.runs | length')" == 1 ]]
+}
