@@ -1121,10 +1121,10 @@ write_resendable_run() {
   start_gallery
   wait_for_snapshot '.runs[0].resendable'
   # The server finds bash on its PATH when it starts the run; this one holds run-all.sh back until the
-  # test lets it go, and runs every other script at once.
+  # test lets it go, or gives up once the test's folder is gone, and runs every other script at once.
   real_bash=$(command -v bash)
-  printf '#!/bin/sh\ncase "$1" in */run-all.sh) while [ ! -e %q ]; do sleep 0.1; done ;; esac\nexec %q "$@"\n' \
-    "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
   chmod +x "$MOCK_DIR/bash"
   answer=$(gallery_curl --max-time 30 -w ' %{http_code}' -X POST -H "$(origin)" -H 'Content-Type: application/json' \
     --data-binary '{"prompt": "a teapot", "providers": ["gemini"]}' "/resend/$a")
