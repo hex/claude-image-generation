@@ -378,10 +378,11 @@ body {
   text-underline-offset: 3px;
   cursor: default;
 }
-/* Open, the square holds as a minimum and grows with the text. */
-.frame.expanded .plate { overflow: visible; }
-.frame.expanded .message { display: none; }
-.frame.expanded .full-error { display: block; }
+/* Open, the square holds as a minimum and grows with the text. A compact strip keeps its squares
+   closed, as a frame opened at full size is once its run turns compact. */
+.strip:not(.compact) .frame.expanded .plate { overflow: visible; }
+.strip:not(.compact) .frame.expanded .message { display: none; }
+.strip:not(.compact) .frame.expanded .full-error { display: block; }
 .compact .frame[data-state="error"] .plate { padding: 10px; justify-content: center; align-items: center; }
 .compact .code { margin: 0; text-align: center; }
 .compact .message, .compact .more, .compact .full-error { display: none; }
@@ -545,6 +546,7 @@ body {
   .brand { padding: 0; margin: 0 auto 0 0; border: 0; }
   .theme { margin: 0; width: 180px; }
   .sessions { order: 3; flex: 1 0 100%; flex-direction: row; gap: 6px; overflow-x: auto; }
+  .sessions > li { flex: none; }
   .session-row { grid-template-columns: auto auto auto; gap: 6px; padding: 3px 10px; background: var(--matte); }
   .lamp:not(.live) { display: none; }
   .canvas { padding: 16px 16px 48px; }

@@ -183,11 +183,11 @@ function roundBegan(run, card, entry) {
   return entry.roundSeen.get(round);
 }
 
-// "Retry 2 of 3" from a retrying record's "2/3": the retry under way and how many the provider
-// makes at most.
+// "Attempt 3 of 4" from a retrying record's "2/3", which counts retries: retry 2 of at most 3 is
+// the third request of at most four.
 function retryWords(attempt) {
   const match = /^([0-9]+)\/([0-9]+)$/.exec(attempt);
-  return match ? 'Retry ' + match[1] + ' of ' + match[2] : '';
+  return match ? 'Attempt ' + (Number(match[1]) + 1) + ' of ' + (Number(match[2]) + 1) : '';
 }
 
 // A frame at work: what it is doing, in the middle, over the usual time or the retry under way, and
