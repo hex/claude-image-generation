@@ -1,6 +1,8 @@
 # ABOUTME: Runs gallery-server.py's own code with the timing of a race fixed, so a bats test can
-# ABOUTME: replay it every time: a server that exits the moment it is told to stop.
+# ABOUTME: replay it every time: a server that exits the moment a run asks it to stop, and a run
+# ABOUTME: that read a server's health before another run replaced that server.
 import importlib.util
+import subprocess
 import sys
 import threading
 import time
@@ -34,5 +36,23 @@ if command == "serve-stopping-at-once":
 
     gallery.Gallery.__init__ = init_stopping_at_once
     gallery.serve(root, "0.0.0-other")
+elif command == "ensure-after-another":
+    # Reads the running server's health, lets another run's ensure replace that server, then goes
+    # on with the health it read. Prints the pid of the server the other run left.
+    health = gallery.control(root, "health")
+    other = subprocess.run([sys.executable, "-I", gallery_py, "ensure", "--root", str(root)])
+    if other.returncode != 0:
+        sys.exit("the other run's ensure exited %d" % other.returncode)
+    print(gallery.control(root, "health")["pid"])
+    control = gallery.control
+    read_earlier = [health]
+
+    def control_after_another(root, command, timeout=2):
+        if command == "health" and read_earlier:
+            return read_earlier.pop()
+        return control(root, command, timeout)
+
+    gallery.control = control_after_another
+    sys.exit(gallery.ensure(root))
 else:
     sys.exit("no such command: %s" % command)

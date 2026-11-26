@@ -13,6 +13,7 @@ retry-offer / .retry pair.
 """
 
 import argparse
+import contextlib
 import fcntl
 import hmac
 import http.server
@@ -759,25 +760,28 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 class ControlHandler(socketserver.StreamRequestHandler):
-    """Answers one command from a client command on the control socket: a line naming it, answered
-    with one line of JSON. Only this user can reach the socket, so a command carries no token."""
+    """Answers one command from a client command on the control socket: a line naming it, and for
+    shutdown the pid it is meant for, answered with one line of JSON. Only this user can reach the
+    socket, so a command carries no token."""
     timeout = 5
 
     def handle(self):
         gallery = self.server.gallery
-        command = self.rfile.readline(64).decode(errors="replace").strip()
+        command, _, argument = self.rfile.readline(64).decode(errors="replace").strip().partition(" ")
         if command == "health":
             answer = {"pid": os.getpid(), "port": gallery.port, "token": gallery.token,
                       "version": gallery.version, "clients": gallery.clients}
         elif command == "open":
             answer = {"opened": gallery.open_page()}
         elif command == "shutdown":
-            answer = {"stopping": True}
+            # Names the pid of the server the caller read health from. Another run may have
+            # replaced that server since, and its successor is not the one the caller meant.
+            answer = {"stopping": argument == str(os.getpid())}
         else:
             answer = {"error": "no such command: %r" % command}
         self.wfile.write(json.dumps(answer).encode() + b"\n")
         # Only once the answer is sent: the main thread exits as soon as it sees the stop.
-        if command == "shutdown":
+        if answer.get("stopping"):
             gallery.stop.set()
 
 
@@ -948,9 +952,13 @@ def ensure(root):
     old_port, old_pages = None, 0
     if health is not None and health["version"] != version:
         old_port, old_pages = health["port"], health["clients"]
-        control(root, "shutdown")
+        # The answer does not matter: a server another run started since says no, and one that
+        # another run's shutdown is stopping can exit before it answers. Either way the old pid
+        # is gone after the wait, and whatever answers then is the server to use.
+        with contextlib.suppress(ConnectionError):
+            control(root, "shutdown %d" % health["pid"])
         wait_for_exit(health["pid"], LOCK_WAIT_SECONDS)
-        health = None
+        health = control(root, "health")
     if health is None:
         health = start_server(root, version)
         if health is None:

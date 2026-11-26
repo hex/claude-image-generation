@@ -277,21 +277,27 @@ run_all_gemini() {
   return 1
 }
 
-@test "a server of another version is replaced by one of this plugin's version" {
+@test "a server of another version is replaced by one of this plugin's version, which a run that found the old one too keeps" {
   # The old server exits the moment it is told to stop, so only an answer sent before that reaches the run.
   python3 -I "${PLUGIN_ROOT}/tests/gallery_race.py" "$GALLERY_PY" serve-stopping-at-once "$IMAGE_GALLERY_DIR"
-  local i old version
+  local i old version replacement root
   for i in $(seq 1 50); do
     [[ "$(server_field version)" == 0.0.0-other ]] && break
     sleep 0.1
   done
   [[ "$(server_field version)" == 0.0.0-other ]]
   old=$(server_field pid)
-  start_gallery
+  # The second run read the old server's health before the first replaced it, and asks to stop it after.
+  replacement=$(python3 -I "${PLUGIN_ROOT}/tests/gallery_race.py" "$GALLERY_PY" ensure-after-another "$IMAGE_GALLERY_DIR")
+  # A server asked to stop exits within one scan, a quarter second.
+  sleep 1
   version=$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")
-  [[ "$(server_field version)" == "$version" ]]
-  [[ "$(server_field pid)" != "$old" ]]
+  [[ "$(server_field pid)" == "$replacement" && "$(server_field version)" == "$version" ]] || {
+    echo "serving: $(server_field pid) $(server_field version), expected $replacement $version"; return 1; }
+  [[ "$replacement" != "$old" ]]
   ! kill -0 "$old" 2>/dev/null
+  root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
+  [[ "$(pgrep -f "gallery-server.py serve --root ${root}" | tr '\n' ' ')" == "$replacement " ]]
 }
 
 # stub_browser — puts an open and an xdg-open first on PATH that record each call in
