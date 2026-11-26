@@ -719,7 +719,7 @@ cpu_seconds() {
   write_run "$b" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/keep-gemini.png\n" done
   start_gallery
   wait_for_snapshot '.runs | length == 2'
-  [[ "$(jq -c --arg a "$a" '.runs[] | select(.id == $a) | .images' <<< "$SNAPSHOT")" == \
+  [[ "$(jq -c --arg a "$a" '.runs[] | select(.id == $a) | [.files[].path]' <<< "$SNAPSHOT")" == \
     "[\"$out/one-gemini.png\",\"$out/two-gemini.png\",\"$out/link-openai.png\",\"$out/gone-xai.png\"]" ]] || {
     echo "$SNAPSHOT"; return 1; }
   # A POST without the page's Origin deletes nothing.
@@ -727,7 +727,7 @@ cpu_seconds() {
   [[ -f "$out/one-gemini.png" && -L "$out/link-openai.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
   local answer
   answer=$(gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" "/delete/$a")
-  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/one-gemini.png\", \"$out/two-gemini.png\", \"$out/link-openai.png\"], \"missing\": [\"$out/gone-xai.png\"], \"shared\": []}], \"kept\": []} 200" ]] || {
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/one-gemini.png\", \"$out/two-gemini.png\", \"$out/link-openai.png\"], \"missing\": [\"$out/gone-xai.png\"], \"kept_files\": []}], \"kept\": []} 200" ]] || {
     echo "$answer"; return 1; }
   [[ "$(ls "$out" | tr '\n' ' ')" == "keep-gemini.png notes.txt one-xai.png target.png " ]] || { ls -la "$out"; return 1; }
   [[ ! -e "$IMAGE_GALLERY_DIR/runs/$a" && -d "$IMAGE_GALLERY_DIR/runs/$b" ]]
@@ -738,21 +738,28 @@ cpu_seconds() {
     echo "$answer"; return 1; }
 }
 
-@test "a run whose records name a file that is not <name>-<provider> with an image extension, or not a file, is kept with all its images" {
+@test "deleting a run deletes the files named <name>-<provider> with an image extension and keeps each other file it names, saying why" {
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1
   printf 'png' > "$out/fine-gemini.png"
+  # A single provider script called as SKILL.md shows saves to a name of the caller's choosing.
+  printf 'png' > "$out/generated.png"
   printf 'png' > "$out/photo-openai.png"
   printf 'secret' > "$out/notes.txt"
   mkdir "$out/folder-xai.png"
-  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/fine-gemini.png\ngemini\tcomplete\t1000\tmodel-a\t$out/photo-openai.png\nopenai\tcomplete\t1000\tmodel-b\t$out/notes.txt\nxai\tcomplete\t1000\tmodel-c\t$out/folder-xai.png\nxai\tcomplete\t1000\tmodel-c\trelative-xai.png\n" done
+  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/fine-gemini.png\ngemini\tcomplete\t1000\tmodel-a\t$out/generated.png\ngemini\tcomplete\t1000\tmodel-a\t$out/photo-openai.png\nopenai\tcomplete\t1000\tmodel-b\t$out/notes.txt\nxai\tcomplete\t1000\tmodel-c\t$out/folder-xai.png\nxai\tcomplete\t1000\tmodel-c\trelative-xai.png\nxai\tcomplete\t1000\tmodel-c\t$out/nul\0-xai.png\n" done
   start_gallery
   wait_for_snapshot '.runs | length == 1'
-  local answer
+  # The page is told which files stay, and why, before it asks: the same files and reasons the delete gives.
+  local foreseen answer
+  [[ "$(jq -c '[.runs[0].files[] | select(.kept == null) | .path]' <<< "$SNAPSHOT")" == "[\"$out/fine-gemini.png\"]" ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  foreseen=$(jq -c '[.runs[0].files[] | select(.kept) | {path, reason: .kept}]' <<< "$SNAPSHOT")
   answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a")
-  [[ "$answer" == "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a names files the gallery does not delete; nothing was deleted\", \"refused\": [{\"path\": \"$out/photo-openai.png\", \"reason\": \"its name does not end in -gemini and .png, .jpg, .jpeg, .webp or .gif\"}, {\"path\": \"$out/notes.txt\", \"reason\": \"its name does not end in -openai and .png, .jpg, .jpeg, .webp or .gif\"}, {\"path\": \"$out/folder-xai.png\", \"reason\": \"not a file\"}, {\"path\": \"relative-xai.png\", \"reason\": \"not an absolute path\"}]}], \"error\": \"run $a names files the gallery does not delete; nothing was deleted\"} 409" ]] || {
+  [[ "$(jq -c '.deleted[0].kept_files' <<< "${answer% *}")" == "$foreseen" ]] || { echo "$foreseen"; echo "$answer"; return 1; }
+  [[ "$(ls "$out" | tr '\n' ' ')" == "folder-xai.png generated.png notes.txt photo-openai.png " ]] || { ls -la "$out"; return 1; }
+  [[ ! -e "$IMAGE_GALLERY_DIR/runs/$a" ]]
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/fine-gemini.png\"], \"missing\": [], \"kept_files\": [{\"path\": \"$out/generated.png\", \"reason\": \"its name does not end in -gemini and .png, .jpg, .jpeg, .webp or .gif\"}, {\"path\": \"$out/photo-openai.png\", \"reason\": \"its name does not end in -gemini and .png, .jpg, .jpeg, .webp or .gif\"}, {\"path\": \"$out/notes.txt\", \"reason\": \"its name does not end in -openai and .png, .jpg, .jpeg, .webp or .gif\"}, {\"path\": \"$out/folder-xai.png\", \"reason\": \"not a file\"}, {\"path\": \"relative-xai.png\", \"reason\": \"not an absolute path\"}, {\"path\": \"$out/nul\\u0000-xai.png\", \"reason\": \"its path holds a NUL character\"}]}], \"kept\": []} 200" ]] || {
     echo "$answer"; return 1; }
-  [[ "$(ls "$out" | tr '\n' ' ')" == "fine-gemini.png folder-xai.png notes.txt photo-openai.png " ]] || { ls -la "$out"; return 1; }
-  [[ -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
 }
 
 @test "a run still held by a process is kept with its images, answered 409" {
@@ -787,7 +794,7 @@ cpu_seconds() {
   wait_for_snapshot '.runs | length == 4'
   local answer
   answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a1/$a2/$a3")
-  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a1\", \"removed\": [\"$out/a1-gemini.png\"], \"missing\": [], \"shared\": []}, {\"id\": \"$a2\", \"removed\": [], \"missing\": [], \"shared\": []}], \"kept\": [{\"id\": \"$a3\", \"error\": \"run $a3 is still generating\"}]} 200" ]] || {
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a1\", \"removed\": [\"$out/a1-gemini.png\"], \"missing\": [], \"kept_files\": []}, {\"id\": \"$a2\", \"removed\": [], \"missing\": [], \"kept_files\": []}], \"kept\": [{\"id\": \"$a3\", \"error\": \"run $a3 is still generating\"}]} 200" ]] || {
     echo "$answer"; return 1; }
   [[ "$(ls "$out" | tr '\n' ' ')" == "a3-gemini.png b1-gemini.png " ]] || { ls -la "$out"; return 1; }
   [[ "$(snapshot | jq -r '[.runs[].id] | @tsv')" == "$b1"$'\t'"$a3" ]]
@@ -805,11 +812,11 @@ cpu_seconds() {
   wait_for_snapshot '.runs | length == 2'
   local answer
   answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a")
-  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/hero-openai.png\"], \"missing\": [], \"shared\": [{\"path\": \"$out/hero-gemini.png\", \"reason\": \"run $b names it too\"}]}], \"kept\": []} 200" ]] || {
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/hero-openai.png\"], \"missing\": [], \"kept_files\": [{\"path\": \"$out/hero-gemini.png\", \"reason\": \"run $b names it too\"}]}], \"kept\": []} 200" ]] || {
     echo "$answer"; return 1; }
   [[ "$(ls "$out" | tr '\n' ' ')" == "hero-gemini.png " ]] || { ls -la "$out"; return 1; }
   answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$b")
-  [[ "$answer" == "{\"deleted\": [{\"id\": \"$b\", \"removed\": [\"$out/hero-gemini.png\"], \"missing\": [], \"shared\": []}], \"kept\": []} 200" ]] || {
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$b\", \"removed\": [\"$out/hero-gemini.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
     echo "$answer"; return 1; }
   [[ -z "$(ls "$out")" ]] || { ls -la "$out"; return 1; }
   # Runs deleted together: the file goes with the last of them that names it.
@@ -818,7 +825,7 @@ cpu_seconds() {
   write_run "$d" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/pair-gemini.png\n" done
   wait_for_snapshot '.runs | length == 2'
   answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$c/$d")
-  [[ "$answer" == "{\"deleted\": [{\"id\": \"$c\", \"removed\": [], \"missing\": [], \"shared\": [{\"path\": \"$out/pair-gemini.png\", \"reason\": \"run $d names it too\"}]}, {\"id\": \"$d\", \"removed\": [\"$out/pair-gemini.png\"], \"missing\": [], \"shared\": []}], \"kept\": []} 200" ]] || {
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$c\", \"removed\": [], \"missing\": [], \"kept_files\": [{\"path\": \"$out/pair-gemini.png\", \"reason\": \"run $d names it too\"}]}, {\"id\": \"$d\", \"removed\": [\"$out/pair-gemini.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
     echo "$answer"; return 1; }
   [[ -z "$(ls "$out")" ]] || { ls -la "$out"; return 1; }
 }

@@ -386,7 +386,7 @@ def read_run(run_dir):
         "updated_ms": updated_ms,
         "problem": problem,
         "providers": cards,
-        "images": unique_paths(recorded_images(providers)),
+        "files": [{"path": path, "provider": name} for name, path in unique_images(recorded_images(providers))],
         "resendable": "arguments" in meta,
     }
 
@@ -450,13 +450,15 @@ def recorded_images(providers):
     return [(p["name"], path) for p in providers.values() for path in p["images"]]
 
 
-def unsafe_image(provider, path):
-    """Why the gallery will not delete path, which a complete record of provider names as its image,
-    or None when it may. Only an absolute path whose file name ends in -<provider> and an image
-    extension may go, and only while it is a file or a symlink, never a directory; a path already
-    gone may go too."""
+def keep_reason(provider, path):
+    """Why deleting the run whose complete record of provider names path as its image keeps the file
+    there, or None when the file goes with the run. Only an absolute path whose file name ends in
+    -<provider> and an image extension goes, and only while it is a file or a symlink, never a
+    directory; a path already gone counts as gone with it."""
     if not PROVIDER.match(provider):
         return "its provider name %s is not one a run writes" % json.dumps(provider)
+    if "\0" in path:
+        return "its path holds a NUL character"
     if not os.path.isabs(path):
         return "not an absolute path"
     name = os.path.basename(path)
@@ -468,15 +470,25 @@ def unsafe_image(provider, path):
         return None
     except OSError as e:
         return e.strerror
-    except ValueError:
-        return "its path holds a NUL character"
     if not (stat.S_ISREG(mode) or stat.S_ISLNK(mode)):
         return "not a file"
     return None
 
 
-def unique_paths(images):
-    return list(dict.fromkeys(path for name, path in images))
+def unique_images(images):
+    """(provider, path) for each path images names, with the provider of its first record."""
+    first = {}
+    for name, path in images:
+        first.setdefault(path, (name, path))
+    return list(first.values())
+
+
+def mark_kept_files(runs):
+    """Gives each file a run names kept: why deleting the run would keep it (keep_reason), or None.
+    Read on every scan, since a file can change while its run's own files do not."""
+    for run in runs:
+        for f in run["files"]:
+            f["kept"] = keep_reason(f["provider"], f["path"])
 
 
 def image_type(head):
@@ -558,6 +570,7 @@ class Gallery:
         for name in set(self.read_runs) - set(names):
             del self.read_runs[name]
         add_usual_times(runs)
+        mark_kept_files(runs)
         snapshot = json.dumps({"instance": self.instance, "runs": runs})
         if snapshot != self.snapshot:
             with self.changed:
@@ -602,16 +615,16 @@ class Gallery:
                 continue
             except ValueError:
                 pass
-            for path in unique_paths(recorded_images(providers)):
+            for provider, path in unique_images(recorded_images(providers)):
                 namers.setdefault(path, []).append(name)
         return namers
 
     def delete(self, run_id, namers):
-        """Deletes a run: the files its complete records name as images, then its directory, once
-        unsafe_image passes every one of them. A file another run in namers (image_namers) names too
-        stays, as shared. Answers (HTTP status, outcome): 200 with the paths removed, those already
-        gone and those shared, or the error that kept the run in place. A deleted run leaves namers.
-        Call it holding runs_lock."""
+        """Deletes a run: each file its complete records name as an image that keep_reason lets go
+        and no other run in namers (image_namers) names, then its directory. Every other file a
+        record names stays. Answers (HTTP status, outcome): 200 with the paths removed, those already
+        gone and those kept with why, or the error that kept the run in place. A deleted run leaves
+        namers. Call it holding runs_lock."""
         run_dir = self.runs_dir / run_id
         if not RUN_ID.match(run_id) or not run_dir.is_dir():
             return 404, {"id": run_id, "error": "no run %s" % run_id}
@@ -627,22 +640,16 @@ class Gallery:
         except ValueError as e:
             return 409, {"id": run_id, "error": "run %s's status log is unreadable (%s), so which images it saved is "
                                                 "unknown; nothing was deleted" % (run_id, e)}
-        images = recorded_images(providers)
-        refused = []
-        for provider, path in images:
-            reason = unsafe_image(provider, path)
-            if reason is not None:
-                refused.append({"path": path, "reason": reason})
-        if refused:
-            return 409, {"id": run_id, "error": "run %s names files the gallery does not delete; nothing was deleted" % run_id,
-                         "refused": refused}
         removed = []
         missing = []
-        shared = []
-        for path in unique_paths(images):
+        kept = []
+        for provider, path in unique_images(recorded_images(providers)):
+            reason = keep_reason(provider, path)
             others = [name for name in namers.get(path, []) if name != run_id]
-            if others:
-                shared.append({"path": path, "reason": "run %s names it too" % others[-1]})
+            if reason is None and others:
+                reason = "run %s names it too" % others[-1]
+            if reason is not None:
+                kept.append({"path": path, "reason": reason})
                 continue
             try:
                 os.unlink(path)
@@ -651,15 +658,15 @@ class Gallery:
                 missing.append(path)
             except OSError as e:
                 return 500, {"id": run_id, "error": "could not delete %s: %s; the run is kept" % (path, e.strerror),
-                             "removed": removed, "missing": missing, "shared": shared}
+                             "removed": removed, "missing": missing, "kept_files": kept}
         shutil.rmtree(str(run_dir), ignore_errors=True)
         if os.path.lexists(str(run_dir)):
             return 500, {"id": run_id, "error": "could not remove the run's folder %s" % run_dir,
-                         "removed": removed, "missing": missing, "shared": shared}
+                         "removed": removed, "missing": missing, "kept_files": kept}
         for names in namers.values():
             if run_id in names:
                 names.remove(run_id)
-        return 200, {"id": run_id, "removed": removed, "missing": missing, "shared": shared}
+        return 200, {"id": run_id, "removed": removed, "missing": missing, "kept_files": kept}
 
     def resend(self, run_id, prompt, providers):
         """Starts run-all.sh again for a run that recorded its arguments, with prompt and providers in
