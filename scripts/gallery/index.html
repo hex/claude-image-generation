@@ -4,18 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Image gallery</title>
+<title>Gallery · Claude Image Generation</title>
 <link rel="stylesheet" href="app.css">
 <script src="app.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#strips">Skip to the runs</a>
-<nav class="rail" aria-label="Sessions">
+<nav class="rail" aria-label="Projects">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <span><span class="brand-name">Claude Image Generation</span><span class="brand-sub">Gallery</span></span>
+  </div>
   <ul id="sessions" class="sessions"></ul>
-  <p id="connection" class="connection" role="status" aria-live="polite"></p>
+  <fieldset class="theme">
+    <legend class="sr">Theme</legend>
+    <label><input type="radio" name="theme" value="auto">Auto</label>
+    <label><input type="radio" name="theme" value="light">Light</label>
+    <label><input type="radio" name="theme" value="dark">Dark</label>
+  </fieldset>
 </nav>
 <main id="strips" class="canvas" tabindex="-1">
-  <h1 class="sr">Image gallery</h1>
+  <h1 class="sr">Gallery</h1>
+  <p class="top"><span id="here" class="here"></span><span id="run-count"></span><span id="connection" role="status" aria-live="polite"></span></p>
   <button id="fresh" class="fresh slab" type="button" hidden></button>
   <p id="empty" class="empty" hidden></p>
   <ol id="strip-list" class="strips"></ol>

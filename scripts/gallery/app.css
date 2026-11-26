@@ -1,69 +1,46 @@
-/* The image gallery in the Agents sidebar's own look: each image run is one of its cards on the
-   canvas, with the folder line and state pill over the prompt as its title, the providers' frames
-   inside it. The tokens are the sidebar's, names and values, and so are the card, pill, type and
-   hover rules, so the two read as one system. */
+/* The image gallery: each image run is a section on a plain canvas, parted from the next by a
+   hairline, with its state, folder and time over the prompt and one square plate per provider in a
+   fixed column. Light and dark come from one set of tokens: light-dark() picks a value by the
+   color-scheme, which follows the system under Auto and is fixed by the rail's Light and Dark. */
 :root {
   color-scheme: light dark;
-  --bg: #f2f2f7; --fg: #1c1c1e; --dim: #6c6c70; --rule: #e5e5ea;
-  /* A run is a card on the canvas. */
-  --card: #ffffff; --card-hover: #f9f9fb; --card-border: #e5e5ea;
-  --finished-bg: #e8f5ec;
-  /* An empty frame's well: a shade of ink over whatever card holds it, so it sinks into the Done
-     card's green as it does into white. The dark cards are lighter than the canvas, which sinks. */
-  --well: color-mix(in srgb, var(--fg) 5%, transparent);
-  --hot: #2a6fd6; --warn: #a8420a;
-  /* Ink on a filled accent: white only where white reads; the dark theme's fills are pale. */
-  --accent-ink: #ffffff;
-  --lit: #2f8f4e; --alert: #c2410c;
-  /* The lamp green reads at 4.07:1 on a white card, which a bar does not care about and words do. */
-  --lit-ink: #2a7d45;
-  --sev-ok: #228739;
-  /* Two hovers: a row tint for anything list-shaped, a control tint for buttons. */
-  --tint-row: color-mix(in srgb, var(--hot) 12%, transparent);
-  --tint-ctl: color-mix(in srgb, var(--fg) 9%, transparent);
-  /* A card's edge is light, not a line: two soft drops and a pale ring. On a dark ground a drop
-     shadow is invisible, so there the ring alone carries the edge. */
-  --card-edge: 0 2px 4px rgb(35 35 35 / .03), 0 1px 2px rgb(35 35 35 / .04),
-               0 0 0 2px rgb(205 205 205 / .14);
+  --canvas: light-dark(#f4f4f2, #121213);
+  /* The plate's ground: what an image letterboxes onto and what a plate without one shows. */
+  --matte: light-dark(#e7e7e4, #1e1e20);
+  --raise: light-dark(#fbfbfa, #19191b);
+  --ink: light-dark(#18181b, #ededef);
+  --ink-2: light-dark(#55555c, #a8a8af);
+  --ink-3: light-dark(#6f6f76, #8b8b93);
+  --rule: light-dark(rgb(0 0 0 / .09), rgb(255 255 255 / .08));
+  --rule-strong: light-dark(rgb(0 0 0 / .18), rgb(255 255 255 / .2));
+  --signal: light-dark(#2563eb, #79a2ff);
+  --fail: light-dark(#b42318, #ff8a7f);
+  --done: light-dark(#1f7a4a, #62c793);
+  --hatch: light-dark(rgb(0 0 0 / .055), rgb(255 255 255 / .045));
   --ease-power2: cubic-bezier(.33, 1, .68, 1);
-  /* The thinnest outline a screen draws whole: half a point on a Retina screen, a pixel on a 1x one. */
-  --hair: .5px;
-  --meta-icon: 9px;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
-@media (max-resolution: 1.5dppx) {
-  :root { --hair: 1px; }
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1c1e; --fg: #f2f2f7; --dim: #98989d; --rule: #3a3a3c;
-    --card: #2c2c2e; --card-hover: #323236; --card-border: #3a3a3c;
-    --finished-bg: #1f2e22;
-    --well: var(--bg);
-    --hot: #81a2be; --warn: #de935f;
-    --accent-ink: #1c1c1e;
-    --lit: #8ec07c; --alert: #fb8b5e; --lit-ink: #8ec07c;
-    --sev-ok: #30d158;
-    --card-edge: 0 0 0 1px var(--card-border);
-  }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
 /* The page keeps what you look at in place itself when a run lands above it (app.js), so the
    browser's own scroll anchoring stays off rather than moving it a second time. */
-html { background: var(--bg); overflow-anchor: none; }
+html { background: var(--canvas); overflow-anchor: none; }
 
 body {
   margin: 0;
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
-  color: var(--fg);
-  font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif;
+  grid-template-columns: 200px minmax(0, 1fr);
+  background: var(--canvas);
+  color: var(--ink);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   -webkit-user-select: none; user-select: none;
   -webkit-text-size-adjust: 100%;
-  /* Arrow, not the pointing hand, as in the sidebar: macOS reserves the hand for links. */
+  /* Arrow, not the pointing hand: macOS reserves the hand for links. */
   cursor: default;
   overflow-anchor: none;
 }
@@ -81,28 +58,22 @@ body {
 .skip:focus {
   left: 8px; top: 8px; z-index: 60;
   padding: 4px 8px; border-radius: 6px;
-  background: var(--card); color: var(--fg); box-shadow: var(--card-edge);
+  background: var(--raise); color: var(--ink); border: 1px solid var(--rule-strong);
 }
 
-:focus-visible {
-  outline: 1px solid var(--hot); outline-offset: 1px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--hot) 22%, transparent);
-}
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-/* Anything floating above the cards -- a frame's buttons, the new-run chip, the loupe -- is one
-   slab: a translucent ground that samples what is behind it, a hairline and a three-layer shadow. */
+/* Anything floating above the runs -- a frame's buttons, the new-run chip, the loupe -- is one
+   slab: a translucent ground that samples what is behind it, a hairline and a soft shadow. */
 .slab {
-  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  background: color-mix(in srgb, var(--canvas) 84%, transparent);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   backdrop-filter: saturate(180%) blur(20px);
-  border: .5px solid color-mix(in srgb, var(--fg) 14%, transparent);
-  box-shadow:
-    0 0 0 var(--hair) color-mix(in srgb, var(--fg) 5%, transparent),
-    0 8px 28px -6px color-mix(in srgb, var(--fg) 34%, transparent),
-    0 2px 6px -2px color-mix(in srgb, var(--fg) 18%, transparent);
+  border: 1px solid var(--rule-strong);
+  box-shadow: 0 8px 28px -6px rgb(0 0 0 / .28), 0 2px 6px -2px rgb(0 0 0 / .16);
 }
 
-/* ── Session rail ──────────────────────────────────────────────── */
+/* ── Rail ──────────────────────────────────────────────────────── */
 
 .rail {
   position: sticky;
@@ -110,185 +81,172 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  padding: 8px 0 10px;
+  padding: 22px 12px;
+  border-right: 1px solid var(--rule);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
+/* The plugin's name over the page's, beside a mark of two tiles: one plate full, one half lit. */
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 10px 18px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+.mark {
+  flex: none; width: 22px; height: 22px; padding: 3px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  border-radius: 6px; background: var(--ink);
+}
+.mark::before, .mark::after { content: ""; border-radius: 2px; background: var(--canvas); }
+.mark::after { opacity: .55; }
+.brand-name { display: block; font-size: 13px; font-weight: 650; line-height: 1.2; }
+.brand-sub { display: block; font-size: 12px; line-height: 1.3; color: var(--ink-3); }
+
 .sessions {
   list-style: none;
   margin: 0;
-  padding: 0 8px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
-/* A sidebar row: 30px tall, the name dim and medium at rest, dark and semibold while it has a run
-   at work. */
 .session-row {
   display: grid;
   grid-template-columns: 6px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  min-height: 30px;
-  padding: 5px 10px;
-  border-radius: 7px;
-  color: var(--dim);
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--ink-2);
+  font-size: 13px;
   text-decoration: none;
   cursor: default;
 }
-.session-row:hover, .session-row[aria-current="page"] { background: var(--tint-row); }
-.session-row .name {
-  font-size: 13px; font-weight: 500; letter-spacing: -.02em; line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.session-row:has(.lamp.live) .name, .session-row[aria-current="page"] .name { color: var(--fg); font-weight: 600; }
-.session-row .count {
-  font: 400 10px/1 ui-monospace, Menlo, monospace;
-  color: var(--dim);
-  font-variant-numeric: tabular-nums;
-}
+.session-row:hover { background: color-mix(in srgb, var(--matte) 55%, transparent); }
+.session-row[aria-current="page"] { background: var(--matte); color: var(--ink); font-weight: 600; }
+.session-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row .count { font-size: 12px; font-weight: 400; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
-/* The Working pill's dot, beside a session with a run at work, and absent otherwise. */
+/* A dot beside a project with a run at work, nothing otherwise. */
 .lamp { width: 6px; height: 6px; border-radius: 50%; }
-.lamp.live { background: var(--lit); }
+.lamp.live { background: var(--signal); }
 
-.connection {
+/* Auto, Light and Dark as one segmented control at the foot of the rail. */
+.theme {
   margin: auto 0 0;
-  padding: 8px 18px 0;
-  font: 400 10px/1.4 -apple-system, sans-serif;
-  color: var(--dim);
-}
-.connection:empty { display: none; }
-
-/* ── Cards ─────────────────────────────────────────────────────── */
-
-.canvas { min-width: 0; padding: 8px 8px 48px; }
-.canvas:focus { outline: none; box-shadow: none; }
-
-.empty {
-  margin: 0;
-  padding: 40px 14px;
-  font: 400 11px/1.3 -apple-system, sans-serif;
-  color: var(--dim);
-}
-
-.strips { list-style: none; margin: 0; padding: 0; }
-
-.card {
-  margin-bottom: 6px; padding: 18px 14px;
+  padding: 2px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  border: 0;
   border-radius: 8px;
-  background: var(--card); box-shadow: var(--card-edge);
-  transition: background-color .18s ease-out, box-shadow .15s var(--ease-power2);
+  background: var(--matte);
 }
-.card:hover { background: var(--card-hover); }
-/* A finished run: the whole card in the panel's calm green, the sidebar's Done wash and ring. */
-.card[data-state="done"] {
-  --finished-ring: color-mix(in srgb, var(--sev-ok) 45%, var(--card-border));
-  background: var(--finished-bg); box-shadow: 0 0 0 1px var(--finished-ring);
+.theme label {
+  position: relative;
+  padding: 5px 0;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
 }
-.card[data-state="done"]:hover { background: color-mix(in srgb, var(--fg) 4%, var(--finished-bg)); }
+.theme input { position: absolute; inset: 0; margin: 0; opacity: 0; }
+.theme label:has(input:checked) { background: var(--raise); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.theme label:has(input:focus-visible) { outline: 2px solid var(--signal); outline-offset: 1px; }
 
-.head { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; margin-bottom: 14px; }
+/* ── Runs ──────────────────────────────────────────────────────── */
+
+.canvas { min-width: 0; padding: 26px 40px 80px; }
+.canvas:focus { outline: none; }
+
+/* Where you are, how many runs it holds, and whether the page is live. */
+.top {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  min-height: 28px; margin: 0 0 22px;
+  font-size: 12.5px; color: var(--ink-3);
+}
+.top > :not(:empty) ~ :not(:empty)::before { content: "\00b7"; margin-right: 8px; }
+.here { color: var(--ink); font-weight: 600; }
+
+.empty { margin: 0; padding: 24px 0; color: var(--ink-3); }
+
+/* The query container for the frames' 980px fallback is the list, not the page, so the fixed
+   new-run chip beside it keeps the viewport as its box. */
+.strips { list-style: none; margin: 0; padding: 0; container-type: inline-size; }
+
+.strip { padding: 0 0 30px; }
+.strip:not([hidden]) ~ .strip { padding-top: 24px; border-top: 1px solid var(--rule); }
+
+.head { margin-bottom: 16px; }
 .head > p { margin: 0; }
+.compact .head { margin-bottom: 10px; }
 
-/* The folder line: the session's folder in the dim ink, the state pill at its right. */
-.identity { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; }
-.folder {
-  display: inline-flex; align-items: center; gap: 5px; flex: 1; min-width: 0;
-  font: 400 11px/1.3 -apple-system, sans-serif; color: var(--dim);
+/* The run's line: its state, folder and time parted by middots, then the retry offer. */
+.line {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  min-height: 28px; margin-bottom: 6px;
+  font-size: 12.5px; color: var(--ink-2);
 }
-.folder svg { flex: none; width: 12px; height: 12px; opacity: .85; }
-.folder-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fact + .fact::before { content: "\00b7"; margin-right: 8px; color: var(--ink-3); }
+.fact time, .recency { font-variant-numeric: tabular-nums; }
 
-/* The state as a soft pill: a dot and the word in the state's ink on a tint of it, no outline.
-   Done is the filled green badge. */
-.word {
-  flex: none; display: inline-flex; align-items: center; gap: 5px;
-  height: 18px; padding: 0 8px 0 7px; border: 0; border-radius: 9px;
-  font: 600 10px/18px -apple-system, sans-serif;
-}
-.word:not(.done)::before {
-  content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor;
-}
-.word.working { color: var(--lit-ink); background: color-mix(in srgb, var(--lit) 14%, transparent); }
-.word.stopped { color: var(--dim); background: color-mix(in srgb, var(--fg) 8%, transparent); }
-.word.failed { color: var(--alert); background: color-mix(in srgb, var(--alert) 16%, transparent); }
-.word.done { padding: 0 8px; color: var(--accent-ink); background: var(--sev-ok); }
+.state { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.state.working { color: var(--signal); }
+.state.done { color: var(--done); }
+.state.failed { color: var(--fail); }
+.state.stopped { color: var(--ink-3); }
+.state.stopped::before { border-radius: 1px; }
+.folder { color: var(--ink); font-weight: 500; }
 
-/* The prompt where the sidebar puts the task title: two lines, then an ellipsis; the whole of it is
-   in the loupe. The clamp is the stylesheet's alone, so a live card's title holds its height through
-   every update. A stopped run's title rests in the dim ink, as an idle session's name does. */
+/* The prompt, two lines and an ellipsis; the whole of it is in the loupe. The clamp is the
+   stylesheet's alone, so a live run's prompt holds its height through every update. */
 .prompt {
-  max-width: 100%;
-  font-size: 17px; line-height: 1.24; font-weight: 600; letter-spacing: -.025em;
+  max-width: 700px;
+  font-size: 17px; line-height: 1.4; font-weight: 500;
   overflow-wrap: anywhere;
+  text-wrap: pretty;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
-.card[data-state="stopped"] .prompt { color: var(--dim); font-weight: 500; }
+.compact .prompt { font-size: 14px; color: var(--ink-2); -webkit-line-clamp: 1; }
 
-.recency { font: 400 10px/1.4 -apple-system, sans-serif; color: var(--dim); }
+.head > .problem { margin-top: 6px; font: 12px/1.4 var(--mono); color: var(--fail); }
 
-/* The facts line: monospace, dim, its items parted by a dim middot. */
-.facts, .print {
-  display: flex; align-items: center; gap: 5px; max-width: 100%;
-  font: 400 10px/1 ui-monospace, Menlo, monospace; color: var(--dim);
-  white-space: nowrap; overflow: hidden; padding-block: .2em; margin-block: -.2em;
-  font-variant-numeric: tabular-nums;
-}
-.chip { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
-.chip svg { flex: none; width: var(--meta-icon); height: var(--meta-icon); opacity: .85; }
-.cwd { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
-.facts > .chip ~ .chip::before,
-.print > :not(.sr) ~ :not(.sr)::before { content: "\00b7"; margin-right: 2px; opacity: .6; }
-
-.problem {
-  font: 400 10px/1.4 ui-monospace, Menlo, monospace;
-  color: var(--alert);
-}
-
-/* The run's one action while its retry offer is open, in the plain tint of the sidebar's card
-   control; a hairline under it drains as the offer runs out. */
-.offer { display: flex; align-items: center; gap: 8px; }
+/* The run's one action while its retry offer is open: a pill with the time left on it. */
+.offer { display: inline-flex; align-items: center; gap: 8px; margin-left: 4px; }
 .retry {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 20px;
-  padding: 0 9px 0 7px;
-  border: 0;
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--tint-ctl);
-  color: var(--fg);
-  font: 500 11px/1 -apple-system, sans-serif;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--raise);
+  color: var(--ink);
+  font: inherit; font-weight: 600;
   cursor: default;
 }
-.retry:hover { background: color-mix(in srgb, var(--fg) 14%, transparent); }
+.retry:has(.left) { padding-right: 6px; }
+.retry:hover { background: var(--matte); }
 .retry:disabled { opacity: .5; }
-.retry svg { width: 11px; height: 11px; }
-.drain {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1.5px;
-  background: var(--dim);
-  transform-origin: left center;
-  transform: scaleX(var(--from));
+.left {
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--matte);
+  color: var(--ink-2);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .note {
   margin: 4px 0 0;
-  font: 400 10px/1.4 ui-monospace, Menlo, monospace;
-  color: var(--alert);
+  font: 11px/1.4 var(--mono);
+  color: var(--fail);
   overflow-wrap: anywhere;
 }
 .note:empty { display: none; }
@@ -296,28 +254,37 @@ body {
 
 /* ── Frames ────────────────────────────────────────────────────── */
 
+/* Four columns, one per provider, so a provider always sits in its own; app.js sets each frame's
+   --col. A run started within the last day takes the width, an older one is a strip of small
+   squares. */
 .frames {
+  --cell: minmax(0, 1fr);
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 14px 12px;
+  grid-template-columns: repeat(4, var(--cell));
+  gap: 16px;
   align-items: start;
 }
-.frame { min-width: 0; }
+.compact .frames { --cell: minmax(0, 148px); gap: 10px; }
+.frame { min-width: 0; grid-column: var(--col, auto); }
 
-/* Every frame of a run is the same square, so the providers compare at a glance whatever shape
-   each image is. A frame without a picture, waiting or failed, is a well in the card. */
+@container (max-width: 980px) {
+  .strip:not(.compact) .frames { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .strip:not(.compact) .frame { grid-column: auto; }
+}
+
+/* Every frame is the same square, whatever shape its image is, on the matte. */
 .plate {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 6px;
-  background: var(--well);
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: var(--matte);
   overflow: hidden;
 }
-.frame[data-state="complete"]:not(.missing) .plate { background: transparent; }
-.frame[data-state="interrupted"] .plate { opacity: .55; }
 
 .view {
   display: block;
@@ -326,13 +293,10 @@ body {
   padding: 0;
   border: 0;
   background: none;
-  cursor: default;
+  cursor: zoom-in;
 }
-.view:focus-visible { outline: none; box-shadow: none; }
-.plate:has(> .view:focus-visible) {
-  outline: 1px solid var(--hot); outline-offset: 1px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--hot) 22%, transparent);
-}
+.view:focus-visible { outline: none; }
+.plate:has(> .view:focus-visible) { outline: 2px solid var(--signal); outline-offset: 2px; }
 .view img {
   display: block;
   width: 100%;
@@ -342,73 +306,102 @@ body {
 }
 .view img.shown { opacity: 1; }
 
-/* The wait, as the sidebar's task bar: a 4px track along the foot of the empty frame that fills
-   in the lamp green over this provider and model's usual time and stops at 92%, never claiming
-   the image is done. Under reduced motion it stands still at the share of that time spent. */
+/* A frame at work: what it is doing, and its usual time or its retry, in the middle. */
+.pending { padding: 0 10px; text-align: center; }
+.pending-label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.pending-sub { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.compact .pending-sub { display: none; }
+
+/* The wait, as a rule along the plate's foot that fills over this provider and model's usual time
+   and stops at 92%, never claiming the image is done; dashed while the provider retries. Under
+   reduced motion it stands still at the share of that time spent. */
 .bar {
   position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 14px;
-  height: 4px;
-  border-radius: 2px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--fg) 16%, transparent);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--signal);
+  clip-path: inset(0 calc(100% - var(--at) * 100%) 0 0);
 }
-.fill {
-  display: block;
-  height: 100%;
-  background: var(--lit);
-  transform-origin: left center;
-  transform: scaleX(var(--at));
+.frame[data-state="retrying"] .bar {
+  background: repeating-linear-gradient(90deg, var(--signal) 0 6px, transparent 6px 10px);
 }
 
-.error {
+.frame[data-state="interrupted"] .plate {
+  background: repeating-linear-gradient(135deg, var(--hatch) 0 7px, transparent 7px 14px), var(--matte);
+}
+.stopped-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-3); }
+.stopped-label::before { content: ""; width: 8px; height: 8px; border-radius: 1px; background: currentColor; }
+
+/* A failed frame: the status and any error code in red, the message as text, the whole file on
+   demand. */
+.frame[data-state="error"] .plate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 16px;
+}
+.code { margin: 0 0 10px; font: 600 11px/1.2 var(--mono); letter-spacing: .02em; color: var(--fail); overflow-wrap: anywhere; }
+.message {
   margin: 0;
-  padding: 10px 12px 0;
-  font: 400 10px/1.4 ui-monospace, Menlo, monospace;
-  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+}
+.message.quiet { color: var(--ink-3); }
+.full-error {
+  display: none;
+  margin: 0;
+  font: 11px/1.45 var(--mono);
+  color: var(--ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   -webkit-user-select: text; user-select: text;
   cursor: text;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 11;
-  overflow: hidden;
 }
 .more {
-  position: absolute;
-  left: 12px;
-  bottom: 8px;
-  padding: 0;
+  margin-top: auto;
+  padding: 8px 0 0;
   border: 0;
   background: none;
-  font: 500 11px/1.3 -apple-system, sans-serif;
-  color: var(--hot);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 3px;
   cursor: default;
 }
 /* Open, the square holds as a minimum and grows with the text. */
 .frame.expanded .plate { overflow: visible; }
-.frame.expanded .error { display: block; }
-.frame.expanded .more { position: static; margin: 4px 12px 10px; }
+.frame.expanded .message { display: none; }
+.frame.expanded .full-error { display: block; }
+.compact .frame[data-state="error"] .plate { padding: 10px; justify-content: center; align-items: center; }
+.compact .code { margin: 0; text-align: center; }
+.compact .message, .compact .more, .compact .full-error { display: none; }
 
-.gone {
-  position: absolute;
-  inset: 0;
-  margin: 0;
+.gone { margin: 0; font-size: 12px; color: var(--ink-3); }
+
+/* Under each frame: the provider and its seconds, then the model. */
+.caption {
+  margin-top: 8px;
   display: grid;
-  place-items: center;
-  font: 400 11px/1.3 -apple-system, sans-serif;
-  color: var(--dim);
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  font-size: 13px;
 }
-
-/* Under each frame, its facts line: provider, model, then the state or the seconds. */
-.frame > .print { margin-top: 8px; }
-.print .model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.print .outcome { flex: none; }
-.frame[data-state="error"] .print .outcome { color: var(--alert); font-weight: 600; }
-.frame[data-state="retrying"] .print .outcome { color: var(--warn); font-weight: 600; }
+.provider { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.secs { font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.frame[data-state="error"] .secs { color: var(--fail); font-weight: 600; }
+.caption .model { grid-column: 1 / -1; font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compact .caption { font-size: 12px; }
+.compact .caption .model { display: none; }
 
 /* A frame's buttons, on hover or keyboard focus, in the bottom-right corner of its image. */
 .actions {
@@ -435,10 +428,10 @@ body {
   border: 0;
   border-radius: 6px;
   background: none;
-  color: var(--fg);
+  color: var(--ink);
   cursor: default;
 }
-.act:hover { background: var(--tint-ctl); }
+.act:hover { background: var(--rule); }
 .act:disabled { opacity: .5; }
 .act svg { width: 14px; height: 14px; }
 
@@ -446,14 +439,14 @@ body {
 .fresh {
   position: fixed;
   top: 10px;
-  left: calc(208px + (100vw - 208px) / 2);
+  left: calc(200px + (100vw - 200px) / 2);
   transform: translateX(-50%);
   z-index: 20;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 6px;
-  color: var(--hot);
-  font: 500 11px/1 -apple-system, sans-serif;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: var(--signal);
+  font: 600 12px/1 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   cursor: default;
 }
@@ -470,7 +463,7 @@ body {
   box-shadow: none;
   opacity: 0;
 }
-.loupe:focus { outline: none; box-shadow: none; }
+.loupe:focus { outline: none; }
 .loupe.open { opacity: 1; }
 .loupe-frame {
   flex: 1;
@@ -488,16 +481,23 @@ body {
 .loupe-image {
   max-width: 100%;
   max-height: calc(100vh - 176px);
-  border-radius: 8px;
-  box-shadow: var(--card-edge);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--rule);
 }
 .loupe-caption { width: min(640px, 100%); }
-.loupe-caption .print { margin: 0; }
+/* The loupe's facts line: provider, model, seconds, parted by middots. */
+.print {
+  display: flex; align-items: center; gap: 6px; margin: 0;
+  font-size: 12.5px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.print .provider { color: var(--ink); }
+.print > :not(.sr) ~ :not(.sr)::before { content: "\00b7"; margin-right: 6px; color: var(--ink-3); }
 .loupe-prompt {
   margin: 8px 0 0;
-  max-height: 66px;
+  max-height: 72px;
   overflow-y: auto;
-  font-size: 14px; line-height: 1.3; font-weight: 600; letter-spacing: -.02em;
+  font-size: 15px; line-height: 1.4; font-weight: 500;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   -webkit-user-select: text; user-select: text;
@@ -511,48 +511,43 @@ body {
   gap: 2px;
 }
 
-/* ── Motion: the image developing, the loupe, the wait fill, the retry drain ── */
+/* ── Motion: the image developing, the loupe, the wait rule ── */
 
 @media (prefers-reduced-motion: no-preference) {
   .view img { transition: opacity 140ms linear; }
-  .fill { animation: wait var(--usual) linear var(--delay) both; }
-  .drain { animation: drain var(--left) linear both; }
-  @keyframes drain {
-    from { transform: scaleX(var(--from)); }
-    to { transform: scaleX(0); }
-  }
+  .bar { animation: wait var(--usual) linear var(--delay) both; }
   @keyframes wait {
-    from { transform: scaleX(0); }
-    to { transform: scaleX(.92); }
+    from { clip-path: inset(0 100% 0 0); }
+    to { clip-path: inset(0 8% 0 0); }
   }
   .loupe { transition: opacity 200ms var(--ease-power2); }
   .loupe-frame { transition: transform 200ms var(--ease-power2); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .card { transition: none; }
+  .actions { transition: none; }
   .loupe-frame { transform: none; }
 }
 
-/* ── Narrow windows: the rail becomes a row of session chips over the cards ── */
+/* ── Narrow windows: the rail becomes a row of project chips over the runs ── */
 
 @media (max-width: 720px) {
   body { display: block; }
   .rail {
     position: static;
     height: auto;
-    padding: 8px 0 2px;
+    padding: 12px 16px 4px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    border-right: 0;
   }
-  .sessions { flex-direction: row; gap: 6px; overflow-x: auto; }
-  .session-row {
-    grid-template-columns: auto auto auto;
-    gap: 6px;
-    min-height: 24px;
-    padding: 2px 8px;
-    background: var(--card);
-    box-shadow: var(--card-edge);
-  }
+  .brand { padding: 0; margin: 0 auto 0 0; border: 0; }
+  .theme { margin: 0; width: 180px; }
+  .sessions { order: 3; flex: 1 0 100%; flex-direction: row; gap: 6px; overflow-x: auto; }
+  .session-row { grid-template-columns: auto auto auto; gap: 6px; padding: 3px 10px; background: var(--matte); }
   .lamp:not(.live) { display: none; }
-  .connection { padding: 6px 12px 0; }
+  .canvas { padding: 16px 16px 48px; }
   .fresh { left: 50%; }
   .loupe { padding: 44px 12px 12px; }
 }
