@@ -839,3 +839,48 @@ cpu_seconds() {
     echo "$answer"; return 1; }
   [[ -f "$out/hero-gemini.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
 }
+
+# resend <run id> <body> — POSTs a resend the way the page's Resend button does, printing the answer
+# and then its status.
+resend() {
+  gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" -H 'Content-Type: application/json' --data-binary "$2" "/resend/$1"
+}
+
+@test "Resend on a run of a gallery-mode run-all starts a new run in its project with the edited prompt and the chosen providers, saved beside its images" {
+  answer_provider_with "$GEMINI_IMAGE"
+  # With no key, openai fails before it starts, as a run's provider can.
+  unset OPENAI_API_KEY
+  # The server inherits the environment of the run-all that starts it, as in use, and here that
+  # run-all works in another folder than the run resent, which is named through a symlink on macOS
+  # (/var is /private/var). The new run must record its folder spelled as the resent run did.
+  cd "${BATS_TEST_TMPDIR}"
+  run bash "${SCRIPTS}/run-all.sh" --mode generate --prompt "a harbour at noon" --output-base out/harbour --providers gemini
+  assert_status 0
+  cd out
+  run bash "${SCRIPTS}/run-all.sh" --mode generate --prompt "a lighthouse at dusk" --output-base picture \
+    --providers gemini,openai --gemini-extra "--aspect-ratio 16:9"
+  assert_status 1
+  wait_for_snapshot '(.runs | length == 2) and .runs[0].status == "done"'
+  local first cwd
+  first=$(jq -r '.runs[0].id' <<< "$SNAPSHOT")
+  cwd=$(jq -r '.runs[0].cwd' <<< "$SNAPSHOT")
+  [[ "$cwd" == "$PWD" && "$(jq -r '.runs[0].resendable' <<< "$SNAPSHOT")" == true ]] || { echo "$SNAPSHOT"; return 1; }
+  local answer new
+  answer=$(resend "$first" '{"prompt": "a lighthouse at dawn", "providers": ["gemini"]}')
+  [[ "$answer" =~ ^\{\"run\":\ \"([0-9]{8}T[0-9]{6}Z-[0-9a-f]{10})\"\}\ 200$ ]] || { echo "answer: $answer"; return 1; }
+  new=${BASH_REMATCH[1]}
+  [[ "$new" != "$first" ]]
+  wait_for_snapshot "(.runs | length == 3) and (.runs[0].id == \"$new\") and (.runs[0].status == \"done\")"
+  [[ "$(jq -r '.runs[0] | [.prompt, .cwd, ([.providers[].name] | join(",")), .providers[0].state] | @tsv' <<< "$SNAPSHOT")" == \
+    "a lighthouse at dawn	$cwd	gemini	complete" ]] || { echo "$SNAPSHOT"; return 1; }
+  local saved
+  saved=$(jq -r '.runs[0].providers[0].image.path' <<< "$SNAPSHOT")
+  [[ "$saved" =~ ^"$PWD"/image-[0-9]{8}-[0-9]{6}-gemini\.png$ && -f "$saved" ]] || { echo "saved: $saved"; ls -la; return 1; }
+  [[ "$(ls | wc -l | tr -d ' ')" == 3 && -f picture-gemini.png ]] || { ls -la; return 1; }
+  # The first run is as it was, and the resent request carried the run's own extra arguments.
+  [[ "$(jq -r '.runs[1] | [.id, .prompt, ([.providers[].name] | join(","))] | @tsv' <<< "$SNAPSHOT")" == \
+    "$first	a lighthouse at dusk	gemini,openai" ]] || { echo "$SNAPSHOT"; return 1; }
+  grep -qF '"aspectRatio": "16:9"' "$MOCK_DIR/request.raw" || { cat "$MOCK_DIR/request.raw"; return 1; }
+  [[ "$(cat "$MOCK_DIR/calls")" == 3 ]]
+  [[ -z "$(grep -rIlF --devices=skip "$DUMMY_GEMINI_KEY" "$IMAGE_GALLERY_DIR")" && "$answer" != *"$DUMMY_GEMINI_KEY"* ]]
+}

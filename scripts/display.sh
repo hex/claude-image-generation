@@ -452,11 +452,13 @@ gallery_root() {
 # Creates a gallery run directory and points DISPLAY_PANE_DIR at it, holding a token for
 # <owner> so the run counts as live until that owner releases it. The run is assembled under a
 # dot name and renamed into runs/ only once its token and meta.json are in place, so the server
-# never sees a run without them. Fails with one line on stderr, leaving DISPLAY_PANE_DIR unset.
-# Usage: gallery_begin_run <owner> <prompt> <provider>...
+# never sees a run without them. <arguments> is a JSON object of what run-all.sh was started with,
+# recorded so the page can resend the run, or empty for a run that cannot be resent. Fails with one
+# line on stderr, leaving DISPLAY_PANE_DIR unset.
+# Usage: gallery_begin_run <owner> <prompt> <arguments> <provider>...
 gallery_begin_run() {
-  local owner="$1" prompt="$2"
-  shift 2
+  local owner="$1" prompt="$2" arguments="$3"
+  shift 3
   local root run_id staging started keep_mode=""
   root=$(gallery_root)
   # A folder IMAGE_GALLERY_DIR names that already exists keeps its own mode, which display_mode
@@ -475,8 +477,9 @@ gallery_begin_run() {
   fi
   DISPLAY_PANE_DIR="$staging"
   __pane_acquire "$owner"
-  if ! jq -n --arg prompt "$prompt" --arg cwd "$PWD" --arg started "$started" \
-      '{prompt: $prompt, cwd: $cwd, started_at: $started, providers: $ARGS.positional}' \
+  if ! jq -n --arg prompt "$prompt" --arg cwd "$PWD" --arg started "$started" --arg arguments "$arguments" \
+      '{prompt: $prompt, cwd: $cwd, started_at: $started, providers: $ARGS.positional}
+       + if $arguments == "" then {} else {arguments: ($arguments | fromjson)} end' \
       --args "$@" > "$staging/meta.json" \
     || ! mv "$staging" "$root/runs/$run_id"; then
     echo "image gallery: cannot write the run in $staging" >&2
@@ -597,7 +600,7 @@ display_pane_begin() {
     local mode
     mode=$(display_mode) || return 1
     if [[ "$mode" == gallery ]]; then
-      gallery_begin_run "$provider" "$prompt" "$provider" && gallery_ensure
+      gallery_begin_run "$provider" "$prompt" "" "$provider" && gallery_ensure
     elif [[ "$mode" == pane ]] && is_tmux; then
       local watch_dir
       if watch_dir=$(display_pane_attach_or_open 2>/dev/null); then

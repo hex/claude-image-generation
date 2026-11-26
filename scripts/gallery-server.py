@@ -54,6 +54,23 @@ ERROR_TEXT_LIMIT = 8192
 USUAL_SAMPLES = 5
 HOLDER_CHECK_SECONDS = 10
 IN_FLIGHT = ("waiting", "querying", "retrying")
+# The providers run-all.sh runs, which a resend may choose from.
+RESEND_PROVIDERS = ("gemini", "openai", "xai", "openrouter")
+# The generate tool's cap on a prompt (hooks/argv.ts), which a resend keeps to: a prompt travels as
+# one program argument down to curl.
+PROMPT_LIMIT_BYTES = 100000
+# A resend's JSON body: a prompt at its limit, every character escaped to six bytes, fits.
+RESEND_BODY_LIMIT = 6 * PROMPT_LIMIT_BYTES + 4096
+BODY_READ_SECONDS = 10
+# How long a resend waits for run-all.sh to make its run directory before it gives up waiting.
+RESEND_START_SECONDS = 15
+RESEND_LOGS_KEPT = 50
+RESEND_ERROR_LINES = 8
+# What a resent run-all.sh's environment drops from the server's: a tmux pane's, which it must not
+# draw into, the run directory of the run-all that started the server, which it would write into
+# instead of starting its own, and the switch that would keep it out of the gallery.
+RESEND_DROPPED_ENV = ("DISPLAY_PANE_DIR", "TMUX", "TMUX_PANE", "SKIP_DISPLAY")
+API_KEY_NAMES = ("GEMINI_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "OPENROUTER_API_KEY")
 RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{10}$")
 PROVIDER = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # The endings of an image file the gallery may delete, after -<provider>.
@@ -265,7 +282,33 @@ def read_meta(run_dir):
     names = meta.get("providers")
     if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
         raise RunRejected("meta.json's providers is %s, not a list of names" % json.dumps(names)[:80])
+    if "arguments" in meta:
+        check_arguments(meta["arguments"])
     return meta
+
+
+def check_arguments(arguments):
+    """Raises RunRejected naming the field unless arguments is what run-all.sh records of how it was
+    started: its mode, its output base and input images as absolute paths, and a string of extra
+    arguments for each provider. A run that recorded none has no arguments field at all."""
+    def bad(field, value, wanted):
+        return RunRejected("meta.json's arguments.%s is %s, not %s" % (field, json.dumps(value)[:80], wanted))
+    if not isinstance(arguments, dict):
+        raise RunRejected("meta.json's arguments is %s, not an object" % json.dumps(arguments)[:80])
+    if arguments.get("mode") not in ("generate", "edit"):
+        raise bad("mode", arguments.get("mode"), "generate or edit")
+    base = arguments.get("output_base")
+    if not isinstance(base, str) or not os.path.isabs(base):
+        raise bad("output_base", base, "an absolute path")
+    images = arguments.get("input_images")
+    if not isinstance(images, list) or not all(isinstance(path, str) and os.path.isabs(path) for path in images):
+        raise bad("input_images", images, "a list of absolute paths")
+    if arguments["mode"] == "edit" and not images:
+        raise bad("input_images", images, "at least one image for edit mode")
+    extras = arguments.get("extras")
+    if (not isinstance(extras, dict) or sorted(extras) != sorted(RESEND_PROVIDERS)
+            or not all(isinstance(value, str) for value in extras.values())):
+        raise bad("extras", extras, "a string for each of %s" % ", ".join(RESEND_PROVIDERS))
 
 
 def read_run(run_dir):
@@ -344,6 +387,7 @@ def read_run(run_dir):
         "problem": problem,
         "providers": cards,
         "images": unique_paths(recorded_images(providers)),
+        "resendable": "arguments" in meta and bool(recorded_images(providers)),
     }
 
 
@@ -472,6 +516,10 @@ class Gallery:
         # half-done work and the request threads never touch read_runs during a scan.
         self.runs_lock = threading.Lock()
         self.read_runs = {}
+        # The output base of each resent run-all.sh not yet reaped, mapped to its process. Held only
+        # to check and claim a base, never while a child runs: the child's own ensure calls back.
+        self.resend_lock = threading.Lock()
+        self.resends = {}
         self.page = {}
         for route, (name, ctype) in PAGE_FILES.items():
             self.page[route] = ((PAGE_DIR / name).read_bytes(), ctype)
@@ -613,6 +661,139 @@ class Gallery:
                 names.remove(run_id)
         return 200, {"id": run_id, "removed": removed, "missing": missing, "shared": shared}
 
+    def resend(self, run_id, prompt, providers):
+        """Starts run-all.sh again for a run that recorded its arguments, with prompt and providers in
+        place of its own, saving beside the run's first image under a fresh image-<stamp> base. Answers
+        (HTTP status, body) once the new run's directory exists, or with why none was started."""
+        run_dir = self.runs_dir / run_id
+        if not RUN_ID.match(run_id) or not run_dir.is_dir():
+            return 404, {"error": "no run %s" % run_id}
+        try:
+            meta = read_meta(run_dir)
+        except RunRejected as e:
+            return 409, {"error": "run %s cannot be read: %s" % (run_id, e)}
+        except OSError as e:
+            return 409, {"error": "run %s cannot be read: %s: %s" % (run_id, e.filename, e.strerror)}
+        arguments = meta.get("arguments")
+        if arguments is None:
+            return 409, {"error": "run %s did not record the arguments it was started with, so it cannot be resent" % run_id}
+        recorded = {}
+        try:
+            reduce_status(read_status_log(run_dir), recorded)
+        except FileNotFoundError:
+            pass
+        except ValueError as e:
+            return 409, {"error": "run %s's status log is unreadable (%s), so where it saved its images is unknown" % (run_id, e)}
+        images = unique_paths(recorded_images(recorded))
+        if not images:
+            return 409, {"error": "run %s saved no image, so there is no folder to save a resend beside" % run_id}
+        folder = os.path.dirname(images[0])
+        cwd = meta["cwd"]
+        for path, what in ((cwd, "working folder"), (folder, "image folder")):
+            if not os.path.isdir(path):
+                return 409, {"error": "run %s's %s %s is gone" % (run_id, what, path)}
+        for path in arguments["input_images"]:
+            if not os.path.isfile(path):
+                return 409, {"error": "run %s's input image %s is gone" % (run_id, path)}
+        base = os.path.join(folder, "image-" + time.strftime("%Y%m%d-%H%M%S"))
+        argv = ["bash", str(SCRIPT.parent / "run-all.sh"), "--mode", arguments["mode"], "--prompt", prompt,
+                "--output-base", base, "--providers", ",".join(providers)]
+        for path in arguments["input_images"]:
+            argv += ["--input-image", path]
+        for name in providers:
+            if arguments["extras"][name]:
+                argv += ["--%s-extra" % name, arguments["extras"][name]]
+        with self.resend_lock:
+            outputs = ["%s-%s.png" % (base, name) for name in providers]
+            if base in self.resends:
+                return 409, {"error": "a resend saving to %s-<provider>.png is already starting; try again in a second" % base}
+            taken = [path for path in outputs if os.path.lexists(path)]
+            if taken:
+                return 409, {"error": "%s already exists, and nothing is overwritten" % taken[0]}
+            log_path = self.resend_log()
+            started = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(time.time() - 1))
+            try:
+                with open(str(log_path), "ab") as log:
+                    child = subprocess.Popen(argv, cwd=cwd, env=self.resend_environment(cwd), stdin=subprocess.DEVNULL,
+                                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True, umask=0o022)
+            except OSError as e:
+                return 500, {"error": "could not start run-all.sh: %s" % e.strerror}
+            self.resends[base] = child
+        threading.Thread(target=self.reap, args=(base, child), daemon=True).start()
+        deadline = time.monotonic() + RESEND_START_SECONDS
+        while True:
+            # Whether it exited is read before the runs are, so a child that made its run and exited
+            # in between is still found.
+            code = child.returncode
+            new_id = self.resent_run(base, started)
+            if new_id is not None:
+                self.scan()
+                return 200, {"run": new_id}
+            if code is not None:
+                return 502, {"error": "run-all.sh exited %d before it started a run: %s" % (code, self.log_tail(log_path))}
+            if time.monotonic() > deadline:
+                return 504, {"error": "run-all.sh started no run within %d s; its output goes to %s"
+                                      % (RESEND_START_SECONDS, log_path)}
+            time.sleep(0.05)
+
+    def resend_environment(self, cwd):
+        """The server's environment, which holds the API keys of the run-all.sh that started it, as a
+        resent run-all.sh gets it: in cwd, showing its run in this gallery and nowhere else."""
+        env = {name: value for name, value in os.environ.items() if name not in RESEND_DROPPED_ENV}
+        # Bash keeps an inherited PWD that names its working folder, so the new run records the
+        # folder spelled as the run it resends did, symlinks and all, and lands in the same project.
+        env.update(PWD=cwd, IMAGE_DISPLAY="gallery", IMAGE_GALLERY_DIR=str(self.root),
+                   DISPLAY_IMAGE_TARGET="/dev/null", IMAGE_GALLERY_NO_OPEN="1")
+        return env
+
+    def resend_log(self):
+        """A fresh file in the gallery folder for one resent run-all.sh's output, keeping only the
+        newest RESEND_LOGS_KEPT of them."""
+        logs = self.root / "resend-logs"
+        logs.mkdir(mode=0o700, exist_ok=True)
+        for old in sorted(os.listdir(str(logs)))[:-RESEND_LOGS_KEPT]:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(str(logs / old))
+        path = logs / ("%s-%s.log" % (time.strftime("%Y%m%d-%H%M%S"), secrets.token_hex(4)))
+        os.close(os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        return path
+
+    def log_tail(self, path):
+        """The last lines of a resend's output, with every API key the server holds hidden."""
+        text = read_text(path)[-ERROR_TEXT_LIMIT:]
+        for name in API_KEY_NAMES:
+            key = os.environ.get(name, "")
+            if key:
+                text = text.replace(key, "[%s]" % name)
+        lines = [line for line in text.splitlines() if line.strip()][-RESEND_ERROR_LINES:]
+        return "\n".join(lines) if lines else "it printed nothing"
+
+    def resent_run(self, base, started):
+        """The id of the run whose recorded output base is base, looked for among the runs started
+        since started, or None while there is none."""
+        for name in sorted(os.listdir(str(self.runs_dir)), reverse=True):
+            if not RUN_ID.match(name):
+                continue
+            if name[:16] < started:
+                break
+            try:
+                arguments = read_meta(self.runs_dir / name).get("arguments")
+            except (RunRejected, OSError):
+                continue
+            if arguments is not None and arguments["output_base"] == base:
+                return name
+        return None
+
+    def reap(self, base, child):
+        """Waits for a resent run-all.sh, so it leaves no zombie, and frees its output base."""
+        child.wait()
+        with self.resend_lock:
+            del self.resends[base]
+
+    def resending(self):
+        with self.resend_lock:
+            return bool(self.resends)
+
     def reject(self, run_dir, reason):
         """Leaves a run directory out of the snapshot, naming it in server.log."""
         print("image gallery: skipping run %s: %s" % (run_dir, reason), file=sys.stderr, flush=True)
@@ -730,17 +911,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(404, {"error": "no such page: %s" % route})
 
     def do_POST(self):
-        # No action takes a body, so none is ever read: one that is declared is refused at once,
-        # however large it says it is or however slowly it arrives.
+        # Only a resend takes a body, read once the request is known to come from the page. Any other
+        # action's body is never read: one that is declared is refused at once, however large it says
+        # it is or however slowly it arrives.
         if not self.host_allowed():
             return
         route = self.route(post=True)
         if route is None:
             return
+        segments = route.strip("/").split("/")
+        if segments[0] == "resend" and len(segments) == 2:
+            self.resend(segments[1])
+            return
         if self.headers.get("Content-Length", "0") != "0" or "Transfer-Encoding" in self.headers:
             self.send_json(413, {"error": "these actions take no request body"})
             return
-        segments = route.strip("/").split("/")
         if segments[0] == "reveal" and len(segments) == 4:
             self.reveal(segments[1:])
         elif segments[0] == "retry" and len(segments) == 2:
@@ -869,6 +1054,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         self.send_json(200, {"retrying": run_id})
 
+    def resend(self, run_id):
+        """Starts a run again from the page's editor. The body is JSON naming the prompt and the
+        providers; the answer names the new run, or why none started."""
+        try:
+            prompt, providers = parse_resend(self.read_body())
+        except ValueError as e:
+            self.send_json(400, {"error": str(e)})
+            return
+        except BodyRefused as e:
+            self.send_json(e.code, {"error": str(e)})
+            return
+        code, body = self.gallery.resend(run_id, prompt, providers)
+        self.send_json(code, body)
+
+    def read_body(self):
+        """The request's body, of the length it declares, read within BODY_READ_SECONDS."""
+        if "Transfer-Encoding" in self.headers:
+            raise BodyRefused(411, "send the body with a Content-Length")
+        length = self.headers.get("Content-Length", "")
+        if not length.isdigit():
+            raise BodyRefused(411, "send the body with a Content-Length")
+        if int(length) > RESEND_BODY_LIMIT:
+            raise BodyRefused(413, "the body is %s bytes; a resend's is at most %d" % (length, RESEND_BODY_LIMIT))
+        self.connection.settimeout(BODY_READ_SECONDS)
+        try:
+            body = self.rfile.read(int(length))
+        except socket.timeout:
+            raise BodyRefused(408, "the body did not arrive within %d s" % BODY_READ_SECONDS)
+        if len(body) != int(length):
+            raise BodyRefused(400, "the body ended after %d of %s bytes" % (len(body), length))
+        return body
+
     def delete(self, run_ids):
         """Deletes each run named that may go and publishes the change. Answers which runs were
         deleted, with their files, and which were kept and why: 200 when any run was deleted, else
@@ -893,6 +1110,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
         code = 500 if 500 in codes else 409 if 409 in codes else 404
         self.send_json(code, {"deleted": deleted, "kept": kept, "error": kept[0]["error"]})
 
+
+
+class BodyRefused(Exception):
+    """A request body the server will not read, with the HTTP status that says why."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def parse_resend(body):
+    """The prompt and providers a resend's JSON body names, or ValueError saying what is wrong with
+    them. The same rules as the generate tool's: a prompt that is not blank, has no NUL and fits in
+    PROMPT_LIMIT_BYTES, and one or more of RESEND_PROVIDERS, each once."""
+    try:
+        request = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as e:
+        raise ValueError("the body is not JSON: %s" % e)
+    if not isinstance(request, dict) or sorted(request) != ["prompt", "providers"]:
+        raise ValueError("the body must be an object with prompt and providers, got %s" % body[:80].decode("utf-8", "replace"))
+    prompt, providers = request["prompt"], request["providers"]
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("the prompt is blank")
+    if "\0" in prompt:
+        raise ValueError("the prompt holds a NUL character, which no program argument can carry")
+    size = len(prompt.encode("utf-8", "surrogatepass"))
+    if size > PROMPT_LIMIT_BYTES:
+        raise ValueError("the prompt is %d bytes; the most a prompt can carry to the providers is %d bytes"
+                         % (size, PROMPT_LIMIT_BYTES))
+    if not isinstance(providers, list) or not providers:
+        raise ValueError("choose at least one provider")
+    for name in providers:
+        if name not in RESEND_PROVIDERS:
+            raise ValueError("unknown provider %s; choose from %s" % (json.dumps(name), ", ".join(RESEND_PROVIDERS)))
+    if len(set(providers)) != len(providers):
+        raise ValueError("a provider is named twice; each provider runs once and saves one file")
+    return prompt, providers
 
 
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -1057,11 +1311,11 @@ def serve(root, version):
     threading.Thread(target=control.serve_forever, daemon=True).start()
     busy_at = time.time()
     while not gallery.stop.wait(SCAN_SECONDS):
-        if gallery.scan() or gallery.clients > 0:
+        if gallery.scan() or gallery.clients > 0 or gallery.resending():
             busy_at = time.time()
         elif time.time() - busy_at > IDLE_SECONDS:
             # A run may have begun since the scan that found none live; look once more.
-            if not gallery.scan() and gallery.clients == 0:
+            if not gallery.scan() and gallery.clients == 0 and not gallery.resending():
                 break
     # Gone before the server stops answering, and while this process still holds server.lock, so
     # the socket is never a successor's.
