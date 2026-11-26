@@ -395,6 +395,23 @@ serve_other_version() {
   [[ "$(cat "$MOCK_DIR/calls")" == 1 ]]
 }
 
+@test "an IMAGE_GALLERY_DIR that already exists keeps its mode, and one other users can write is not used" {
+  answer_provider_with "$GEMINI_IMAGE"
+  mkdir -m 755 "$IMAGE_GALLERY_DIR"
+  run_all_gemini
+  assert_status 0
+  [[ "$(ls -ld "$IMAGE_GALLERY_DIR" | cut -c1-10)" == drwxr-xr-x ]] || { ls -ld "$IMAGE_GALLERY_DIR"; return 1; }
+  wait_for_snapshot '.runs | length == 1'
+  chmod 775 "$IMAGE_GALLERY_DIR"
+  OUT_BASE="${OUT_BASE}-again"
+  run_all_gemini
+  assert_status 0
+  [[ "$(grep -c '^image display: ' <<< "$output")" == 1 ]] || { echo "output: $output"; return 1; }
+  assert_output_contains "image display: IMAGE_GALLERY_DIR ${IMAGE_GALLERY_DIR} can be written by other users; using the terminal instead"
+  [[ "$(ls -ld "$IMAGE_GALLERY_DIR" | cut -c1-10)" == drwxrwxr-x ]] || { ls -ld "$IMAGE_GALLERY_DIR"; return 1; }
+  [[ "$(ls "$IMAGE_GALLERY_DIR/runs" | wc -l | tr -d ' ')" == 1 ]]
+}
+
 @test "an IMAGE_DISPLAY that is not gallery, pane or none stops run-all before any provider runs" {
   answer_provider_with "$GEMINI_IMAGE"
   IMAGE_DISPLAY=bogus run_all_gemini

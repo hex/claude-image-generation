@@ -899,7 +899,6 @@ def in_ssh_session():
 def ensure(root):
     version = plugin_version()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(str(root), 0o700)
     info, health = running_server(root)
     # Pages of a server this one replaces reconnect to its successor when it binds the same port.
     old_port, old_pages = None, 0

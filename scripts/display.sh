@@ -386,10 +386,21 @@ __gallery_python_usable() {
   "$py" -I -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1
 }
 
+# Reports whether the folder IMAGE_GALLERY_DIR names can hold the gallery's token and runs. One
+# that already exists keeps its own mode, so it must be this user's and writable by no one else:
+# another user able to write it could replace server.json and be sent the token. The default
+# folder, and one that does not exist yet, gallery_begin_run makes readable by this user only.
+__gallery_root_private() {
+  local root="${IMAGE_GALLERY_DIR:-}"
+  [[ -n "$root" && -d "$root" ]] || return 0
+  [[ -O "$root" && -z "$(find "$root" -maxdepth 0 \( -perm -020 -o -perm -002 \) -print)" ]]
+}
+
 # Prints where images go, the one place that decides it: gallery (the browser gallery page),
 # pane (the tmux pane, or inline drawing outside tmux) or none. SKIP_DISPLAY=1 means none;
-# otherwise IMAGE_DISPLAY chooses, gallery when unset. Gallery without a usable python3 becomes
-# pane, saying so on stderr. Any other IMAGE_DISPLAY value fails, naming it. Usage: display_mode
+# otherwise IMAGE_DISPLAY chooses, gallery when unset. Gallery without a usable python3, or with
+# an IMAGE_GALLERY_DIR other users can write, becomes pane, saying so on stderr. Any other
+# IMAGE_DISPLAY value fails, naming it. Usage: display_mode
 display_mode() {
   if [[ "${SKIP_DISPLAY:-}" == "1" ]]; then
     echo none
@@ -399,11 +410,14 @@ display_mode() {
   case "$mode" in
     pane|none) echo "$mode" ;;
     gallery)
-      if __gallery_python_usable; then
-        echo gallery
-      else
+      if ! __gallery_python_usable; then
         echo "image display: the gallery needs python3 3.9 or later, none found; using the terminal instead" >&2
         echo pane
+      elif ! __gallery_root_private; then
+        echo "image display: IMAGE_GALLERY_DIR ${IMAGE_GALLERY_DIR} can be written by other users; using the terminal instead" >&2
+        echo pane
+      else
+        echo gallery
       fi
       ;;
     *)
@@ -428,9 +442,12 @@ gallery_root() {
 gallery_begin_run() {
   local owner="$1" prompt="$2"
   shift 2
-  local root run_id staging started
+  local root run_id staging started keep_mode=""
   root=$(gallery_root)
-  if ! (umask 077 && mkdir -p "$root/runs" && chmod 700 "$root"); then
+  # A folder IMAGE_GALLERY_DIR names that already exists keeps its own mode, which display_mode
+  # has checked; any other is made, or kept, readable by this user only.
+  [[ -n "${IMAGE_GALLERY_DIR:-}" && -d "$root" ]] && keep_mode=1
+  if ! (umask 077 && mkdir -p "$root/runs" && { [[ -n "$keep_mode" ]] || chmod 700 "$root"; }); then
     echo "image gallery: cannot create $root/runs" >&2
     return 1
   fi
