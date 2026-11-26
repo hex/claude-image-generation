@@ -414,6 +414,7 @@ class Gallery:
         self.clients = 0
         self.stop = threading.Event()
         self.last_open = 0.0
+        self.opening = threading.Lock()
         self.launch_codes = {}
         self.read_runs = {}
         self.page = {}
@@ -497,23 +498,25 @@ class Gallery:
 
     def open_page(self):
         """Opens the page in the browser at most once per OPEN_INTERVAL_SECONDS. True when a
-        browser was opened now or a moment ago."""
-        if time.time() - self.last_open < OPEN_INTERVAL_SECONDS:
-            return True
-        if sys.platform == "darwin":
-            command = ["open", "-g", self.launch_url()]
-        elif shutil.which("xdg-open") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-            command = ["xdg-open", self.launch_url()]
-        else:
-            return False
-        try:
-            opened = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL, timeout=10).returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-        if opened:
-            self.last_open = time.time()
-        return opened
+        browser was opened now or a moment ago. Runs that ask together take turns, so the second
+        finds the page the first opened."""
+        with self.opening:
+            if time.time() - self.last_open < OPEN_INTERVAL_SECONDS:
+                return True
+            if sys.platform == "darwin":
+                command = ["open", "-g", self.launch_url()]
+            elif shutil.which("xdg-open") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                command = ["xdg-open", self.launch_url()]
+            else:
+                return False
+            try:
+                opened = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL, timeout=10).returncode == 0
+            except (OSError, subprocess.TimeoutExpired):
+                return False
+            if opened:
+                self.last_open = time.time()
+            return opened
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

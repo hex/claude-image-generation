@@ -234,7 +234,10 @@ run_all_gemini() {
   [[ "$(jq -r '.runs[0].providers[0].state' <<< "$SNAPSHOT")" == interrupted ]] || { echo "$SNAPSHOT"; return 1; }
 }
 
-@test "runs started together share one server" {
+@test "runs started together share one server and open one page" {
+  # Each start finds no page connected and asks for one; a browser slow to open still opens once.
+  stub_browser
+  printf 'sleep 1\n' | tee -a "$MOCK_DIR/browser/open" >> "$MOCK_DIR/browser/xdg-open"
   start_gallery &
   start_gallery &
   wait
@@ -245,6 +248,7 @@ run_all_gemini() {
   instance=$(server_field instance)
   start_gallery
   [[ "$(server_field pid)" == "$pid" && "$(server_field instance)" == "$instance" ]]
+  [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
   # The racer that lost the lock gives up within its five-second wait.
   for i in $(seq 1 70); do
     [[ "$(pgrep -f "gallery-server.py serve --root ${root}" | tr '\n' ' ')" == "$pid " ]] && return 0
