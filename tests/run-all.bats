@@ -280,3 +280,11 @@ STUB
     }
   done
 }
+
+@test "run-all refuses a mode other than generate or edit before any provider runs" {
+  stub_provider gemini
+  run bash "$WORK_DIR/run-all.sh" --mode genrate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini
+  assert_status 1
+  assert_output_contains "Error: --mode must be generate or edit, got 'genrate'"
+  [[ ! -e "$WORK_DIR/gemini.argv" ]]
+}

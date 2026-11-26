@@ -71,6 +71,11 @@ if [[ -z "$MODE" || -z "$PROMPT" || -z "$OUTPUT_BASE" ]]; then
   usage
 fi
 
+if [[ "$MODE" != generate && "$MODE" != edit ]]; then
+  echo "Error: --mode must be generate or edit, got '$MODE'" >&2
+  usage
+fi
+
 if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   echo "Error: --input-image is required for edit mode" >&2
   usage

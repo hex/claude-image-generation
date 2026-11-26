@@ -14,6 +14,7 @@ cover the versions up to 2026.9.1.
 - `IMAGE_DISPLAY` (`gallery`, `pane` or `none`) and the matching **Image display** row in `/config` choose where images show. `pane` keeps the tmux pane and inline drawing as they were.
 
 ### Changed
+- `run-all.sh` refuses a `--mode` other than `generate` or `edit` before any provider runs, instead of leaving each provider to fail on it.
 - `SKIP_DISPLAY=1` also keeps `run-all.sh` and the providers from opening the tmux pane, not only from drawing inline.
 - In the gallery, provider output stays on `run-all.sh`'s own stderr instead of going to `$DISPLAY_PANE_DIR/logs/`, so the generate tool's result includes it.
 

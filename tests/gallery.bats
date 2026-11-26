@@ -908,6 +908,9 @@ write_resendable_run() {
   start_gallery
   wait_for_snapshot '.runs | length == 1'
   [[ "$(jq -r '.runs[0].resendable' <<< "$SNAPSHOT")" == false ]] || { echo "$SNAPSHOT"; return 1; }
+  # Without the page's Origin a resend is refused before its body is read, as every button's post is.
+  [[ "$(gallery_curl -w ' %{http_code}' -X POST -H 'Content-Type: application/json' --data-binary '{"prompt": "a kettle", "providers": ["gemini"]}' "/resend/$a")" == \
+    '{"error": "wrong Origin header"} 403' ]]
   [[ "$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini"]}')" == \
     "{\"error\": \"run $a did not record the arguments it was started with, so it cannot be resent\"} 409" ]]
   [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && "$(ls "$out")" == hero-gemini.png ]]
