@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ABOUTME: Image runs against the real gallery server, started under the test's temp directory:
-# ABOUTME: what its page reads from /events and /img, its request guards, liveness, reuse and retry.
+# ABOUTME: what its page reads from /events and /img, its request guards, liveness, reuse, retry and delete.
 
 load test_helper
 
@@ -702,4 +702,71 @@ cpu_seconds() {
   wait "$HOLDER_PID" 2>/dev/null || true
   mkdir "$dir/active/run-all.123"
   wait_for_snapshot '.runs[0].status == "interrupted"'
+}
+
+@test "deleting a run removes the image files its records name and its folder, and leaves every other file and run" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2
+  printf 'png' > "$out/one-gemini.png"
+  printf 'png' > "$out/two-gemini.png"
+  # A record that names a symlink: the link goes, the file it points at stays.
+  printf 'png' > "$out/target.png"
+  ln -s "$out/target.png" "$out/link-openai.png"
+  printf 'png' > "$out/keep-gemini.png"
+  printf 'png' > "$out/one-xai.png"
+  printf 'notes' > "$out/notes.txt"
+  # gone-xai.png is named by a record but no longer on disk, which does not stop the delete.
+  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/one-gemini.png\ngemini\tquerying\t\tmodel-a\t\ngemini\tcomplete\t1000\tmodel-a\t$out/two-gemini.png\nopenai\tcomplete\t1000\tmodel-b\t$out/link-openai.png\nxai\tcomplete\t1000\tmodel-c\t$out/gone-xai.png\n" done
+  write_run "$b" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/keep-gemini.png\n" done
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  [[ "$(jq -c --arg a "$a" '.runs[] | select(.id == $a) | .images' <<< "$SNAPSHOT")" == \
+    "[\"$out/one-gemini.png\",\"$out/two-gemini.png\",\"$out/link-openai.png\",\"$out/gone-xai.png\"]" ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  # A POST without the page's Origin deletes nothing.
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST "/delete/$a")" == 403 ]]
+  [[ -f "$out/one-gemini.png" && -L "$out/link-openai.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
+  local answer
+  answer=$(gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" "/delete/$a")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/one-gemini.png\", \"$out/two-gemini.png\", \"$out/link-openai.png\"], \"missing\": [\"$out/gone-xai.png\"]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ "$(ls "$out" | tr '\n' ' ')" == "keep-gemini.png notes.txt one-xai.png target.png " ]] || { ls -la "$out"; return 1; }
+  [[ ! -e "$IMAGE_GALLERY_DIR/runs/$a" && -d "$IMAGE_GALLERY_DIR/runs/$b" ]]
+  # The page hears of it at once: the snapshot already published holds only the other run.
+  [[ "$(snapshot | jq -r '[.runs[].id] | @tsv')" == "$b" ]]
+  answer=$(gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" "/delete/$a")
+  [[ "$answer" == "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"no run $a\"}], \"error\": \"no run $a\"} 404" ]] || {
+    echo "$answer"; return 1; }
+}
+
+@test "a run whose records name a file that is not <name>-<provider> with an image extension, or not a file, is kept with all its images" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1
+  printf 'png' > "$out/fine-gemini.png"
+  printf 'png' > "$out/photo-openai.png"
+  printf 'secret' > "$out/notes.txt"
+  mkdir "$out/folder-xai.png"
+  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/fine-gemini.png\ngemini\tcomplete\t1000\tmodel-a\t$out/photo-openai.png\nopenai\tcomplete\t1000\tmodel-b\t$out/notes.txt\nxai\tcomplete\t1000\tmodel-c\t$out/folder-xai.png\nxai\tcomplete\t1000\tmodel-c\trelative-xai.png\n" done
+  start_gallery
+  wait_for_snapshot '.runs | length == 1'
+  local answer
+  answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a")
+  [[ "$answer" == "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a names files the gallery does not delete; nothing was deleted\", \"refused\": [{\"path\": \"$out/photo-openai.png\", \"reason\": \"its name does not end in -gemini and .png, .jpg, .jpeg, .webp or .gif\"}, {\"path\": \"$out/notes.txt\", \"reason\": \"its name does not end in -openai and .png, .jpg, .jpeg, .webp or .gif\"}, {\"path\": \"$out/folder-xai.png\", \"reason\": \"not a file\"}, {\"path\": \"relative-xai.png\", \"reason\": \"not an absolute path\"}]}], \"error\": \"run $a names files the gallery does not delete; nothing was deleted\"} 409" ]] || {
+    echo "$answer"; return 1; }
+  [[ "$(ls "$out" | tr '\n' ' ')" == "fine-gemini.png folder-xai.png notes.txt photo-openai.png " ]] || { ls -la "$out"; return 1; }
+  [[ -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
+}
+
+@test "a run still held by a process is kept with its images, answered 409" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1
+  printf 'png' > "$out/held-gemini.png"
+  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/held-gemini.png\nopenai\tquerying\t\tmodel-b\t\n"
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/$a/active/run-all.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs[0].status == "live"'
+  local answer
+  answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a")
+  [[ "$answer" == "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is still generating\"}], \"error\": \"run $a is still generating\"} 409" ]] || {
+    echo "$answer"; return 1; }
+  [[ -f "$out/held-gemini.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
 }

@@ -341,6 +341,7 @@ def read_run(run_dir):
         "updated_ms": updated_ms,
         "problem": problem,
         "providers": cards,
+        "images": unique_paths(recorded_images(providers)),
     }
 
 
@@ -397,6 +398,42 @@ def image_path(runs_dir, run_id, provider, n):
     return p["images"][n]
 
 
+def recorded_images(providers):
+    """(provider, path) for each image a complete record names, in the order of the providers and
+    of their records. A provider that completed again in a later round names each of its images."""
+    return [(p["name"], path) for p in providers.values() for path in p["images"]]
+
+
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+def unsafe_image(provider, path):
+    """Why the gallery will not delete path, which a complete record of provider names as its image,
+    or None when it may. Only an absolute path whose file name ends in -<provider> and an image
+    extension may go, and only while it is a file or a symlink, never a directory; a path already
+    gone may go too."""
+    if not PROVIDER.match(provider):
+        return "its provider name %s is not one a run writes" % json.dumps(provider)
+    if not os.path.isabs(path):
+        return "not an absolute path"
+    name = os.path.basename(path)
+    if not any(name.endswith("-" + provider + extension) for extension in IMAGE_EXTENSIONS):
+        return "its name does not end in -%s and .png, .jpg, .jpeg, .webp or .gif" % provider
+    try:
+        mode = os.lstat(path).st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as e:
+        return e.strerror
+    if not (stat.S_ISREG(mode) or stat.S_ISLNK(mode)):
+        return "not a file"
+    return None
+
+
+def unique_paths(images):
+    return list(dict.fromkeys(path for name, path in images))
+
+
 def image_type(head):
     if head.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
@@ -430,6 +467,9 @@ class Gallery:
         self.last_open = 0.0
         self.opening = threading.Lock()
         self.launch_codes = {}
+        # Held while the runs folder is scanned or a run deleted, so neither sees the other's
+        # half-done work and the request threads never touch read_runs during a scan.
+        self.runs_lock = threading.Lock()
         self.read_runs = {}
         self.page = {}
         for route, (name, ctype) in PAGE_FILES.items():
@@ -438,6 +478,10 @@ class Gallery:
     def scan(self):
         """Reads every run whose files changed or whose holder went away, newest first, prunes
         beyond KEEP_RUNS and publishes a change."""
+        with self.runs_lock:
+            return self.scan_runs()
+
+    def scan_runs(self):
         forget_unchecked_holders()
         names = []
         now = time.time()
@@ -492,6 +536,52 @@ class Gallery:
             return None
         self.read_runs[run_dir.name] = (files, run)
         return run
+
+    def delete(self, run_id):
+        """Deletes a run: the files its complete records name as images, then its directory, once
+        unsafe_image passes every one of them. Answers (HTTP status, outcome): 200 with the paths
+        removed and those already gone, or the error that kept the run in place. Call it holding
+        runs_lock."""
+        run_dir = self.runs_dir / run_id
+        if not RUN_ID.match(run_id) or not run_dir.is_dir():
+            return 404, {"id": run_id, "error": "no run %s" % run_id}
+        # A run's retry offer is open only while run-all holds the run, so this keeps an open offer
+        # too; an offer a killed run-all left behind does not keep its run.
+        if run_is_held(run_dir):
+            return 409, {"id": run_id, "error": "run %s is still generating" % run_id}
+        providers = {}
+        try:
+            reduce_status(read_status_log(run_dir), providers)
+        except FileNotFoundError:
+            pass
+        except ValueError as e:
+            return 409, {"id": run_id, "error": "run %s's status log is unreadable (%s), so which images it saved is "
+                                                "unknown; nothing was deleted" % (run_id, e)}
+        images = recorded_images(providers)
+        refused = []
+        for provider, path in images:
+            reason = unsafe_image(provider, path)
+            if reason is not None:
+                refused.append({"path": path, "reason": reason})
+        if refused:
+            return 409, {"id": run_id, "error": "run %s names files the gallery does not delete; nothing was deleted" % run_id,
+                         "refused": refused}
+        removed = []
+        missing = []
+        for path in unique_paths(images):
+            try:
+                os.unlink(path)
+                removed.append(path)
+            except (FileNotFoundError, NotADirectoryError):
+                missing.append(path)
+            except OSError as e:
+                return 500, {"id": run_id, "error": "could not delete %s: %s; the run is kept" % (path, e.strerror),
+                             "removed": removed, "missing": missing}
+        shutil.rmtree(str(run_dir), ignore_errors=True)
+        if os.path.lexists(str(run_dir)):
+            return 500, {"id": run_id, "error": "could not remove the run's folder %s" % run_dir,
+                         "removed": removed, "missing": missing}
+        return 200, {"id": run_id, "removed": removed, "missing": missing}
 
     def reject(self, run_dir, reason):
         """Leaves a run directory out of the snapshot, naming it in server.log."""
@@ -625,6 +715,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reveal(segments[1:])
         elif segments[0] == "retry" and len(segments) == 2:
             self.retry(segments[1])
+        elif segments[0] == "delete" and len(segments) == 2:
+            self.delete(segments[1:])
         else:
             self.send_json(404, {"error": "no such action: %s" % route})
 
@@ -746,6 +838,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(409, {"error": "run %s has no retry offer open" % run_id})
             return
         self.send_json(200, {"retrying": run_id})
+
+
+    def delete(self, run_ids):
+        """Deletes each run named that may go and publishes the change. Answers which runs were
+        deleted, with their files, and which were kept and why: 200 when any run was deleted, else
+        the status of what kept them, 404 when no run named exists."""
+        outcomes = []
+        with self.gallery.runs_lock:
+            for run_id in dict.fromkeys(run_ids):
+                outcomes.append(self.gallery.delete(run_id))
+        self.gallery.scan()
+        deleted = [outcome for code, outcome in outcomes if code == 200]
+        kept = [outcome for code, outcome in outcomes if code != 200]
+        if deleted:
+            self.send_json(200, {"deleted": deleted, "kept": kept})
+            return
+        codes = {code for code, outcome in outcomes}
+        code = 500 if 500 in codes else 409 if 409 in codes else 404
+        self.send_json(code, {"deleted": deleted, "kept": kept, "error": kept[0]["error"]})
 
 
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
