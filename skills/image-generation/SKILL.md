@@ -1,7 +1,7 @@
 ---
 name: image-generation
 description: Generates and edits images using Google Gemini, OpenAI GPT Image, xAI Grok Image, and OpenRouter APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "generate with openrouter", "gpt image", "gemini image", "grok image", or "openrouter image".
-version: 2026.11.1
+version: 2026.11.2
 ---
 
 # Image Generation with Gemini, OpenAI, xAI, and OpenRouter
@@ -11,21 +11,21 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 ## Available Providers
 
 ### Google Gemini
-- **Model**: `gemini-3-pro-image` (default, "Nano Banana Pro"). Alt: `gemini-3.1-flash-image` (Flash, 14 ratios), `gemini-3.1-flash-lite-image` (cheapest). The `-preview` IDs are past their shutdown date.
+- **Model**: `gemini-3-pro-image` (default, "Nano Banana Pro"). Alt: `gemini-3.1-flash-image` (Flash, 14 ratios), `gemini-nano-banana-2.1` (Flash, "Nano Banana 2.1", Google's replacement for `gemini-3.1-flash-image` and the plugin's fallback), `gemini-3.1-flash-lite-image` (cheapest). The `-preview` IDs are past their shutdown date.
 - **Strengths**: Premium quality, up to 4K output, thinking mode, Google Search grounding, multi-turn editing with up to 14 reference images
 - **Aspect ratios**: 10 on Pro (1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9); Flash adds 4 extreme ratios (1:4, 4:1, 1:8, 8:1)
 - **Resolution**: `--image-size` takes `1K`, `2K`, `4K` on both Pro and Flash; Flash additionally supports `512` (UPPERCASE required)
 - **Env var**: `GEMINI_API_KEY`
 
 ### OpenAI GPT Image 2
-- **Model**: `gpt-image-2.6-sunburst` (default); `gpt-image-2.6-flare` (faster), `gpt-image-2.5-sunburst`, `gpt-image-2` (snapshot `gpt-image-2-2026-04-21`) and `gpt-image-1.5` (previous flagship) available via `--model`
+- **Model**: `gpt-image-2.6-sunburst` (default); `gpt-image-2.6-flare` (faster), `gpt-image-2.5-sunburst`, `gpt-image-2` (snapshot `gpt-image-2-2026-04-21`) and `gpt-image-1.5` (previous flagship, shuts down 2026-12-01) available via `--model`
 - **Strengths**: Superior text rendering, transparent backgrounds, up to 16 input images for editing, quality tiers
 - **Sizes**: on `gpt-image-2` and the `gpt-image-2.5` models, any `WxH` with both edges multiples of 16, longest edge up to 3840 and ratio at most 3:1 (such as `2048x1152`, `3840x2160`). OpenAI states no size rules for `gpt-image-2.6-sunburst`; it drew `1536x864` in a 2026-11-05 test. Older models take `1024x1024`, `1536x1024` (landscape), `1024x1536` (portrait)
 - **Quality**: low (fast/cheap), medium, high; xhigh and max on the `gpt-image-2.5` and `2.6` models
 - **Env var**: `OPENAI_API_KEY`
 
 ### xAI Grok Image
-- **Model**: `grok-imagine-image-2.0` (default, flagship since 2026-08-07), `grok-imagine-image-quality` (May 2026 quality mode; `grok-imagine-image-pro` redirects here), `grok-imagine-image` (standard, 300 RPM)
+- **Model**: `grok-imagine-image-2.0` (default, flagship since 2026-08-07), `grok-imagine-image` (standard, 300 RPM). xAI has retired `grok-imagine-image-quality`, the May 2026 quality mode: the API answered HTTP 404 for it on 2026-11-26
 - **Strengths**: Prompt revision by chat model, flat per-image pricing, diverse style range, many aspect ratios
 - **Aspect ratios**: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, 21:9, 5:2, auto
 - **Resolution**: `--resolution` takes `1k`, `2k` (LOWERCASE required, opposite of Gemini)
@@ -261,7 +261,7 @@ with none open, a failed run returns at once.
 | `--mode` | generate, edit | (required) |
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
-| `--input-image` | file path, repeatable | (edit only) |
+| `--input-image` | file path, repeatable | (required for edit; also sent in generate) |
 | `--model` | any OpenRouter image model slug | google/gemini-nano-banana-2.1 |
 | `--site-url` | URL (sent as `HTTP-Referer`) | (from `OPENROUTER_SITE_URL`) |
 | `--site-name` | text (sent as `X-Title`) | (from `OPENROUTER_SITE_NAME`) |

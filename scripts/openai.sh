@@ -36,7 +36,8 @@ Options:
                       5 images on gpt-image-1.5, the first image only on gpt-image-1-mini
   --model             OpenAI model (default: gpt-image-2.6-sunburst)
                       Alternatives: gpt-image-2.6-flare (faster), gpt-image-2.5-sunburst,
-                      gpt-image-2, gpt-image-1.5, gpt-image-1-mini (3-4x cheaper)
+                      gpt-image-2, gpt-image-1.5, gpt-image-1-mini (3-4x cheaper);
+                      gpt-image-1.5 and gpt-image-1-mini shut down 2026-12-01
 
 Environment:
   OPENAI_API_KEY      OpenAI API key (required)
@@ -97,7 +98,7 @@ if [[ -n "$INPUT_FIDELITY" ]]; then
   # has no dated snapshot.
   case "$MODEL" in
     gpt-image-2|gpt-image-2-*|gpt-image-2.6-sunburst)
-      echo "Error: --input-fidelity is not accepted by ${MODEL}; drop the flag or pass --model gpt-image-1.5" >&2
+      echo "Error: --input-fidelity is not accepted by ${MODEL}; drop the flag or pass --model gpt-image-1.5 (shuts down 2026-12-01)" >&2
       exit 1 ;;
   esac
 fi

@@ -366,7 +366,7 @@ When `response_format` is `"url"`, the response contains `url` instead of `b64_j
 
 ### Models
 - `grok-imagine-image-2.0` (default): Flagship since 2026-08-07. Adds `quality` (`low`, `medium`, `auto`; omitted means `auto`, served as `low` for generation and `medium` for edits, billed as served), up to 5 reference images on edits (was 3), and the `21:9` and `5:2` ratios (2026-08-28 release notes).
-- `grok-imagine-image-quality`: Quality mode launched 2026-05-06. Aliases `grok-imagine-image-quality-20260403`, `grok-imagine-image-quality-latest` and `grok-imagine-image-pro` (the pro slug was retired 2026-05-15 and redirects here).
+- `grok-imagine-image-quality`: retired; the API answered HTTP 404 for it on 2026-11-26. xAI launched it 2026-05-06 as the quality mode, with aliases `grok-imagine-image-quality-20260403`, `grok-imagine-image-quality-latest` and `grok-imagine-image-pro` (xAI retired the pro slug 2026-05-15 and redirected it here).
 - `grok-imagine-image`: Standard tier. Versioned as `grok-imagine-image-2026-03-02`. 1K/2K resolution, 300 RPM.
 - `grok-2-image-1212` (aka `grok-2-image`): **Deprecated 2026-02-28**. Migration target is `grok-imagine-image`.
 - The plugin falls back to `grok-imagine-image` when the default is unavailable to the key.
@@ -376,7 +376,6 @@ When `response_format` is `"url"`, the response contains `url` instead of `b64_j
 | Model | Output per image | Image input |
 |-------|------------------|-------------|
 | `grok-imagine-image-2.0` | $0.04 (1K, low) to $0.08 by resolution and quality | $0.01 |
-| `grok-imagine-image-quality` | $0.05 (1K) | $0.01 |
 | `grok-imagine-image` | $0.02 | $0.002 |
 
 Multi-image edit example: 5 images on 2.0 at 1K low = `5 × $0.01 + $0.04 = $0.09`.
@@ -384,7 +383,7 @@ Multi-image edit example: 5 images on 2.0 at 1K low = `5 × $0.01 + $0.04 = $0.0
 ### Rate Limits
 - **Free tier removed 2026-03-19** — API requires billing
 - `grok-imagine-image`: 300 RPM
-- `grok-imagine-image-2.0` and `grok-imagine-image-quality`: see the model pages on docs.x.ai for the current limits
+- `grok-imagine-image-2.0`: see the model page on docs.x.ai for the current limits
 - Increased limits available by request form
 
 ### Batch API (2026-03-15)
@@ -414,7 +413,7 @@ There is no separate edit endpoint; editing is generation with input images atta
 - Optional attribution headers: `HTTP-Referer: <site-url>` and `X-Title: <site-name>` (the plugin sends these from `--site-url` / `--site-name` or `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME`)
 
 ### Request Format
-The prompt is a normal chat message; image output is opted into with `modalities`. In generate mode `content` is a plain string:
+The prompt is a normal chat message; image output is opted into with `modalities`. With no input images, `content` is a plain string:
 ```json
 {
   "model": "google/gemini-3.1-flash-image",
@@ -422,7 +421,7 @@ The prompt is a normal chat message; image output is opted into with `modalities
   "messages": [{"role": "user", "content": "a serene mountain landscape at sunset"}]
 }
 ```
-In edit mode `content` is an array whose first part is the text prompt, followed by one `image_url` part per input image. Each image is a base64 data URL (the plugin streams these via `jq --rawfile` and posts with `curl --data-binary @-` to stay under ARG_MAX, mirroring gemini.sh):
+When the request carries input images, in either mode, `content` is an array whose first part is the text prompt, followed by one `image_url` part per input image. Each image is a base64 data URL (the plugin streams these via `jq --rawfile` and posts with `curl --data-binary @-` to stay under ARG_MAX, mirroring gemini.sh):
 ```json
 {
   "model": "google/gemini-3.1-flash-image",

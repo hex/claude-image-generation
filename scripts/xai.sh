@@ -30,8 +30,7 @@ Options:
   --quality       low, medium or auto (grok-imagine-image-2.0 only; omitted means auto,
                   which the API serves as low for generation and medium for edits)
   --model         xAI model (default: grok-imagine-image-2.0)
-                  Alternatives: grok-imagine-image-quality (May 2026 quality mode, also
-                  answers grok-imagine-image-pro), grok-imagine-image (standard)
+                  Alternative: grok-imagine-image (standard)
 
 Environment:
   XAI_API_KEY         xAI API key (or GROK_API_KEY)

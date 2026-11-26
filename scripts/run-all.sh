@@ -15,7 +15,7 @@ Runs Gemini, OpenAI, and xAI in parallel and shows them as one run. Where the
 run shows is IMAGE_DISPLAY's choice:
   gallery (default)  one section on the browser gallery page, a frame per provider
   pane               a single tmux pane with per-provider colored banners
-                     (blue / gray / red) and an animated spinner
+                     (blue / gray / red / indigo) and an animated spinner
   none               nowhere; the images are only saved
 
 Each provider writes <base>-<provider>.png. In the tmux pane, per-provider
@@ -25,7 +25,8 @@ debugging; in the gallery and with none it stays on this script's own output.
 Options:
   --mode           generate or edit (required)
   --prompt         text prompt (required)
-  --output-base    base path; produces <base>-gemini.png, <base>-openai.png, <base>-xai.png
+  --output-base    base path; produces <base>-gemini.png, <base>-openai.png, <base>-xai.png,
+                   <base>-openrouter.png
   --input-image    input image path (required for edit mode, repeatable)
   --providers      comma-separated subset (default: gemini,openai,xai;
                    openrouter is available but opt-in, e.g. --providers gemini,openrouter)

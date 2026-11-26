@@ -124,15 +124,15 @@ export GEMINI_IMAGE_MODEL="gemini-3.1-flash-image"
 bash scripts/gemini.sh --mode generate --prompt "test" --output /tmp/test.png
 # Expected: stderr includes "model: gemini-3.1-flash-image" (will fail at API call without valid key, but model name is visible in the log)
 
-# OpenAI model override (forcing previous flagship)
-export OPENAI_IMAGE_MODEL="gpt-image-1.5"
+# OpenAI model override (forcing the faster 2.6 model)
+export OPENAI_IMAGE_MODEL="gpt-image-2.6-flare"
 bash scripts/openai.sh --mode generate --prompt "test" --output /tmp/test.png
-# Expected: stderr includes "model: gpt-image-1.5" (not the default gpt-image-2.6-sunburst)
+# Expected: stderr includes "model: gpt-image-2.6-flare" (not the default gpt-image-2.6-sunburst)
 
 # xAI model override
-export XAI_IMAGE_MODEL="grok-imagine-image-quality"
+export XAI_IMAGE_MODEL="grok-imagine-image"
 bash scripts/xai.sh --mode generate --prompt "test" --output /tmp/test.png
-# Expected: stderr includes "model: grok-imagine-image-quality"
+# Expected: stderr includes "model: grok-imagine-image"
 ```
 
 ### Multi-Image Input Validation
@@ -284,6 +284,8 @@ When a session loads both the marketplace copy and a `--plugin-dir` copy of the 
 
 **All providers in parallel:**
 
+**Setup:** Start Claude Code inside tmux with `IMAGE_DISPLAY=pane` in its environment. With the default display, `gallery`, the run shows in the browser instead (section 3.7).
+
 1. Run `/generate-image a simple blue circle`
 2. Select "All in parallel"
 3. Verify a single task is created tracking the parallel run (`run-all.sh` owns parallelism; the agent does not orchestrate per-provider Task subagents)
@@ -299,6 +301,8 @@ When a session loads both the marketplace copy and a `--plugin-dir` copy of the 
 
 ### 3.5 Parallel Generation via run-all.sh
 
+**Setup:** Start Claude Code inside tmux with `IMAGE_DISPLAY=pane` in its environment. With the default display, `gallery`, the run shows in the browser instead (section 3.7).
+
 1. Run `/generate-image a sunset over the ocean` and select "All in parallel"
 2. Observe that a single task tracking the parallel run is created and marked in_progress
 3. A streaming pane opens, taking 30% of the terminal's longer axis (a right-hand column when the terminal is wide, a bottom band when it is tall/narrow). As each provider finishes, a colored banner appears (gemini blue / openai gray / xai red) with the model name and elapsed timing, followed by the rendered image
@@ -308,7 +312,7 @@ When a session loads both the marketplace copy and a `--plugin-dir` copy of the 
 
 ### 3.6 One Pane Across Concurrently-Launched Providers
 
-Run inside tmux. Launch two providers directly, at the same time, without run-all.sh:
+Run inside tmux with `IMAGE_DISPLAY=pane` exported. With the default display, `gallery`, each provider shows as a run of its own in the browser instead. Launch two providers directly, at the same time, without run-all.sh:
 
 ```bash
 bash scripts/gemini.sh --mode generate --prompt "a blue circle" --output /tmp/pane-gemini.png &
@@ -321,6 +325,70 @@ wait
 3. Verify the pane stays open until the slower provider finishes, then shows `[f]inder [p]review [esc/ctrl-d]`
 4. Delete `/tmp/pane-gemini.png` and `/tmp/pane-xai.png` (the scripts never overwrite an output), run the same two commands again after you dismiss the pane, and verify a fresh pane opens rather than the images landing in the dismissed one
 5. Start a provider in the background, then run `run-all.sh` while it is still generating, and verify both stream into the same pane and that run-all does not dismiss it while the background provider is still working
+
+### 3.7 Browser Gallery
+
+**Setup:** The default display (`IMAGE_DISPLAY` unset or `gallery`), `python3` 3.9 or later, and two finished runs from `/generate-image` in one project, the second an edit of an image the first saved (`/generate-image --edit ./<base>-gemini.png add a red scarf`). Open the gallery page the first run opened.
+
+**Delete run:**
+
+1. Click the trash button at the end of a finished run's top line (its tooltip reads `Delete run`)
+2. Check the dialog: the title `Delete this run?`, a body such as `Removes it from the gallery and deletes 3 images from disk. This can’t be undone.`, each image file's path listed under it, and the focus on **Cancel**
+3. Click **Cancel**, check the run and its files are still there, then open the dialog again and click **Delete**
+
+**Expected:** The dialog closes, the run leaves the page, and the listed files no longer exist on disk. A run still generating has no trash button.
+
+**Kept files:**
+
+1. Run a provider script with an output name that has no `-<provider>` suffix: `bash scripts/gemini.sh --mode generate --prompt "a green leaf" --output "$PWD/generated.png"`
+2. Click that run's trash button
+3. Click the trash button on the first run from the setup, whose image the edit run used
+
+**Expected:**
+
+- Step 2's body reads `Removes it from the gallery. It deletes no images. 1 file stays on disk. This can’t be undone.`, and the list shows `<path>/generated.png: kept, its name does not end in -gemini and .png, .jpg, .jpeg, .webp or .gif`. After **Delete** the run leaves the page and `generated.png` stays on disk
+- Step 3's list shows the edited image as `<path>: kept, run <id> uses it as an input image`, and the count of images it deletes leaves that file out
+
+**Delete project…:**
+
+1. Click a project in the rail, then **Delete project…** on the top line. Hovering over a project's row in the rail, or tabbing to it, shows a trash button (tooltip `Delete project`) that opens the same dialog
+2. Check the title reads `Delete <project> from the gallery?` and the body starts `Removes its <n> runs from the gallery`
+3. Start a run in that project and, while it generates, open **Delete project…** again
+
+**Expected:** Step 3's body includes `1 run still generating stays.`. After **Delete** the finished runs leave the page with their listed files and the generating run stays.
+
+**Edit prompt and Resend:**
+
+1. Click **Edit prompt** on a run that `/generate-image` made. The prompt opens in an editor, with a button per provider and the run's own providers pressed
+2. Clear the prompt, then turn every provider off, and check that each disables **Resend**
+3. Change the prompt, leave one provider on, and click **Resend** (or press ⌘↩, Ctrl+↩ off macOS)
+4. Rename the folder the run's images are in, click **Edit prompt** and **Resend** again, then rename the folder back
+
+**Expected:**
+
+- After step 3 the editor closes and a new run of the same project shows at the top with the edited prompt and only the chosen provider. Its image is in the first run's image folder as `image-<YYYYMMDD-HHMMSS>-<provider>.png`, and `stat -f %Lp <file>` (`stat -c %a <file>` on Linux) prints `600`. Claude gets no result from the resend
+- When the resent run has not started within 15 seconds, the editor closes and a note under the run's line reads `The resend started and will appear in the gallery.` for 10 seconds; the run shows once it starts
+- Step 4 starts nothing: the editor stays open and shows `run <id>'s image folder <path> is gone`
+
+**Theme switch:**
+
+1. Click **Light**, then **Dark**, then **Auto** at the bottom of the rail, and switch the system between light and dark mode after each
+2. Pick **Dark** and reload the page
+
+**Expected:** Light and Dark keep their colors whatever the system's mode, Auto follows it, and the reload keeps Dark.
+
+**Loupe:**
+
+1. Click an image, or tab to it and press Enter
+2. Press Left and Right, then Up and Down, then R, then Tab until the focus wraps
+3. Press Esc; open the loupe again and click outside the image
+
+**Expected:**
+
+- The loupe shows the image large, a line with its provider, model and seconds, and the run's whole prompt
+- Left and Right move across the run's providers that have an image; Up and Down move to the nearest run above or below with an image, the same provider's when it has one
+- R reveals the file in Finder (its folder on Linux), and Tab keeps the focus inside the loupe
+- Esc and a click outside the image each close it
 
 ## 4. Edge Cases
 
@@ -340,7 +408,7 @@ wait
    ```
    The scripts handle an unsupported mode differently:
    - `gemini.sh` and `xai.sh` do not check `--mode`; any value other than `edit` runs a normal generation.
-   - `openai.sh` exits with an unbound-variable error, since neither its generate nor its edit branch runs.
+   - `openai.sh` sends no request and exits 1 with `OpenAI API returned HTTP :`, since neither its generate nor its edit branch runs.
    - `openrouter.sh` exits 1 with "Error: --mode must be 'generate' or 'edit'".
 
 2. Run with an unreachable output path:

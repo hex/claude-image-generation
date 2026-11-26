@@ -94,7 +94,7 @@ The rail on the left lists the projects, the one with the newest run first, with
 
 A finished run's top line ends with a trash button. A project's row in the rail shows one when you hover over it or tab to it, and with a project selected the top line has **Delete project…**. Each one first opens a dialog that says how many image files it deletes from disk, lists each file by its path, lists each file that stays with the reason, and says this can't be undone. Cancel has the focus; **Delete** removes the runs from the gallery and deletes those files. A run still generating, or one with its retry offer open, has no trash button, and a project's delete leaves those runs where they are and says how many it leaves. The server deletes only the files that the run's own records name as its images, and only if each path is absolute and its file name ends in `-<provider>` and `.png`, `.jpg`, `.jpeg`, `.webp` or `.gif`, as in `hero-gemini.png`. A file that breaks that rule stays on disk while its run leaves the gallery, and so does a path that is relative or holds a null character. The dialog lists each one as kept with the reason before you confirm. A single provider script called with `--output ./generated.png` records such a file. For a symlink it removes the link, not the file the link points to. A file that is already gone counts as deleted. A file that another run in the gallery also names stays, and the dialog marks it as kept: once you delete a file by hand, a newer run can save to the same path, and deleting the older run then leaves the newer image alone. The server compares the files the paths lead to, not the paths' text, so a run that names the file through a symlinked folder, a symlink to it or a doubled slash counts too. When one delete takes every run that names a file, the file goes too. A file that another run used as an input image, as an edit of it does, stays as well, and the dialog marks it as kept by that run. If any run folder under `runs/` has a status log or `meta.json` that does not parse, the server cannot tell which files that run needs. It then deletes nothing, and the dialog says **Could not delete** and names the run. Remove that run's folder to delete again. The page sends the paths its dialog listed for each run, and the server deletes only those that the run's records still name. A file that something made worth keeping after the dialog opened, such as a run that names it since, stays, and the dialog then lists each file it kept and why. If the run is still generating, the server deletes nothing of that run, and the dialog names the run and the reason.
 
-A run that `run-all.sh` started (the generate tool and `/claude-image-generation:generate` both use it) has **Edit prompt** on its top line, even when every provider failed. It opens the prompt in an editor, with one button per provider under it and the run's own providers turned on. **Resend** (or ⌘↩, Ctrl+↩ off macOS) has the server start `run-all.sh` again in the run's working folder, with the edited prompt and the providers you turned on. The run's mode, input images and per-provider extra arguments (where an aspect ratio goes) stay as they were. The images go in the folder of the run's own output base, where its images went, as `image-<YYYYMMDD-HHMMSS>-<provider>.png`, readable by you only (mode 600), and the new run shows on the page as a run of the same project. Its results never reach Claude. The server never overwrites a file: when one of those paths already exists, as a file or a symlink (a dangling one too), it starts nothing and the editor says which path. It also refuses a blank prompt, one over 100,000 bytes or with a null character, no provider, an unknown provider or one named twice, and a run whose working folder, image folder or input image no longer exists, naming it. The editor stays open with the reason. A run from a single provider script, or from an older version of the plugin, recorded no arguments and has no **Edit prompt**. A provider with no API key in the server's environment fails with its usual error frame. The resent `run-all.sh` writes its output to a file in `resend-logs/` in the gallery folder, which keeps the newest 50. If it exits before it starts a run, the editor shows its exit status and last lines of output, with API keys replaced by their variable names. If it has not started its run within 15 seconds, the editor closes with a note that the resend started, and its run shows on the page once it begins. The server finds that run by a launch id it passes in `IMAGE_GALLERY_LAUNCH_ID`, which the run records in its `meta.json`.
+A run that `run-all.sh` started (the generate tool and `/claude-image-generation:generate-image` both use it) has **Edit prompt** on its top line, even when every provider failed. It opens the prompt in an editor, with one button per provider under it and the run's own providers turned on. **Resend** (or ⌘↩, Ctrl+↩ off macOS) has the server start `run-all.sh` again in the run's working folder, with the edited prompt and the providers you turned on. The run's mode, input images and per-provider extra arguments (where an aspect ratio goes) stay as they were. The images go in the folder of the run's own output base, where its images went, as `image-<YYYYMMDD-HHMMSS>-<provider>.png`, readable by you only (mode 600), and the new run shows on the page as a run of the same project. Its results never reach Claude. The server never overwrites a file: when one of those paths already exists, as a file or a symlink (a dangling one too), it starts nothing and the editor says which path. It also refuses a blank prompt, one over 100,000 bytes or with a null character, no provider, an unknown provider or one named twice, and a run whose working folder, image folder or input image no longer exists, naming it. The editor stays open with the reason. A run from a single provider script, or from an older version of the plugin, recorded no arguments and has no **Edit prompt**. A provider with no API key in the server's environment fails with its usual error frame. The resent `run-all.sh` writes its output to a file in `resend-logs/` in the gallery folder, which keeps the newest 50. If it exits before it starts a run, the editor shows its exit status and last lines of output, with API keys replaced by their variable names. If it has not started its run within 15 seconds, the editor closes with a note that the resend started, and its run shows on the page once it begins. The server finds that run by a launch id it passes in `IMAGE_GALLERY_LAUNCH_ID`, which the run records in its `meta.json`.
 
 Hover over an image, or tab to it, for two buttons: one reveals the file in Finder (its folder on Linux), the other opens it full size in a new tab. Click an image or press Enter on it to open the loupe. In the loupe, Left and Right move across the providers of the run, Up and Down move between runs, R reveals the file, and Esc or a click outside the image closes it.
 
@@ -125,6 +125,7 @@ The first two apply to inline display (iTerm2, Sixel), to the tmux panes a direc
 |-------|-----------------|
 | `gemini-3-pro-image` | Pro tier, premium quality, 10 aspect ratios, up to 14 reference images (default, "Nano Banana Pro", GA since 2026-05-28) |
 | `gemini-3.1-flash-image` | 14 aspect ratios (incl. extreme 1:4, 8:1), 512-4K resolution, thinking, Google Search grounding ("Nano Banana 2", GA since 2026-05-28) |
+| `gemini-nano-banana-2.1` | Flash tier ("Nano Banana 2.1", released 2026-10-06), Google's replacement for `gemini-3.1-flash-image`; the model the plugin falls back to when the default is unavailable to the key |
 | `gemini-3.1-flash-lite-image` | Cheapest tier ("Nano Banana 2 Lite") |
 | `gemini-2.5-flash-image` | Previous generation, 1K only (earliest shutdown 2027-03-15; Google's replacement is `gemini-3.1-flash-lite-image`) |
 
@@ -148,8 +149,9 @@ OpenAI names `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare` as the replacemen
 | Model | Characteristics |
 |-------|-----------------|
 | `grok-imagine-image-2.0` | Flagship since 2026-08-07: `--quality` low/medium/auto, up to 5 reference images, `21:9` and `5:2` ratios (default) |
-| `grok-imagine-image-quality` | Quality mode from 2026-05-06; `grok-imagine-image-pro` has redirected here since its 2026-05-15 retirement |
 | `grok-imagine-image` | Standard tier, 1K/2K resolution, 300 RPM, same endpoint and parameters |
+
+xAI has also retired `grok-imagine-image-quality`, the quality mode launched 2026-05-06 that `grok-imagine-image-pro` redirected to after its own 2026-05-15 retirement: the API answered HTTP 404 for it on 2026-11-26.
 
 ### Available OpenRouter Models
 
@@ -161,7 +163,7 @@ OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any 
 | `google/gemini-3.1-flash-image` | Fast Gemini image model, generation + editing |
 | `google/gemini-3-pro-image` | Pro-tier Gemini image model, premium quality |
 | `x-ai/grok-imagine-image-2.0` | xAI's flagship image model via OpenRouter |
-| `openai/gpt-image-2` | OpenAI's flagship image model via OpenRouter (`openai/gpt-5-image` and `openai/gpt-5-image-mini` are the older chat-image models) |
+| `openai/gpt-image-2` | OpenAI's `gpt-image-2` via OpenRouter; OpenRouter also lists `openai/gpt-image-2.6-sunburst`, `openai/gpt-image-2.6-flare` and the 2.5 models (`openai/gpt-5-image` and `openai/gpt-5-image-mini` are the older chat-image models) |
 
 Browse the full list at [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
 
@@ -383,12 +385,12 @@ bash scripts/xai.sh \
   --output ./cat.png \
   --resolution 2k
 
-# Use the May 2026 quality-mode model instead of the 2.0 default
+# Use the standard tier instead of the 2.0 default
 bash scripts/xai.sh \
   --mode generate \
   --prompt "a cat in a tree" \
   --output ./cat.png \
-  --model grok-imagine-image-quality
+  --model grok-imagine-image
 ```
 
 **Flags:**
@@ -439,7 +441,7 @@ bash scripts/openrouter.sh \
 | `--mode` | `generate`, `edit` | -- | Yes |
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
-| `--input-image` | file path, repeatable | -- | Edit mode only |
+| `--input-image` | file path, repeatable | -- | Edit mode; in generate mode also sent as references |
 | `--model` | any OpenRouter image model slug | `google/gemini-nano-banana-2.1` | No |
 | `--site-url` | URL | (none) | No (sent as `HTTP-Referer` for OpenRouter attribution) |
 | `--site-name` | text | (none) | No (sent as `X-Title` for OpenRouter attribution) |
@@ -457,7 +459,7 @@ Each `--input-image` must be a PNG, JPEG, WebP or GIF file. The scripts copy eac
 | Gemini | 14 | `generate` (references for a fresh composition) and `edit` |
 | OpenAI | 16 | `edit` only (its generation endpoint takes no images) |
 | xAI | 5 on `grok-imagine-image-2.0` (older models take 3) | `edit` only |
-| OpenRouter | model-dependent | `edit` only (input images attached as chat image parts) |
+| OpenRouter | model-dependent | `generate` and `edit` (input images attached as chat image parts) |
 
 ```bash
 # Gemini: compose a new image from reference images (generate mode)
@@ -540,7 +542,7 @@ Delete the verdict directory to try the default again before the verdict expires
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
 | Transparent BG | No | Yes (png or webp only; preview on gpt-image-2) | No | Model-dependent |
 | Aspect ratios | 10 on Pro / 14 on 3.1 Flash | Any `WxH` up to 3:1 on gpt-image-2 and the 2.5 models; 3 fixed sizes on older models | 16 options (incl. 21:9, 5:2, auto) | Prompt-driven |
-| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts (edit) |
+| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts (generate + edit) |
 | Quality tiers | N/A | auto / low / medium / high, plus xhigh / max on the 2.5 and 2.6 models | low / medium / auto (2.0 only) | Model-dependent |
 | Thinking mode | Yes (`--thinking-level`) | No | No | Model-dependent |
 | Search grounding | Yes (Google Search) | No | No | Model-dependent |
@@ -567,7 +569,7 @@ Delete the verdict directory to try the default again before the verdict expires
 | Output image save | `scripts/output-image.sh` | Refuses an `--output` that already exists, decodes the image into a temp file beside it and hard-links that to the output's name, so it never replaces or follows anything at the path |
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel as one gallery run or under one streaming pane; holds a token for the batch |
 | Display utility | `scripts/display.sh` | Decides the display mode, writes gallery runs, and does multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
-| Gallery server | `scripts/gallery-server.py` | Serves the gallery's runs on 127.0.0.1, starts `run-all.sh` again for a resend, and starts, reuses or replaces that server for `display.sh` |
+| Gallery server | `scripts/gallery-server.py` | Serves the gallery's runs on 127.0.0.1, deletes runs with their image files, starts `run-all.sh` again for a resend, and starts, reuses or replaces that server for `display.sh` |
 | Gallery page | `scripts/gallery/` | The page, script and stylesheet the gallery server serves |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
 | Skill evals | `skills/image-generation/evals/evals.json` | Trigger prompts for the skill's eval suite |

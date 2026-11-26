@@ -80,7 +80,7 @@ Generate or edit an image based on the user's request.
       `--openai-extra "..."`, `--xai-extra "..."`, `--openrouter-extra "..."` (e.g.
       `--openrouter-extra "--model openai/gpt-image-2"`).
    d. Mark the task completed when run-all.sh exits. Its exit status reports whether any
-      provider failed. Each provider's error shows in its frame on the run's gallery card, or inline in the
+      provider failed. Each provider's error shows in its frame of the run on the gallery page, or inline in the
       streaming pane as a red banner; in the gallery the providers' output also stays in the
       Bash call's output. The per-provider logs under `$DISPLAY_PANE_DIR/logs/` exist only in
       pane mode, while the pane is open: the pane deletes them when it closes.

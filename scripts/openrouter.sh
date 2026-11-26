@@ -18,13 +18,13 @@ usage() {
 Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [options]
 
 OpenRouter is a gateway: --model accepts any OpenRouter model slug that supports
-image output (e.g. google/gemini-3.1-flash-image, openai/gpt-5-image).
+image output (e.g. google/gemini-3.1-flash-image, google/gemini-3-pro-image).
 
 Options:
   --mode              generate or edit (required)
   --prompt            Text prompt describing the image (required)
   --output            Output file path (required)
-  --input-image       Input image path for edit mode (required for edit, repeatable)
+  --input-image       Input image path (required for edit, repeatable; also sent in generate)
   --model             OpenRouter model slug (default: google/gemini-nano-banana-2.1)
   --site-url          Sent as HTTP-Referer for OpenRouter attribution (optional)
   --site-name         Sent as X-Title for OpenRouter attribution (optional)
@@ -89,8 +89,8 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
 fi
 
 # OpenRouter does image generation through chat completions: the user message
-# holds the prompt (and, in edit mode, one image_url part per input image as a
-# base64 data URL), and the model returns images in message.images[].
+# holds the prompt (and, when input images are given in either mode, one image_url
+# part per input image as a base64 data URL), and the model returns images in message.images[].
 build_request_body() {
   local content
 

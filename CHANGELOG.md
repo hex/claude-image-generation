@@ -5,7 +5,7 @@ This file lists every notable change to claude-image-generation. The format foll
 versioning in `YYYY.M.PATCH` format. [GitHub releases](https://github.com/hex/claude-image-generation/releases)
 cover the versions up to 2026.9.1.
 
-## Unreleased
+## 2026.11.2 - 2026-11-26
 
 ### Added
 - Browser gallery, the new default display: every image run from every Claude Code session shows on one local page served from 127.0.0.1, newest first, as a section with one frame per provider in that provider's own column. A rail filters the runs by project, a run with a failed provider gets a Retry failed button that counts down the time left, a loupe shows each image large, and a switch picks Auto, Light or Dark. Nothing splits the chat's tmux pane. It needs `python3` 3.9 or later and falls back to the pane without it.
@@ -21,6 +21,15 @@ cover the versions up to 2026.9.1.
 ### Fixed
 - The record of an image saved under a relative `outputBase` names it under the run's working directory, even with `CDPATH` in the environment. With a `CDPATH` folder of the same name, the run's status record named a file in that other folder, with a newline in its path.
 - The record of an image saved under a relative `outputBase` names the folder the file is really in, symlinks resolved. A base such as `out/../hero` behind a symlinked `out/` named the working directory in its record while the file went where the symlink leads.
+
+### Documentation
+- `grok-imagine-image-quality` is out of the model lists and examples: the xAI API answered HTTP 404 for it on 2026-11-26. The docs keep its history and say xAI retired it.
+- The Gemini model lists name `gemini-nano-banana-2.1`, the plugin's Gemini fallback. The docs date the `gpt-image-1.5` and `gpt-image-1-mini` shutdown (2026-12-01) and suggest `gpt-image-2.6-flare` for drafts and as the model-override example.
+- OpenRouter attaches input images in generate mode too, and the docs and `openrouter.sh` help now say so.
+- The README names the `/claude-image-generation:generate-image` command correctly and no longer calls `openai/gpt-image-2` OpenAI's flagship. The gallery server's row says it deletes runs and their image files.
+- The agent and command describe a run as a section of the gallery page, not a card. The agent reports only the files its own call saved, since the gallery can delete runs and resend prompts without it.
+- `TESTING.md` gives the real result of `openai.sh` with an unknown `--mode`, sets `IMAGE_DISPLAY=pane` for the streaming-pane tests, and adds manual tests for the browser gallery (section 3.7).
+- `run-all.sh` help lists OpenRouter's indigo banner and its output file. `openrouter.sh` help gives current example models.
 
 ## 2026.11.1 - 2026-11-05
 
