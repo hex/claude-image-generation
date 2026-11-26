@@ -287,6 +287,8 @@ def read_meta(run_dir):
         raise RunRejected("meta.json's providers is %s, not a list of names" % json.dumps(names)[:80])
     if "arguments" in meta:
         check_arguments(meta["arguments"])
+    if "launch" in meta and not isinstance(meta["launch"], str):
+        raise RunRejected("meta.json's launch is %s, not a string" % json.dumps(meta["launch"])[:80])
     return meta
 
 
@@ -726,6 +728,7 @@ class Gallery:
             if not os.path.isfile(path):
                 return 409, {"error": "run %s's input image %s is gone" % (run_id, path)}
         base = os.path.join(folder, "image-" + time.strftime("%Y%m%d-%H%M%S"))
+        launch = secrets.token_hex(8)
         argv = ["bash", str(SCRIPT.parent / "run-all.sh"), "--mode", arguments["mode"], "--prompt", prompt,
                 "--output-base", base, "--providers", ",".join(providers)]
         for path in arguments["input_images"]:
@@ -746,7 +749,7 @@ class Gallery:
                 # The server cannot know the umask of the run it resends, so the images are saved
                 # readable by this user only, as the gallery's own files are.
                 with open(str(log_path), "ab") as log:
-                    child = subprocess.Popen(argv, cwd=cwd, env=self.resend_environment(cwd), stdin=subprocess.DEVNULL,
+                    child = subprocess.Popen(argv, cwd=cwd, env=self.resend_environment(cwd, launch), stdin=subprocess.DEVNULL,
                                              stdout=log, stderr=subprocess.STDOUT, start_new_session=True, umask=0o077)
             except OSError as e:
                 return 500, {"error": "could not start run-all.sh: %s" % e.strerror}
@@ -757,7 +760,7 @@ class Gallery:
             # Whether it exited is read before the runs are, so a child that made its run and exited
             # in between is still found.
             code = child.returncode
-            new_id = self.resent_run(base, started)
+            new_id = self.resent_run(launch, started)
             if new_id is not None:
                 self.scan()
                 return 200, {"run": new_id}
@@ -768,14 +771,15 @@ class Gallery:
                                       % (RESEND_START_SECONDS, log_path)}
             time.sleep(0.05)
 
-    def resend_environment(self, cwd):
+    def resend_environment(self, cwd, launch):
         """The server's environment, which holds the API keys of the run-all.sh that started it, as a
-        resent run-all.sh gets it: in cwd, showing its run in this gallery and nowhere else."""
+        resent run-all.sh gets it: in cwd, showing its run in this gallery and nowhere else, and
+        recording launch in the run's meta.json so the server can find it."""
         env = {name: value for name, value in os.environ.items() if name not in RESEND_DROPPED_ENV}
         # Bash keeps an inherited PWD that names its working folder, so the new run records the
         # folder spelled as the run it resends did, symlinks and all, and lands in the same project.
         env.update(PWD=cwd, IMAGE_DISPLAY="gallery", IMAGE_GALLERY_DIR=str(self.root),
-                   DISPLAY_IMAGE_TARGET="/dev/null", IMAGE_GALLERY_NO_OPEN="1")
+                   DISPLAY_IMAGE_TARGET="/dev/null", IMAGE_GALLERY_NO_OPEN="1", IMAGE_GALLERY_LAUNCH_ID=launch)
         return env
 
     def resend_log(self):
@@ -800,19 +804,19 @@ class Gallery:
         lines = [line for line in text.splitlines() if line.strip()][-RESEND_ERROR_LINES:]
         return "\n".join(lines) if lines else "it printed nothing"
 
-    def resent_run(self, base, started):
-        """The id of the run whose recorded output base is base, looked for among the runs started
-        since started, or None while there is none."""
+    def resent_run(self, launch, started):
+        """The id of the run that recorded the launch id launch, looked for among the runs started
+        since started, or None while there is none. Another run can record the same output base."""
         for name in sorted(os.listdir(str(self.runs_dir)), reverse=True):
             if not RUN_ID.match(name):
                 continue
             if name[:16] < started:
                 break
             try:
-                arguments = read_meta(self.runs_dir / name).get("arguments")
+                meta = read_meta(self.runs_dir / name)
             except (RunRejected, OSError):
                 continue
-            if arguments is not None and arguments["output_base"] == base:
+            if meta.get("launch") == launch:
                 return name
         return None
 

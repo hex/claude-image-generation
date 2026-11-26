@@ -454,8 +454,10 @@ gallery_root() {
 # <owner> so the run counts as live until that owner releases it. The run is assembled under a
 # dot name and renamed into runs/ only once its token and meta.json are in place, so the server
 # never sees a run without them. <arguments> is a JSON object of what run-all.sh was started with,
-# recorded so the page can resend the run, or empty for a run that cannot be resent. Fails with one
-# line on stderr, leaving DISPLAY_PANE_DIR unset.
+# recorded so the page can resend the run, or empty for a run that cannot be resent. A run the
+# gallery server started for a resend also records the IMAGE_GALLERY_LAUNCH_ID it was given, by
+# which the server tells its run from any other. Fails with one line on stderr, leaving
+# DISPLAY_PANE_DIR unset.
 # Usage: gallery_begin_run <owner> <prompt> <arguments> <provider>...
 gallery_begin_run() {
   local owner="$1" prompt="$2" arguments="$3"
@@ -479,8 +481,10 @@ gallery_begin_run() {
   DISPLAY_PANE_DIR="$staging"
   __pane_acquire "$owner"
   if ! jq -n --arg prompt "$prompt" --arg cwd "$PWD" --arg started "$started" --arg arguments "$arguments" \
+      --arg launch "${IMAGE_GALLERY_LAUNCH_ID:-}" \
       '{prompt: $prompt, cwd: $cwd, started_at: $started, providers: $ARGS.positional}
-       + if $arguments == "" then {} else {arguments: ($arguments | fromjson)} end' \
+       + if $arguments == "" then {} else {arguments: ($arguments | fromjson)} end
+       + if $launch == "" then {} else {launch: $launch} end' \
       --args "$@" > "$staging/meta.json" \
     || ! mv "$staging" "$root/runs/$run_id"; then
     echo "image gallery: cannot write the run in $staging" >&2

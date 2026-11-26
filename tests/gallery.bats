@@ -931,6 +931,8 @@ resend() {
   first=$(jq -r '.runs[0].id' <<< "$SNAPSHOT")
   cwd=$(jq -r '.runs[0].cwd' <<< "$SNAPSHOT")
   [[ "$cwd" == "$PWD" && "$(jq -r '.runs[0].resendable' <<< "$SNAPSHOT")" == true ]] || { echo "$SNAPSHOT"; return 1; }
+  # A run the server did not start records no launch id.
+  [[ "$(jq 'has("launch")' "$IMAGE_GALLERY_DIR/runs/$first/meta.json")" == false ]]
   local answer new
   answer=$(resend "$first" '{"prompt": "a lighthouse at dawn", "providers": ["gemini"]}')
   [[ "$answer" =~ ^\{\"run\":\ \"([0-9]{8}T[0-9]{6}Z-[0-9a-f]{10})\"\}\ 200$ ]] || { echo "answer: $answer"; return 1; }
@@ -1046,6 +1048,27 @@ write_resendable_run() {
     '{"error": "run-all.sh exited 3 before it started a run: using key [GEMINI_API_KEY]\nno run today"} 502' ]]
   rm "$MOCK_DIR/bash"
   [[ "$(snapshot | jq '.runs | length')" == 1 ]]
+}
+
+@test "a resend answers with the run it started, though newer runs record the output base it saves to" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 n=0 stamp answer new
+  printf 'png' > "$out/hero-gemini.png"
+  write_resendable_run "$a" "$out" "$out/hero-gemini.png"
+  # The resend's base is stamped with the second it starts in. Each base it could get in the next ten
+  # seconds is recorded by a run whose id sorts after any run it starts.
+  for stamp in $(python3 -I -c 'import time; [print(time.strftime("%Y%m%d-%H%M%S", time.localtime(time.time() + s))) for s in range(10)]'); do
+    write_run "20991231T23590${n}Z-00000000f${n}" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+    record_arguments "20991231T23590${n}Z-00000000f${n}" "$out/image-$stamp"
+    n=$((n + 1))
+  done
+  start_gallery
+  wait_for_snapshot '.runs | length == 11'
+  answer=$(resend "$a" '{"prompt": "a teapot", "providers": ["gemini"]}')
+  [[ "$answer" =~ ^\{\"run\":\ \"([0-9]{8}T[0-9]{6}Z-[0-9a-f]{10})\"\}\ 200$ ]] || { echo "answer: $answer"; return 1; }
+  new=${BASH_REMATCH[1]}
+  [[ "$(jq -r '[.prompt, (.launch | test("^[0-9a-f]{16}$"))] | @tsv' "$IMAGE_GALLERY_DIR/runs/$new/meta.json")" == $'a teapot\ttrue' ]] || {
+    cat "$IMAGE_GALLERY_DIR/runs/$new/meta.json"; return 1; }
 }
 
 @test "a resend keeps the newest 50 logs in resend-logs, its own among them" {
