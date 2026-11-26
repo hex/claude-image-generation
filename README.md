@@ -99,7 +99,7 @@ The server binds 127.0.0.1 only. It answers only requests whose Host header is `
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `IMAGE_DISPLAY` | `gallery` | `gallery`, `pane` or `none` |
-| `IMAGE_GALLERY_DIR` | `$XDG_STATE_HOME/claude-image-generation/gallery`, else `~/.local/state/claude-image-generation/gallery` | The server's files (`server.json`, `server.lock`, `token`, `last-port`, `server.log`) and one folder per run under `runs/`; readable by you only. A folder you name that already exists keeps its permissions, and one that other users can write is not used: images show as with `pane`, and stderr says so |
+| `IMAGE_GALLERY_DIR` | `$XDG_STATE_HOME/claude-image-generation/gallery`, else `~/.local/state/claude-image-generation/gallery` | The server's files (`server.sock`, `server.lock`, `token`, `last-port`, `server.log`) and one folder per run under `runs/`; readable by you only. A folder you name that already exists keeps its permissions, and one that other users can write is not used: images show as with `pane`, and stderr says so |
 | `IMAGE_GALLERY_NO_OPEN` | unset | `1` never opens the browser and prints no address |
 
 ### Display Size

@@ -34,10 +34,10 @@ teardown() {
   cleanup_tmpdir
 }
 
-# stop_gallery — ends the server server.json names and waits for it to go.
+# stop_gallery — ends the running server and waits for it to go.
 stop_gallery() {
   local pid i
-  pid=$(jq -r .pid "$IMAGE_GALLERY_DIR/server.json" 2>/dev/null) || return 0
+  pid=$(server_field pid) || return 0
   [[ "$pid" =~ ^[0-9]+$ ]] || return 0
   kill "$pid" 2>/dev/null || return 0
   for i in $(seq 1 30); do
@@ -46,7 +46,16 @@ stop_gallery() {
   done
 }
 
-server_field() { jq -r ".$1" "$IMAGE_GALLERY_DIR/server.json" 2>/dev/null; }
+# server_field <name> — a field of the health the running server answers on its control socket,
+# asked from inside the gallery folder the way the client commands ask; fails with no server.
+server_field() {
+  (cd "$IMAGE_GALLERY_DIR" 2>/dev/null && python3 -I -c '
+import json, socket, sys
+with socket.socket(socket.AF_UNIX) as sock:
+    sock.connect("server.sock")
+    sock.sendall(b"health\n")
+    print(json.loads(sock.makefile().readline())[sys.argv[1]])' "$1" 2>/dev/null)
+}
 
 # gallery_curl [curl args...] <path> — curl at the running server, the path under the page's token.
 gallery_curl() {
@@ -123,7 +132,7 @@ connect_page() {
   curl -s -N --max-time 60 "http://127.0.0.1:$(server_field port)/$(server_field token)/events" > /dev/null &
   EVENTS_PID=$!
   for i in $(seq 1 50); do
-    [[ "$(gallery_curl /health | jq -r .clients)" == 1 ]] && return 0
+    [[ "$(server_field clients)" == 1 ]] && return 0
     sleep 0.1
   done
   echo "the server never counted the page"
@@ -175,18 +184,20 @@ run_all_gemini() {
   local port url
   port=$(server_field port)
   url="http://127.0.0.1:${port}"
-  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -H "Host: localhost:${port}" /health)" == 403 ]]
-  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -H "Host: 127.0.0.1" /health)" == 403 ]]
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' "${url}/health")" == 403 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -H "Host: localhost:${port}" /app.js)" == 403 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -H "Host: 127.0.0.1" /app.js)" == 403 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "${url}/app.js")" == 403 ]]
   [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "${url}/events")" == 403 ]]
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' "${url}/wrong/health")" == 403 ]]
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: gallery_token=$(server_field token)" "${url}/health")" == 403 ]]
-  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://localhost:${port}" /open)" == 403 ]]
-  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST /open)" == 403 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "${url}/wrong/app.js")" == 403 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: gallery_token=$(server_field token)" "${url}/app.js")" == 403 ]]
+  local retry=/retry/20990101T000000Z-0000000000
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://localhost:${port}" "$retry")" == 403 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST "$retry")" == 403 ]]
   # A POST that declares a body it never sends is answered at once, without reading it.
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H 'Content-Length: 100' "${url}/wrong/open")" == 403 ]]
-  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H "$(origin)" -H 'Content-Length: 100' /open)" == 413 ]]
-  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' /health)" == 200 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H 'Content-Length: 100' "${url}/wrong${retry}")" == 403 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H "$(origin)" -H 'Content-Length: 100' "$retry")" == 413 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "$(origin)" "$retry")" == 404 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' /app.js)" == 200 ]]
 }
 
 @test "the page and its files are served under the token's path, and the server sets no cookie" {
@@ -211,7 +222,7 @@ run_all_gemini() {
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' /img/20990101T000000Z-0000000000/gemini/0)" == 404 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' "/img/${id}/openai/0")" == 404 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' "/img/${id}/gemini/1")" == 404 ]]
-  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' "/img/${id}/..%2F..%2Fserver.json/0")" == 404 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' "/img/${id}/..%2F..%2Ftoken/0")" == 404 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "$(origin)" "/reveal/${id}/openai/0")" == 404 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "$(origin)" /retry/20990101T000000Z-0000000000)" == 404 ]]
   [[ "$(gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" "/retry/${id}")" == \
@@ -236,18 +247,20 @@ run_all_gemini() {
 
 @test "runs started together share one server and open one page" {
   # Each start finds no page connected and asks for one; a browser slow to open still opens once.
+  # The gallery folder is too deep for its control socket's path to fit a socket address.
+  export IMAGE_GALLERY_DIR="${BATS_TEST_TMPDIR}/a-gallery-folder-whose-control-socket-path-is-longer-than-a-socket-address-holds"
+  [[ ${#IMAGE_GALLERY_DIR} -gt 104 ]]
   stub_browser
   printf 'sleep 1\n' | tee -a "$MOCK_DIR/browser/open" >> "$MOCK_DIR/browser/xdg-open"
   start_gallery &
   start_gallery &
   wait
-  local pid instance i root
+  local pid i root
   pid=$(server_field pid)
   # The server is started with the root resolved, /var becoming /private/var on macOS.
   root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
-  instance=$(server_field instance)
   start_gallery
-  [[ "$(server_field pid)" == "$pid" && "$(server_field instance)" == "$instance" ]]
+  [[ "$(server_field pid)" == "$pid" && "$(python3 -I "$GALLERY_PY" clients --root "$IMAGE_GALLERY_DIR")" == 0 ]]
   [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
   # The racer that lost the lock gives up within its five-second wait.
   for i in $(seq 1 70); do
@@ -262,14 +275,14 @@ run_all_gemini() {
   python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version 0.0.0-other
   local i old version
   for i in $(seq 1 50); do
-    [[ -s "$IMAGE_GALLERY_DIR/server.json" ]] && break
+    [[ "$(server_field version)" == 0.0.0-other ]] && break
     sleep 0.1
   done
   [[ "$(server_field version)" == 0.0.0-other ]]
   old=$(server_field pid)
   start_gallery
   version=$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")
-  [[ "$(gallery_curl /health | jq -r .version)" == "$version" ]]
+  [[ "$(server_field version)" == "$version" ]]
   [[ "$(server_field pid)" != "$old" ]]
   ! kill -0 "$old" 2>/dev/null
 }
@@ -293,7 +306,7 @@ serve_other_version() {
     [[ "$(server_field version)" == 0.0.0-other ]] && return 0
     sleep 0.1
   done
-  echo "the server of another version never wrote server.json"
+  echo "the server of another version never answered on its control socket"
   return 1
 }
 
@@ -332,27 +345,31 @@ serve_other_version() {
   [[ ! -e "$MOCK_DIR/opened" ]]
 }
 
-@test "the token goes only to the server process server.json names, never to another process on its port" {
-  # A server that died without removing server.json: its pid is now another process of this
-  # user's, and its port is held by a listener that records whatever it is sent.
+@test "the token never reaches a listener on the port the gallery folder records" {
+  # The folder's records name a port another listener now holds: last-port, and a server.json
+  # naming a live process of this user with its true start time. The listener records whatever
+  # it is sent.
   mkdir -p "$IMAGE_GALLERY_DIR"
   sleep 60 &
   HOLDER_PID=$!
   printf 'null' > "$MOCK_DIR/answer"
   python3 -I "${PLUGIN_ROOT}/tests/one_request_server.py" "$MOCK_DIR/port" "$MOCK_DIR/request.raw" "$MOCK_DIR/answer" &
   LISTENER_PID=$!
-  local i
+  local i started
   for i in $(seq 1 50); do
     [[ -s "$MOCK_DIR/port" ]] && break
     sleep 0.1
   done
-  jq -n --argjson pid "$HOLDER_PID" --argjson port "$(cat "$MOCK_DIR/port")" \
+  started=$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" | awk '{$1 = $1; print}')
+  cp "$MOCK_DIR/port" "$IMAGE_GALLERY_DIR/last-port"
+  jq -n --argjson pid "$HOLDER_PID" --argjson port "$(cat "$MOCK_DIR/port")" --arg started "$started" \
     '{pid: $pid, port: $port, instance: "0123456789abcdef", version: "0.0.0-other",
-      started: "Thu Jan  1 00:00:00 1970", token: "stale-token-0123456789-0123456789-0123456789"}' \
+      started: $started, token: "stale-token-0123456789-0123456789-0123456789"}' \
     > "$IMAGE_GALLERY_DIR/server.json"
   start_gallery
+  python3 -I "$GALLERY_PY" clients --root "$IMAGE_GALLERY_DIR"
   [[ ! -e "$MOCK_DIR/request.raw" ]] || { echo "the listener was sent:"; cat "$MOCK_DIR/request.raw"; return 1; }
-  [[ "$(gallery_curl /health | jq -r .version)" == "$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")" ]]
+  [[ "$(server_field version)" == "$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")" ]]
 }
 
 @test "the Retry button's POST /retry runs the failed provider again" {
@@ -388,7 +405,7 @@ serve_other_version() {
   connect_page
   kill "$EVENTS_PID"
   sleep 2
-  [[ "$(gallery_curl /health | jq -r .clients)" == 0 ]]
+  [[ "$(server_field clients)" == 0 ]]
 }
 
 @test "a provider that exits before it starts shows as failed, saying so" {

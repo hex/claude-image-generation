@@ -15,7 +15,6 @@ retry-offer / .retry pair.
 import argparse
 import fcntl
 import hmac
-import http.client
 import http.server
 import json
 import os
@@ -34,8 +33,13 @@ import time
 import urllib.parse
 from pathlib import Path
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-PAGE_DIR = Path(__file__).resolve().parent / "gallery"
+SCRIPT = Path(__file__).resolve()
+PLUGIN_ROOT = SCRIPT.parent.parent
+PAGE_DIR = SCRIPT.parent / "gallery"
+# The control socket the client commands reach the server on, inside the gallery folder. It is
+# named relative to that folder, from inside it, because a Unix socket's address holds at most
+# 104 bytes on macOS and a gallery folder deep in a temp directory can be longer than that.
+CONTROL_SOCKET = "server.sock"
 IDLE_SECONDS = 30 * 60
 SCAN_SECONDS = 0.25
 PING_SECONDS = 15
@@ -597,9 +601,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
-        elif route == "/health":
-            self.send_json(200, {"instance": self.gallery.instance, "version": self.gallery.version,
-                                 "clients": self.gallery.clients})
         elif route == "/events":
             self.events()
         elif route.startswith("/img/"):
@@ -623,11 +624,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reveal(segments[1:])
         elif segments[0] == "retry" and len(segments) == 2:
             self.retry(segments[1])
-        elif route == "/open":
-            self.send_json(200, {"opened": self.gallery.open_page()})
-        elif route == "/shutdown":
-            self.send_json(200, {"stopping": True})
-            self.gallery.stop.set()
         else:
             self.send_json(404, {"error": "no such action: %s" % route})
 
@@ -762,6 +758,45 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.server_port = self.server_address[1]
 
 
+class ControlHandler(socketserver.StreamRequestHandler):
+    """Answers one command from a client command on the control socket: a line naming it, answered
+    with one line of JSON. Only this user can reach the socket, so a command carries no token."""
+    timeout = 5
+
+    def handle(self):
+        gallery = self.server.gallery
+        command = self.rfile.readline(64).decode(errors="replace").strip()
+        if command == "health":
+            answer = {"pid": os.getpid(), "port": gallery.port, "token": gallery.token,
+                      "version": gallery.version, "clients": gallery.clients}
+        elif command == "open":
+            answer = {"opened": gallery.open_page()}
+        elif command == "shutdown":
+            answer = {"stopping": True}
+            gallery.stop.set()
+        else:
+            answer = {"error": "no such command: %r" % command}
+        self.wfile.write(json.dumps(answer).encode() + b"\n")
+
+
+class ControlServer(socketserver.ThreadingUnixStreamServer):
+    daemon_threads = True
+
+
+def bind_control(root):
+    """Binds the control socket, readable and writable by this user only. The caller holds
+    server.lock, so a socket already there is one a dead server left."""
+    os.chdir(str(root))
+    try:
+        os.unlink(CONTROL_SOCKET)
+    except FileNotFoundError:
+        pass
+    control = ControlServer(CONTROL_SOCKET, ControlHandler)
+    os.chmod(CONTROL_SOCKET, 0o600)
+    os.chdir("/")
+    return control
+
+
 def detach():
     """Leaves the caller behind: a session of its own, no terminal, none of the caller's files."""
     if os.fork() > 0:
@@ -837,10 +872,9 @@ def serve(root, version):
     gallery.scan()
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     write_private(root / "last-port", str(port))
-    write_private(root / "server.json", json.dumps({
-        "pid": os.getpid(), "started": process_started(os.getpid()), "port": port, "instance": gallery.instance,
-        "version": version, "token": gallery.token,
-    }))
+    control = bind_control(root)
+    control.gallery = gallery
+    threading.Thread(target=control.serve_forever, daemon=True).start()
     busy_at = time.time()
     while not gallery.stop.wait(SCAN_SECONDS):
         if gallery.scan() or gallery.clients > 0:
@@ -849,12 +883,10 @@ def serve(root, version):
             # A run may have begun since the scan that found none live; look once more.
             if not gallery.scan() and gallery.clients == 0:
                 break
-    try:
-        info = json.loads(read_text(root / "server.json"))
-        if info.get("instance") == gallery.instance:
-            os.unlink(str(root / "server.json"))
-    except (FileNotFoundError, ValueError):
-        pass
+    # Gone before the server stops answering, and while this process still holds server.lock, so
+    # the socket is never a successor's.
+    os.unlink(str(root / CONTROL_SOCKET))
+    control.server_close()
     httpd.server_close()
     os._exit(0)
 
@@ -862,34 +894,23 @@ def serve(root, version):
 # ── Client ────────────────────────────────────────────────────────────
 
 
-def request(info, method, path, timeout=2):
-    """Sends one request to the server server.json describes; returns (status, parsed JSON)."""
-    conn = http.client.HTTPConnection("127.0.0.1", info["port"], timeout=timeout)
-    try:
-        headers = {}
-        if method == "POST":
-            headers["Origin"] = "http://127.0.0.1:%d" % info["port"]
-        conn.request(method, "/%s%s" % (info["token"], path), headers=headers)
-        response = conn.getresponse()
-        return response.status, json.loads(response.read() or b"null")
-    finally:
-        conn.close()
-
-
-def running_server(root):
-    """server.json and /health of the server answering for root, or (None, None). The token is
-    sent only while the process server.json names is still the one that wrote it: that process
-    keeps its port bound until it exits, so nothing else can be listening there."""
-    try:
-        info = json.loads(read_text(root / "server.json"))
-        if not holder_alive(info["pid"], info["started"]):
-            return None, None
-        status, health = request(info, "GET", "/health")
-    except (FileNotFoundError, ValueError, KeyError, TypeError, OSError, http.client.HTTPException):
-        return None, None
-    if status != 200 or not isinstance(health, dict) or health.get("instance") != info.get("instance"):
-        return None, None
-    return info, health
+def control(root, command, timeout=2):
+    """Sends a command to the server serving root over its control socket and returns its answer,
+    or None when no server listens there. The socket is reached by its name from inside root, so
+    this process moves into root."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        try:
+            os.chdir(str(root))
+            sock.connect(CONTROL_SOCKET)
+        except (FileNotFoundError, ConnectionRefusedError):
+            return None
+        sock.sendall(command.encode() + b"\n")
+        with sock.makefile("rb") as answer:
+            line = answer.readline()
+    if not line.endswith(b"\n"):
+        raise ConnectionError("the server in %s closed its control socket without answering %s" % (root, command))
+    return json.loads(line)
 
 
 def wait_for_exit(pid, seconds):
@@ -899,17 +920,18 @@ def wait_for_exit(pid, seconds):
 
 
 def start_server(root, version):
-    """Launches a server and waits for one to answer: this one, or a racing caller's."""
-    subprocess.run([sys.executable, "-I", str(Path(__file__).resolve()), "serve", "--root", str(root),
+    """Launches a server and returns its health once one answers: this one, or a racing caller's.
+    None when none answers within START_WAIT_SECONDS."""
+    subprocess.run([sys.executable, "-I", str(SCRIPT), "serve", "--root", str(root),
                     "--version", version], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL, check=True)
     deadline = time.time() + START_WAIT_SECONDS
     while time.time() < deadline:
-        info, health = running_server(root)
-        if info is not None:
-            return info, health
+        health = control(root, "health")
+        if health is not None:
+            return health
         time.sleep(0.05)
-    return None, None
+    return None
 
 
 def in_ssh_session():
@@ -919,34 +941,33 @@ def in_ssh_session():
 def ensure(root):
     version = plugin_version()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    info, health = running_server(root)
+    health = control(root, "health")
     # Pages of a server this one replaces reconnect to its successor when it binds the same port.
     old_port, old_pages = None, 0
-    if info is not None and health.get("version") != version:
-        old_port, old_pages = info["port"], health["clients"]
-        request(info, "POST", "/shutdown")
-        wait_for_exit(info["pid"], LOCK_WAIT_SECONDS)
-        info = None
-    if info is None:
-        info, health = start_server(root, version)
-        if info is None:
+    if health is not None and health["version"] != version:
+        old_port, old_pages = health["port"], health["clients"]
+        control(root, "shutdown")
+        wait_for_exit(health["pid"], LOCK_WAIT_SECONDS)
+        health = None
+    if health is None:
+        health = start_server(root, version)
+        if health is None:
             print("image gallery: the server did not start within %d s; see %s" %
                   (START_WAIT_SECONDS, root / "server.log"), file=sys.stderr)
             return 1
-    pages = health["clients"] + (old_pages if info["port"] == old_port else 0)
+    pages = health["clients"] + (old_pages if health["port"] == old_port else 0)
     if pages == 0 and os.environ.get("IMAGE_GALLERY_NO_OPEN") != "1":
-        url = "http://127.0.0.1:%d/%s/" % (info["port"], info["token"])
+        url = "http://127.0.0.1:%d/%s/" % (health["port"], health["token"])
         opened = False
         if not in_ssh_session():
-            status, answer = request(info, "POST", "/open", timeout=15)
-            opened = status == 200 and answer.get("opened") is True
+            opened = control(root, "open", timeout=15) == {"opened": True}
         if not opened:
             print("image gallery: open %s to watch the images" % url, file=sys.stderr)
     return 0
 
 
 def clients(root):
-    info, health = running_server(root)
+    health = control(root, "health")
     print(0 if health is None else health["clients"])
     return 0
 
@@ -961,13 +982,11 @@ def main():
     if args.command == "serve":
         serve(root, args.version or plugin_version())
         return 0
-    if args.command == "ensure":
-        try:
-            return ensure(root)
-        except (OSError, http.client.HTTPException, subprocess.CalledProcessError, ValueError) as e:
-            print("image gallery: %s" % e, file=sys.stderr)
-            return 1
-    return clients(root)
+    try:
+        return ensure(root) if args.command == "ensure" else clients(root)
+    except (OSError, subprocess.CalledProcessError, ValueError) as e:
+        print("image gallery: %s" % e, file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
