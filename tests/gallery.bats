@@ -46,6 +46,16 @@ stop_gallery() {
   done
 }
 
+# servers_on <root> — the pids of the servers running on <root>, one per line. pgrep matches in the
+# C locale: in UTF-8 it fails with "illegal byte sequence" whenever any process on the machine has
+# arguments that are not valid UTF-8, and a failure must not read as "no server". It prints the
+# failure instead, which no pid list or empty check accepts.
+servers_on() {
+  local status=0
+  LC_ALL=C pgrep -f "gallery-server.py serve --root $1" || status=$?
+  [[ $status -le 1 ]] || echo "pgrep failed with exit $status"
+}
+
 # server_field <name> — a field of the health the running server answers on its control socket,
 # asked from inside the gallery folder the way the client commands ask; fails with no server.
 server_field() {
@@ -271,10 +281,10 @@ run_all_gemini() {
   [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
   # The racer that lost the lock gives up within its five-second wait.
   for i in $(seq 1 70); do
-    [[ "$(pgrep -f "gallery-server.py serve --root ${root}" | tr '\n' ' ')" == "$pid " ]] && return 0
+    [[ "$(servers_on "$root" | tr '\n' ' ')" == "$pid " ]] && return 0
     sleep 0.1
   done
-  echo "servers for this root: $(pgrep -f "gallery-server.py serve --root ${root}" | tr '\n' ' '), expected $pid"
+  echo "servers for this root: $(servers_on "$root" | tr '\n' ' '), expected $pid"
   return 1
 }
 
@@ -298,7 +308,7 @@ run_all_gemini() {
   [[ "$replacement" != "$old" ]]
   ! kill -0 "$old" 2>/dev/null
   root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
-  [[ "$(pgrep -f "gallery-server.py serve --root ${root}" | tr '\n' ' ')" == "$replacement " ]]
+  [[ "$(servers_on "$root" | tr '\n' ' ')" == "$replacement " ]]
 }
 
 # stub_browser — puts an open and an xdg-open first on PATH that record each call in
@@ -496,10 +506,10 @@ serve_other_version() {
   # A server started on the folder directly refuses it too, and exits.
   python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version 0.0.0-other
   for i in $(seq 1 50); do
-    [[ -z "$(pgrep -f "gallery-server.py serve --root ${IMAGE_GALLERY_DIR}")" ]] && break
+    [[ -z "$(servers_on "$IMAGE_GALLERY_DIR")" ]] && break
     sleep 0.1
   done
-  [[ -z "$(pgrep -f "gallery-server.py serve --root ${IMAGE_GALLERY_DIR}")" ]]
+  [[ -z "$(servers_on "$IMAGE_GALLERY_DIR")" ]]
   [[ "$(tail -n 1 "$IMAGE_GALLERY_DIR/server.log")" == "image gallery: ${message}" ]] || { cat "$IMAGE_GALLERY_DIR/server.log"; return 1; }
   [[ "$(cat "$IMAGE_GALLERY_DIR/server.sock")" == notes ]]
 }
