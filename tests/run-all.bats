@@ -151,6 +151,21 @@ STUB
   [[ ! -e "$PANE/.retry" && ! -e "$PANE/retry-offer" ]] || { ls -A "$PANE"; return 1; }
 }
 
+@test "run-all records a provider that exits without a result as failed, whether or not it began" {
+  fake_pane
+  # gemini stops before it begins, xai after it began, neither writing a result.
+  printf '#!/bin/bash\nexit 1\n' > "$WORK_DIR/gemini.sh"
+  printf '#!/bin/bash\nsource "$(dirname "$0")/display.sh"\ndisplay_pane_begin xai model-x p\nexit 3\n' > "$WORK_DIR/xai.sh"
+  chmod +x "$WORK_DIR/gemini.sh" "$WORK_DIR/xai.sh"
+  DISPLAY_PANE_RETRY_WAIT=0 run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" \
+    --output-base "$WORK_DIR/out" --providers gemini,xai
+  assert_status 1
+  [[ "$(grep '^gemini' "$PANE/status")" == $'gemini\terror\t\t\t' ]] || { cat "$PANE/status"; return 1; }
+  [[ "$(grep '^xai' "$PANE/status")" == $'xai\tquerying\t\tmodel-x\t\nxai\terror\t\t\t' ]] || { cat "$PANE/status"; return 1; }
+  [[ "$(cat "$PANE/errors/gemini.txt")" == "gemini exited 1 before reporting a result; its error output says why" ]]
+  [[ "$(cat "$PANE/errors/xai.txt")" == "xai exited 3 before reporting a result; its error output says why" ]]
+}
+
 @test "run-all treats a pane that closed during the offer as no retry" {
   stub_provider gemini
   stub_flaky_provider xai

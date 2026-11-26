@@ -145,13 +145,15 @@ spawn_named() {
   spawn_provider "$p" "${SCRIPT_DIR}/${p}.sh" "${args[@]}"
 }
 
-# record_unreported_failure <provider> <exit status> — gives a provider that exited before it
-# wrote any status record (a missing key, a bad option) an error record, so the run does not show
-# it as never started once the run is over. Its own error output says why it stopped.
+# record_unreported_failure <provider> <exit status> — gives a provider that exited without a
+# result in the status log (a missing key or bad option before it began, an abort after) an error
+# record, so the finished run does not show it as never started or stopped midway. Its own error
+# output says why it stopped.
 record_unreported_failure() {
-  local p="$1" code="$2" dir="${DISPLAY_PANE_DIR:-}"
+  local p="$1" code="$2" dir="${DISPLAY_PANE_DIR:-}" last
   [[ -n "$dir" && -d "$dir" ]] || return 0
-  grep -q "^${p}"$'\t' "$dir/status" 2>/dev/null && return 0
+  last=$(grep "^${p}"$'\t' "$dir/status" 2>/dev/null | tail -n 1 | cut -f2) || last=""
+  [[ "$last" == complete || "$last" == error ]] && return 0
   display_pane_error "$p" "$p exited $code before reporting a result; its error output says why"
   display_pane_status "$p" error "" "" ""
 }
