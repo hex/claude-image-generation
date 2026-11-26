@@ -153,6 +153,8 @@ STUB
 
 @test "run-all records a provider that exits without a result as failed, whether or not it began" {
   fake_pane
+  # An earlier batch in the same pane left gemini complete and xai failed.
+  printf 'gemini\tcomplete\t900\tmodel-g\t/earlier.png\nxai\terror\t\tmodel-x\t\n' > "$PANE/status"
   # gemini stops before it begins, xai after it began, neither writing a result.
   printf '#!/bin/bash\nexit 1\n' > "$WORK_DIR/gemini.sh"
   printf '#!/bin/bash\nsource "$(dirname "$0")/display.sh"\ndisplay_pane_begin xai model-x p\nexit 3\n' > "$WORK_DIR/xai.sh"
@@ -160,8 +162,10 @@ STUB
   DISPLAY_PANE_RETRY_WAIT=0 run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" \
     --output-base "$WORK_DIR/out" --providers gemini,xai
   assert_status 1
-  [[ "$(grep '^gemini' "$PANE/status")" == $'gemini\terror\t\t\t' ]] || { cat "$PANE/status"; return 1; }
-  [[ "$(grep '^xai' "$PANE/status")" == $'xai\tquerying\t\tmodel-x\t\nxai\terror\t\t\t' ]] || { cat "$PANE/status"; return 1; }
+  [[ "$(grep '^gemini' "$PANE/status")" == $'gemini\tcomplete\t900\tmodel-g\t/earlier.png\ngemini\terror\t\t\t' ]] || {
+    cat "$PANE/status"; return 1; }
+  [[ "$(grep '^xai' "$PANE/status")" == $'xai\terror\t\tmodel-x\t\nxai\tquerying\t\tmodel-x\t\nxai\terror\t\t\t' ]] || {
+    cat "$PANE/status"; return 1; }
   [[ "$(cat "$PANE/errors/gemini.txt")" == "gemini exited 1 before reporting a result; its error output says why" ]]
   [[ "$(cat "$PANE/errors/xai.txt")" == "xai exited 3 before reporting a result; its error output says why" ]]
 }
