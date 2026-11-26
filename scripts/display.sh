@@ -393,7 +393,9 @@ __gallery_python_usable() {
 __gallery_root_private() {
   local root="${IMAGE_GALLERY_DIR:-}"
   [[ -n "$root" && -d "$root" ]] || return 0
-  [[ -O "$root" && -z "$(find "$root" -maxdepth 0 \( -perm -020 -o -perm -002 \) -print)" ]]
+  local writable
+  writable=$(find -H "$root" -maxdepth 0 \( -perm -020 -o -perm -002 \) -print) || return 1
+  [[ -O "$root" && -z "$writable" ]]
 }
 
 # Prints where images go, the one place that decides it: gallery (the browser gallery page),
