@@ -155,8 +155,10 @@ status_size() {
 # record_unreported_failure <provider> <exit status> <status size at spawn> — gives a provider that
 # exited without a result in the status log (a missing key or bad option before it began, an abort
 # after) an error record, so the finished run does not show it as never started or stopped midway.
-# Only records written since it was spawned count: earlier rounds and batches in a shared pane
-# wrote the ones before. Its own error output says why it stopped.
+# Only records written since it was spawned count, which leaves out those of earlier rounds and
+# batches in a shared pane. A batch running at the same time in that pane can still write a record
+# under the same provider name after the spawn, and that record then counts as this provider's.
+# Its own error output says why it stopped.
 record_unreported_failure() {
   local p="$1" code="$2" offset="$3" dir="${DISPLAY_PANE_DIR:-}" last
   [[ -n "$dir" && -d "$dir" ]] || return 0
