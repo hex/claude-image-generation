@@ -62,9 +62,9 @@ let unseen = 0;
 let firstSnapshot = true;
 let loupeAt = null;
 let loupeClosing = 0;
-// What the open delete dialog asks to delete: { ids, empties, staying, busy }, or null. empties is
-// true when the runs are every run of the project in view, so the page goes back to All projects once
-// they go; staying maps each file the dialog said stays to why.
+// What the open delete dialog asks to delete: { ids, listed, empties, busy }, or null. listed maps
+// each run id to the paths of the files the dialog said go with that run. empties is true when the
+// runs are every run of the project in view, so the page goes back to All projects once they go.
 let deleting = null;
 
 function el(tag, attrs, ...children) {
@@ -682,31 +682,36 @@ function counted(n, noun) {
 }
 
 // Asks before deleting runs, none of them live: the dialog names every image file that goes and
-// every file that stays with why, as the server keeps it: one the server does not delete (its name,
-// or not a file) and one a run outside the delete also names. It says how many of a project's runs
-// stay because they are still generating. Cancel has the focus.
+// every file that stays with why, as the server decides: one the server does not delete (its name,
+// or not a file) and one a run outside the delete also names, by any path. A file two of the runs
+// name goes with the later of them, as the server deletes it, and is listed once. The dialog says
+// how many of a project's runs stay because they are still generating. Cancel has the focus.
 function askToDelete(chosen, project, generating) {
   const ids = chosen.map(run => run.id);
-  const others = runs.filter(run => !ids.includes(run.id));
-  const going = new Set();
+  const outside = new Set(runs.filter(run => !ids.includes(run.id)).flatMap(run => run.files.map(file => file.entry)));
+  const listed = {};
   const staying = new Map();
-  for (const file of chosen.flatMap(run => run.files)) {
-    const why = file.kept || (others.some(run => run.files.some(other => other.path === file.path)) ? 'another run uses it' : null);
-    if (why) staying.set(file.path, why);
-    else going.add(file.path);
-  }
+  chosen.forEach((run, index) => {
+    listed[run.id] = [];
+    for (const file of run.files) {
+      if (file.kept) staying.set(file.path, file.kept);
+      else if (outside.has(file.entry)) staying.set(file.path, 'another run uses it');
+      else if (!chosen.slice(index + 1).some(later => later.files.some(other => other.entry === file.entry))) listed[run.id].push(file.path);
+    }
+  });
+  const going = Object.values(listed).flat();
   const named = chosen.some(run => run.files.length);
   const selected = selectedSession();
   const empties = selected !== null && runs.filter(run => run.cwd === selected).every(run => ids.includes(run.id));
-  deleting = { ids, empties, staying, busy: false };
+  deleting = { ids, listed, empties, busy: false };
   confirmTitle.textContent = project ? 'Delete ' + project.name + ' from the gallery?' : 'Delete this run?';
   const removes = project ? 'Removes its ' + counted(chosen.length, 'run') + ' from the gallery' : 'Removes it from the gallery';
-  const files = going.size ? ' and deletes ' + counted(going.size, 'image') + ' from disk.' : named ? '. It deletes no images.' : '. ' + (project ? 'They have' : 'It has') + ' no saved images.';
+  const files = going.length ? ' and deletes ' + counted(going.length, 'image') + ' from disk.' : named ? '. It deletes no images.' : '. ' + (project ? 'They have' : 'It has') + ' no saved images.';
   const keeps = staying.size ? ' ' + counted(staying.size, 'file') + ' ' + (staying.size === 1 ? 'stays' : 'stay') + ' on disk.' : '';
   const stays = generating ? ' ' + counted(generating, 'run') + ' still generating ' + (generating === 1 ? 'stays' : 'stay') + '.' : '';
   confirmBody.textContent = removes + files + keeps + stays + ' This can\u2019t be undone.';
   confirmFiles.replaceChildren(
-    ...[...going].map(path => el('li', { text: path })),
+    ...going.map(path => el('li', { text: path })),
     ...[...staying].map(([path, why]) => el('li', { text: path + ': kept, ' + why })),
   );
   confirmFiles.hidden = !named;
@@ -740,12 +745,11 @@ async function deleteListed() {
     answer = null;
   }
   asked.busy = false;
-  // A file the dialog said goes can stay, as when a run the page did not know of names it too.
+  // Each file the dialog said goes that the server kept instead, with why: one a run the page did
+  // not know of names too, say.
   const outcomes = answer && Array.isArray(answer.kept) ? [...answer.deleted, ...answer.kept] : [];
-  const gone = new Set(outcomes.flatMap(run => [...(run.removed || []), ...(run.missing || [])]));
-  const unforeseen = outcomes.flatMap(run => run.kept_files || [])
-    .filter(file => !gone.has(file.path) && !asked.staying.has(file.path));
-  if (answer && Array.isArray(answer.kept) && !answer.kept.length && !unforeseen.length) {
+  const stayed = outcomes.flatMap(run => (run.kept_files || []).filter(file => (asked.listed[run.id] || []).includes(file.path)));
+  if (answer && Array.isArray(answer.kept) && !answer.kept.length && !stayed.length) {
     confirmDialog.close();
     if (asked.empties) location.hash = '';
     document.getElementById('strips').focus();
@@ -764,11 +768,11 @@ async function deleteListed() {
   const images = outcomes.reduce((sum, run) => sum + (run.removed ? run.removed.length : 0), 0);
   confirmTitle.textContent = answer.deleted.length || images ? 'Not everything was deleted' : 'Nothing was deleted';
   const done = answer.deleted.length || images ? 'Deleted ' + counted(answer.deleted.length, 'run') + ' and ' + counted(images, 'image') + '. ' : '';
-  const kept = [answer.kept.length && counted(answer.kept.length, 'run'), unforeseen.length && counted(unforeseen.length, 'image')];
+  const kept = [answer.kept.length && counted(answer.kept.length, 'run'), stayed.length && counted(stayed.length, 'image')];
   confirmBody.textContent = done + 'Kept ' + kept.filter(Boolean).join(' and ') + ':';
   confirmFiles.replaceChildren(
     ...answer.kept.map(run => el('li', { text: run.error })),
-    ...unforeseen.map(file => el('li', { text: file.path + ': ' + file.reason })),
+    ...stayed.map(file => el('li', { text: file.path + ': ' + file.reason })),
   );
   confirmFiles.hidden = false;
 }

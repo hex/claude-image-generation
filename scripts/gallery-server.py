@@ -483,12 +483,31 @@ def unique_images(images):
     return list(first.values())
 
 
-def mark_kept_files(runs):
-    """Gives each file a run names kept: why deleting the run would keep it (keep_reason), or None.
-    Read on every scan, since a file can change while its run's own files do not."""
+def file_entry(path):
+    """What tells the file at path from every other file, however its path is spelled: the device
+    and inode os.stat finds there. A file named through a symlinked folder, with a doubled slash or
+    through a symlink to it is one entry, so a run never deletes the file or link another run's
+    image needs. A path that is relative, holds a NUL or has nothing there to stat is an entry of its
+    own."""
+    if "\0" in path or not os.path.isabs(path):
+        return ("path", path)
+    try:
+        st = os.stat(path)
+    except OSError:
+        return ("path", path)
+    return ("file", st.st_dev, st.st_ino)
+
+
+def mark_files(runs):
+    """Gives each file a run names kept: why deleting the run would keep it (keep_reason), or None;
+    and entry: a number the files of runs share when they are one file on disk (file_entry), however
+    their paths are spelled. Read on every scan, since a file can change while the runs' own files
+    do not."""
+    entries = {}
     for run in runs:
         for f in run["files"]:
             f["kept"] = keep_reason(f["provider"], f["path"])
+            f["entry"] = entries.setdefault(file_entry(f["path"]), len(entries))
 
 
 def image_type(head):
@@ -570,7 +589,7 @@ class Gallery:
         for name in set(self.read_runs) - set(names):
             del self.read_runs[name]
         add_usual_times(runs)
-        mark_kept_files(runs)
+        mark_files(runs)
         snapshot = json.dumps({"instance": self.instance, "runs": runs})
         if snapshot != self.snapshot:
             with self.changed:
@@ -600,10 +619,10 @@ class Gallery:
         return run
 
     def image_namers(self):
-        """Each image path a run in the gallery names, mapped to the ids of the runs that name it,
-        oldest first. A run whose status log stops parsing names the images of the records before
-        that point, as the page shows it. Raises OSError naming a run whose status log cannot be
-        read. Call it holding runs_lock."""
+        """Each image file a run in the gallery names, by its file_entry, mapped to the ids of the
+        runs that name it, oldest first and each once. A run whose status log stops parsing names the
+        images of the records before that point, as the page shows it. Raises OSError naming a run
+        whose status log cannot be read. Call it holding runs_lock."""
         namers = {}
         for name in sorted(os.listdir(str(self.runs_dir))):
             if not RUN_ID.match(name):
@@ -616,12 +635,14 @@ class Gallery:
             except ValueError:
                 pass
             for provider, path in unique_images(recorded_images(providers)):
-                namers.setdefault(path, []).append(name)
+                names = namers.setdefault(file_entry(path), [])
+                if name not in names:
+                    names.append(name)
         return namers
 
     def delete(self, run_id, namers):
         """Deletes a run: each file its complete records name as an image that keep_reason lets go
-        and no other run in namers (image_namers) names, then its directory. Every other file a
+        and no other run in namers (image_namers) names, by any path, then its directory. Every other file a
         record names stays. Answers (HTTP status, outcome): 200 with the paths removed, those already
         gone and those kept with why, or the error that kept the run in place. A deleted run leaves
         namers. Call it holding runs_lock."""
@@ -645,7 +666,7 @@ class Gallery:
         kept = []
         for provider, path in unique_images(recorded_images(providers)):
             reason = keep_reason(provider, path)
-            others = [name for name in namers.get(path, []) if name != run_id]
+            others = [name for name in namers.get(file_entry(path), []) if name != run_id]
             if reason is None and others:
                 reason = "run %s names it too" % others[-1]
             if reason is not None:

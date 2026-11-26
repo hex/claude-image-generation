@@ -830,6 +830,25 @@ cpu_seconds() {
   [[ -z "$(ls "$out")" ]] || { ls -la "$out"; return 1; }
 }
 
+@test "deleting a run keeps a file another run names by another spelling, through a symlinked folder or a doubled slash" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2
+  printf 'png' > "$out/hero-gemini.png"
+  printf 'png' > "$out/pair-openai.png"
+  ln -s "$out" "${BATS_TEST_TMPDIR}/link"
+  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t${BATS_TEST_TMPDIR}/link/hero-gemini.png\nopenai\tcomplete\t1000\tmodel-b\t$out//pair-openai.png\n" done
+  write_run "$b" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\nopenai\tcomplete\t1000\tmodel-b\t$out/pair-openai.png\n" done
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  # The page is told each file is one of b's, so its dialog marks both as kept.
+  [[ "$(jq -c '[.runs[] | [.id, [.files[].entry]]]' <<< "$SNAPSHOT")" == "[[\"$b\",[0,1]],[\"$a\",[0,1]]]" ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  local answer
+  answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a")
+  [[ "$(ls "$out" | tr '\n' ' ')" == "hero-gemini.png pair-openai.png " ]] || { ls -la "$out"; return 1; }
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [], \"missing\": [], \"kept_files\": [{\"path\": \"${BATS_TEST_TMPDIR}/link/hero-gemini.png\", \"reason\": \"run $b names it too\"}, {\"path\": \"$out//pair-openai.png\", \"reason\": \"run $b names it too\"}]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+}
+
 @test "a run in the gallery whose status log the server cannot read stops a delete, since it may name the same files" {
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2
   printf 'png' > "$out/hero-gemini.png"
