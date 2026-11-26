@@ -253,10 +253,15 @@ run_all_gemini() {
   [[ ${#IMAGE_GALLERY_DIR} -gt 104 ]]
   stub_browser
   printf 'sleep 1\n' | tee -a "$MOCK_DIR/browser/open" >> "$MOCK_DIR/browser/xdg-open"
+  local first second status=0 pid i root
   start_gallery &
+  first=$!
   start_gallery &
-  wait
-  local pid i root
+  second=$!
+  wait "$first" || status=$?
+  [[ $status -eq 0 ]] || { echo "the first start exited $status"; return 1; }
+  wait "$second" || status=$?
+  [[ $status -eq 0 ]] || { echo "the second start exited $status"; return 1; }
   pid=$(server_field pid)
   # The server is started with the root resolved, /var becoming /private/var on macOS.
   root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
