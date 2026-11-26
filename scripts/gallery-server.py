@@ -960,7 +960,12 @@ def ensure(root):
         url = "http://127.0.0.1:%d/%s/" % (health["port"], health["token"])
         opened = False
         if not in_ssh_session():
-            opened = control(root, "open", timeout=15) == {"opened": True}
+            # Runs that ask together take turns opening the browser, so one slow to open can
+            # outlast this wait; the address is printed then.
+            try:
+                opened = control(root, "open", timeout=15) == {"opened": True}
+            except socket.timeout:
+                opened = False
         if not opened:
             print("image gallery: open %s to watch the images" % url, file=sys.stderr)
     return 0
