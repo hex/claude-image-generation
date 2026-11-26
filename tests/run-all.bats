@@ -187,7 +187,34 @@ STUB
   CDPATH="$WORK_DIR/elsewhere" DISPLAY_PANE_RETRY_WAIT=0 run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" \
     --output-base art/hero --providers gemini
   assert_status 0
-  [[ "$(cat "$PANE/status")" == $'gemini\tcomplete\t\tmodel-g\t'"$WORK_DIR/project/art/hero-gemini.png" ]] || {
+  # The folder as it really is: on macOS the temp folder is under /var, which is /private/var.
+  local project
+  project=$(cd "$WORK_DIR/project" && pwd -P)
+  [[ "$(cat "$PANE/status")" == $'gemini\tcomplete\t\tmodel-g\t'"$project/art/hero-gemini.png" ]] || {
+    cat "$PANE/status"; return 1; }
+}
+
+@test "run-all records a relative output base's image where the file is, through a symlinked folder and .." {
+  fake_pane
+  cat > "$WORK_DIR/gemini.sh" <<'STUB'
+#!/bin/bash
+source "$(dirname "$0")/display.sh"
+while [ $# -gt 0 ]; do [ "$1" = --output ] && output="$2"; shift; done
+printf 'png' > "$output"
+display_pane_finish gemini model-g "$output"
+STUB
+  chmod +x "$WORK_DIR/gemini.sh"
+  mkdir -p "$WORK_DIR/project" "$WORK_DIR/real/deep/inner"
+  ln -s "$WORK_DIR/real/deep/inner" "$WORK_DIR/project/out"
+  cd "$WORK_DIR/project"
+  # out/.. is real/deep, where the provider writes, not project.
+  DISPLAY_PANE_RETRY_WAIT=0 run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" \
+    --output-base out/../hero --providers gemini
+  assert_status 0
+  local real
+  real=$(cd "$WORK_DIR/real/deep" && pwd -P)
+  [[ -f "$real/hero-gemini.png" && ! -e "$WORK_DIR/project/hero-gemini.png" ]] || { ls -laR "$WORK_DIR"; return 1; }
+  [[ "$(cat "$PANE/status")" == $'gemini\tcomplete\t\tmodel-g\t'"$real/hero-gemini.png" ]] || {
     cat "$PANE/status"; return 1; }
 }
 

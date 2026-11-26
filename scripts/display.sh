@@ -305,9 +305,10 @@ __tmux_words() {
   done
 }
 
-# Sets <var> to <path> made absolute against the working directory, its folder spelled the way
-# cd spells it: . and .. folded, symlinks kept. CDPATH is cleared, or cd could pick a folder of the
-# same name somewhere else. Fails, leaving <var> as it was, when the folder cannot be entered.
+# Sets <var> to <path> made absolute against the working directory, its folder spelled as the
+# folder it really is: symlinks resolved before .. is, the way the kernel opens the path, so the
+# result names the file the path does. CDPATH is cleared, or cd could pick a folder of the same name
+# somewhere else. Fails, leaving <var> as it was, when the folder cannot be entered.
 # Usage: __absolute_path <var> <path>
 __absolute_path() {
   local __dir
@@ -315,7 +316,7 @@ __absolute_path() {
     printf -v "$1" '%s' "$2"
     return 0
   fi
-  __dir=$(CDPATH='' cd -- "$(dirname -- "$2")" && pwd) || return 1
+  __dir=$(CDPATH='' cd -P -- "$(dirname -- "$2")" && pwd -P) || return 1
   printf -v "$1" '%s/%s' "$__dir" "${2##*/}"
 }
 
