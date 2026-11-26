@@ -124,7 +124,8 @@ Use `scripts/run-all.sh` — a single Bash call that forks all providers in para
 By default (`IMAGE_DISPLAY=gallery`) the run shows on the browser gallery page every session
 shares: a section with one frame per provider, filled in as each finishes, with nothing drawn in the terminal.
 The page can also delete a finished run, or every finished run of a project, with the image files they saved,
-after a dialog that lists each file.
+after a dialog that lists each file. Its Edit prompt button sends a run-all.sh run's prompt again, edited, to the
+providers the person picks; the server starts run-all.sh for it and the results show only on the page, never reaching Claude.
 With `IMAGE_DISPLAY=pane` it streams into one shared tmux pane instead, whose watcher renders per-provider colored banners (gemini
 blue / openai gray / xai red / openrouter indigo) with model + timing, plus a bottom `waiting on`
 line naming the pending providers. It animates until the first image renders; after that it is
