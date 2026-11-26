@@ -587,13 +587,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(404, {"error": "no such page: %s" % route})
 
     def do_POST(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if length:
-            self.rfile.read(length)
+        # No action takes a body, so none is ever read: one that is declared is refused at once,
+        # however large it says it is or however slowly it arrives.
         if not self.host_allowed():
             return
         route = self.route(post=True)
         if route is None:
+            return
+        if self.headers.get("Content-Length", "0") != "0":
+            self.send_json(413, {"error": "these actions take no request body"})
             return
         segments = route.strip("/").split("/")
         if segments[0] == "reveal" and len(segments) == 4:

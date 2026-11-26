@@ -167,7 +167,7 @@ run_all_gemini() {
   [[ ! -e "$(ls -d "$IMAGE_GALLERY_DIR"/runs/*)/logs" ]]
 }
 
-@test "the server answers 403 to a wrong Host, a missing or wrong token, a token in a cookie and a POST from another Origin" {
+@test "the server answers 403 to a wrong Host, a missing or wrong token, a token in a cookie and a POST from another Origin, reading no POST body" {
   start_gallery
   local port url
   port=$(server_field port)
@@ -180,6 +180,9 @@ run_all_gemini() {
   [[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: gallery_token=$(server_field token)" "${url}/health")" == 403 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://localhost:${port}" /open)" == 403 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST /open)" == 403 ]]
+  # A POST that declares a body it never sends is answered at once, without reading it.
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H 'Content-Length: 100' "${url}/wrong/open")" == 403 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H "$(origin)" -H 'Content-Length: 100' /open)" == 413 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' /health)" == 200 ]]
 }
 
