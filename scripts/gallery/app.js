@@ -730,8 +730,9 @@ function askToDeleteProject(cwd) {
   askToDelete(own.filter(run => run.status !== 'live'), { name: own[0].session, cwd }, generating);
 }
 
-// Sends the runs the dialog listed, by id, so a run it did not list never goes. When every one went
-// the dialog closes; otherwise it says what the server deleted and why each run it kept stayed.
+// Sends the runs the dialog listed, by id, each with the files the dialog said go with it, so the
+// server deletes no run and no file the dialog did not list. When every run and file went the
+// dialog closes; otherwise it says what the server deleted and why each run or file it kept stayed.
 async function deleteListed() {
   const asked = deleting;
   asked.busy = true;
@@ -739,7 +740,11 @@ async function deleteListed() {
   confirmCancel.disabled = true;
   let answer = null;
   try {
-    const response = await fetch('delete/' + asked.ids.map(encodeURIComponent).join('/'), { method: 'POST' });
+    const response = await fetch('delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runs: asked.listed }),
+    });
     answer = await response.json();
   } catch (error) {
     answer = null;

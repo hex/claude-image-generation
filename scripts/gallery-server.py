@@ -61,6 +61,9 @@ RESEND_PROVIDERS = ("gemini", "openai", "xai", "openrouter")
 PROMPT_LIMIT_BYTES = 100000
 # A resend's JSON body: a prompt at its limit, every character escaped to six bytes, fits.
 RESEND_BODY_LIMIT = 6 * PROMPT_LIMIT_BYTES + 4096
+# A delete's JSON body: every run the gallery keeps, each listing an image per resend provider at the
+# longest path macOS allows with every byte escaped to six, fits.
+DELETE_BODY_LIMIT = KEEP_RUNS * len(RESEND_PROVIDERS) * 6 * 1024 + 4096
 BODY_READ_SECONDS = 10
 # How long a resend waits for run-all.sh to make its run directory before it gives up waiting.
 RESEND_START_SECONDS = 15
@@ -640,12 +643,13 @@ class Gallery:
                     names.append(name)
         return namers
 
-    def delete(self, run_id, namers):
-        """Deletes a run: each file its complete records name as an image that keep_reason lets go
-        and no other run in namers (image_namers) names, by any path, then its directory. Every other file a
-        record names stays. Answers (HTTP status, outcome): 200 with the paths removed, those already
-        gone and those kept with why, or the error that kept the run in place. A deleted run leaves
-        namers. Call it holding runs_lock."""
+    def delete(self, run_id, listed, namers):
+        """Deletes a run: each file its complete records name as an image that the page listed for it
+        in listed, keep_reason lets go and no other run in namers (image_namers) names, by any path,
+        then its directory. Every other file a record names stays, and so does every listed path no
+        record names: the page's list only narrows what goes. Answers (HTTP status, outcome): 200
+        with the paths removed, those already gone and those kept with why, or the error that kept
+        the run in place. A deleted run leaves namers. Call it holding runs_lock."""
         run_dir = self.runs_dir / run_id
         if not RUN_ID.match(run_id) or not run_dir.is_dir():
             return 404, {"id": run_id, "error": "no run %s" % run_id}
@@ -664,11 +668,14 @@ class Gallery:
         removed = []
         missing = []
         kept = []
-        for provider, path in unique_images(recorded_images(providers)):
+        images = unique_images(recorded_images(providers))
+        for provider, path in images:
             reason = keep_reason(provider, path)
             others = [name for name in namers.get(file_entry(path), []) if name != run_id]
             if reason is None and others:
                 reason = "run %s names it too" % others[-1]
+            if reason is None and path not in listed:
+                reason = "the delete did not list it"
             if reason is not None:
                 kept.append({"path": path, "reason": reason})
                 continue
@@ -680,6 +687,10 @@ class Gallery:
             except OSError as e:
                 return 500, {"id": run_id, "error": "could not delete %s: %s; the run is kept" % (path, e.strerror),
                              "removed": removed, "missing": missing, "kept_files": kept}
+        named = {path for provider, path in images}
+        for path in dict.fromkeys(listed):
+            if path not in named:
+                kept.append({"path": path, "reason": "run %s's records do not name it" % run_id})
         shutil.rmtree(str(run_dir), ignore_errors=True)
         if os.path.lexists(str(run_dir)):
             return 500, {"id": run_id, "error": "could not remove the run's folder %s" % run_dir,
@@ -930,9 +941,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(404, {"error": "no such page: %s" % route})
 
     def do_POST(self):
-        # Only a resend takes a body, read once the request is known to come from the page. Any other
-        # action's body is never read: one that is declared is refused at once, however large it says
-        # it is or however slowly it arrives.
+        # Only a resend and a delete take a body, read once the request is known to come from the page.
+        # Any other action's body is never read: one that is declared is refused at once, however large
+        # it says it is or however slowly it arrives.
         if not self.host_allowed():
             return
         route = self.route(post=True)
@@ -942,6 +953,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if segments[0] == "resend" and len(segments) == 2:
             self.resend(segments[1])
             return
+        if segments == ["delete"]:
+            self.delete()
+            return
         if self.headers.get("Content-Length", "0") != "0" or "Transfer-Encoding" in self.headers:
             self.send_json(413, {"error": "these actions take no request body"})
             return
@@ -949,8 +963,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reveal(segments[1:])
         elif segments[0] == "retry" and len(segments) == 2:
             self.retry(segments[1])
-        elif segments[0] == "delete" and len(segments) >= 2:
-            self.delete(segments[1:])
         else:
             self.send_json(404, {"error": "no such action: %s" % route})
 
@@ -1077,7 +1089,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Starts a run again from the page's editor. The body is JSON naming the prompt and the
         providers; the answer names the new run, or why none started."""
         try:
-            prompt, providers = parse_resend(self.read_body())
+            prompt, providers = parse_resend(self.read_body(RESEND_BODY_LIMIT, "resend"))
         except ValueError as e:
             self.send_json(400, {"error": str(e)})
             return
@@ -1087,15 +1099,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         code, body = self.gallery.resend(run_id, prompt, providers)
         self.send_json(code, body)
 
-    def read_body(self):
-        """The request's body, of the length it declares, read within BODY_READ_SECONDS."""
+    def read_body(self, limit, action):
+        """The request's body, of the length it declares and at most limit bytes, read within
+        BODY_READ_SECONDS."""
         if "Transfer-Encoding" in self.headers:
             raise BodyRefused(411, "send the body with a Content-Length")
         length = self.headers.get("Content-Length", "")
         if not length.isdigit():
             raise BodyRefused(411, "send the body with a Content-Length")
-        if int(length) > RESEND_BODY_LIMIT:
-            raise BodyRefused(413, "the body is %s bytes; a resend's is at most %d" % (length, RESEND_BODY_LIMIT))
+        if int(length) > limit:
+            raise BodyRefused(413, "the body is %s bytes; a %s's is at most %d" % (length, action, limit))
         self.connection.settimeout(BODY_READ_SECONDS)
         try:
             body = self.rfile.read(int(length))
@@ -1105,10 +1118,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise BodyRefused(400, "the body ended after %d of %s bytes" % (len(body), length))
         return body
 
-    def delete(self, run_ids):
-        """Deletes each run named that may go and publishes the change. Answers which runs were
-        deleted, with their files, and which were kept and why: 200 when any run was deleted, else
-        the status of what kept them, 404 when no run named exists."""
+    def delete(self):
+        """Deletes each run the page's JSON body names that may go, with the files the page listed for
+        it, and publishes the change. Answers which runs were deleted, with their files, and which
+        were kept and why: 200 when any run was deleted, else the status of what kept them, 404 when
+        no run named exists."""
+        try:
+            runs = parse_delete(self.read_body(DELETE_BODY_LIMIT, "delete"))
+        except ValueError as e:
+            self.send_json(400, {"error": str(e)})
+            return
+        except BodyRefused as e:
+            self.send_json(e.code, {"error": str(e)})
+            return
         outcomes = []
         with self.gallery.runs_lock:
             try:
@@ -1117,8 +1139,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json(500, {"error": "could not read %s: %s, so which runs share an image is unknown; "
                                               "nothing was deleted" % (e.filename, e.strerror)})
                 return
-            for run_id in dict.fromkeys(run_ids):
-                outcomes.append(self.gallery.delete(run_id, namers))
+            for run_id, listed in runs.items():
+                outcomes.append(self.gallery.delete(run_id, listed, namers))
         self.gallery.scan()
         deleted = [outcome for code, outcome in outcomes if code == 200]
         kept = [outcome for code, outcome in outcomes if code != 200]
@@ -1137,6 +1159,22 @@ class BodyRefused(Exception):
     def __init__(self, code, message):
         super().__init__(message)
         self.code = code
+
+
+def parse_delete(body):
+    """The runs a delete's JSON body names, each mapped to the paths of the files the page listed as
+    going with it, or ValueError saying what is wrong with them."""
+    try:
+        request = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as e:
+        raise ValueError("the body is not JSON: %s" % e)
+    runs = request.get("runs") if isinstance(request, dict) and sorted(request) == ["runs"] else None
+    if not isinstance(runs, dict) or not runs:
+        raise ValueError("the body must be an object with runs, each run's id mapped to the paths the page listed for it")
+    for run_id, paths in runs.items():
+        if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+            raise ValueError("run %s's paths are %s, not a list of paths" % (json.dumps(run_id)[:80], json.dumps(paths)[:80]))
+    return runs
 
 
 def parse_resend(body):
