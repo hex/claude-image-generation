@@ -170,6 +170,27 @@ STUB
   [[ "$(cat "$PANE/errors/xai.txt")" == "xai exited 3 before reporting a result; its error output says why" ]]
 }
 
+@test "run-all records a relative output base's image under the run's working directory, whatever CDPATH holds" {
+  fake_pane
+  # The provider saves where --output says and records it the way gemini.sh does.
+  cat > "$WORK_DIR/gemini.sh" <<'STUB'
+#!/bin/bash
+source "$(dirname "$0")/display.sh"
+while [ $# -gt 0 ]; do [ "$1" = --output ] && output="$2"; shift; done
+printf 'png' > "$output"
+display_pane_finish gemini model-g "$output"
+STUB
+  chmod +x "$WORK_DIR/gemini.sh"
+  mkdir -p "$WORK_DIR/project/art" "$WORK_DIR/elsewhere/art"
+  cd "$WORK_DIR/project"
+  # An exported CDPATH with its own art/ is how a cd inside the record could land elsewhere.
+  CDPATH="$WORK_DIR/elsewhere" DISPLAY_PANE_RETRY_WAIT=0 run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" \
+    --output-base art/hero --providers gemini
+  assert_status 0
+  [[ "$(cat "$PANE/status")" == $'gemini\tcomplete\t\tmodel-g\t'"$WORK_DIR/project/art/hero-gemini.png" ]] || {
+    cat "$PANE/status"; return 1; }
+}
+
 @test "run-all treats a pane that closed during the offer as no retry" {
   stub_provider gemini
   stub_flaky_provider xai

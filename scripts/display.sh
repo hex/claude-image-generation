@@ -305,6 +305,20 @@ __tmux_words() {
   done
 }
 
+# Sets <var> to <path> made absolute against the working directory, its folder spelled the way
+# cd spells it: . and .. folded, symlinks kept. CDPATH is cleared, or cd could pick a folder of the
+# same name somewhere else. Fails, leaving <var> as it was, when the folder cannot be entered.
+# Usage: __absolute_path <var> <path>
+__absolute_path() {
+  local __dir
+  if [[ "$2" == /* ]]; then
+    printf -v "$1" '%s' "$2"
+    return 0
+  fi
+  __dir=$(CDPATH='' cd -- "$(dirname -- "$2")" && pwd) || return 1
+  printf -v "$1" '%s/%s' "$__dir" "${2##*/}"
+}
+
 # Opens a tmux split pane that displays an image and closes on keypress.
 # Usage: display_image_in_pane <file_path>
 display_image_in_pane() {
@@ -315,10 +329,7 @@ display_image_in_pane() {
     return 1
   fi
 
-  # Resolve to absolute path
-  if [[ "$file_path" != /* ]]; then
-    file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
-  fi
+  __absolute_path file_path "$file_path" || return 1
 
   if [[ ! -f "$file_path" ]]; then
     echo "File not found: $file_path" >&2
@@ -516,9 +527,7 @@ display_pane_add() {
     return 1
   fi
   local file_path="$1"
-  if [[ "$file_path" != /* ]]; then
-    file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
-  fi
+  __absolute_path file_path "$file_path" || return 1
   __pane_escape_field file_path "$file_path"
   printf '%s\n' "$file_path" >> "$DISPLAY_PANE_DIR/manifest"
 }
@@ -544,8 +553,8 @@ display_pane_status() {
     return 1
   fi
   local provider="$1" state="$2" ms="${3:-}" model="${4:-}" path="${5:-}"
-  if [[ -n "$path" && "$path" != /* ]]; then
-    path="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+  if [[ -n "$path" ]]; then
+    __absolute_path path "$path" || return 1
   fi
   # Model and path come from the caller's arguments; the other fields are fixed words.
   __pane_escape_field model "$model"
@@ -750,10 +759,7 @@ display_pane_open() {
   # The render script sources this library so it can reuse normalize_for_display. Resolve to an
   # absolute path because render.sh runs in a pane whose working directory may differ.
   local self="${BASH_SOURCE[0]}"
-  case "$self" in
-    /*) ;;
-    *) self="$(cd "$(dirname "$self")" && pwd)/$(basename "$self")" ;;
-  esac
+  __absolute_path self "$self" || return 1
 
   local terminal
   terminal=$(get_outer_terminal) || true
@@ -1508,9 +1514,7 @@ display_images_in_pane() {
 
   local -a paths=()
   for file_path in "${files[@]}"; do
-    if [[ "$file_path" != /* ]]; then
-      file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
-    fi
+    __absolute_path file_path "$file_path" || continue
     if [[ ! -f "$file_path" ]]; then
       continue
     fi
