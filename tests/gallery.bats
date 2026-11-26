@@ -278,7 +278,8 @@ run_all_gemini() {
 }
 
 @test "a server of another version is replaced by one of this plugin's version" {
-  python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version 0.0.0-other
+  # The old server exits the moment it is told to stop, so only an answer sent before that reaches the run.
+  python3 -I "${PLUGIN_ROOT}/tests/gallery_race.py" "$GALLERY_PY" serve-stopping-at-once "$IMAGE_GALLERY_DIR"
   local i old version
   for i in $(seq 1 50); do
     [[ "$(server_field version)" == 0.0.0-other ]] && break

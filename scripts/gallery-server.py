@@ -773,10 +773,12 @@ class ControlHandler(socketserver.StreamRequestHandler):
             answer = {"opened": gallery.open_page()}
         elif command == "shutdown":
             answer = {"stopping": True}
-            gallery.stop.set()
         else:
             answer = {"error": "no such command: %r" % command}
         self.wfile.write(json.dumps(answer).encode() + b"\n")
+        # Only once the answer is sent: the main thread exits as soon as it sees the stop.
+        if command == "shutdown":
+            gallery.stop.set()
 
 
 class ControlServer(socketserver.ThreadingUnixStreamServer):
