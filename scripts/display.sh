@@ -388,8 +388,10 @@ __gallery_python_usable() {
 
 # Reports whether the folder IMAGE_GALLERY_DIR names can hold the gallery's token and runs. One
 # that already exists keeps its own mode, so it must be this user's and writable by no one else:
-# another user able to write it could replace server.json and be sent the token. The default
-# folder, and one that does not exist yet, gallery_begin_run makes readable by this user only.
+# another user able to write it could plant a token they know or a control socket of their own.
+# A link is judged by the folder it points to. ACLs are not read, and the folder or link can
+# still change after this check. The default folder, and one that does not exist yet,
+# gallery_begin_run makes readable by this user only.
 __gallery_root_private() {
   local root="${IMAGE_GALLERY_DIR:-}"
   [[ -n "$root" && -d "$root" ]] || return 0
