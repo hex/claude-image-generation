@@ -59,7 +59,8 @@ let unseen = 0;
 let firstSnapshot = true;
 let loupeAt = null;
 let loupeClosing = 0;
-// What the open delete dialog asks to delete: { ids, project, generating, busy }, or null.
+// What the open delete dialog asks to delete: { ids, empties, busy }, or null. empties is true when
+// the runs are every run of the project in view, so the page goes back to All projects once they go.
 let deleting = null;
 
 function el(tag, attrs, ...children) {
@@ -561,7 +562,10 @@ function counted(n, noun) {
 // how many of a project's runs stay because they are still generating. Cancel has the focus.
 function askToDelete(chosen, project, generating) {
   const paths = [...new Set(chosen.flatMap(run => run.images))];
-  deleting = { ids: chosen.map(run => run.id), project, generating, busy: false };
+  const ids = chosen.map(run => run.id);
+  const selected = selectedSession();
+  const empties = selected !== null && runs.filter(run => run.cwd === selected).every(run => ids.includes(run.id));
+  deleting = { ids, empties, busy: false };
   confirmTitle.textContent = project ? 'Delete ' + project.name + ' from the gallery?' : 'Delete this run?';
   const removes = project ? 'Removes its ' + counted(chosen.length, 'run') + ' from the gallery' : 'Removes it from the gallery';
   const files = paths.length ? ' and deletes ' + counted(paths.length, 'image') + ' from disk.' : '. ' + (project ? 'They have' : 'It has') + ' no saved images.';
@@ -601,7 +605,7 @@ async function deleteListed() {
   asked.busy = false;
   if (answer && Array.isArray(answer.kept) && !answer.kept.length) {
     confirmDialog.close();
-    if (asked.project && !asked.generating && selectedSession() === asked.project.cwd) location.hash = '';
+    if (asked.empties) location.hash = '';
     document.getElementById('strips').focus();
     return;
   }

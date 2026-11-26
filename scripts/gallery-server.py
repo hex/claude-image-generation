@@ -424,6 +424,8 @@ def unsafe_image(provider, path):
         return None
     except OSError as e:
         return e.strerror
+    except ValueError:
+        return "its path holds a NUL character"
     if not (stat.S_ISREG(mode) or stat.S_ISLNK(mode)):
         return "not a file"
     return None
