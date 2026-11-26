@@ -580,9 +580,10 @@ cpu_seconds() {
   [[ "$(jq -r '.runs[0].providers[0].state' <<< "$SNAPSHOT")" == querying ]] || { echo "$SNAPSHOT"; return 1; }
 }
 
-@test "an entry in active/ that is not a file neither holds a run nor stops the server" {
+@test "an entry in active/ that is not a file, or names a pid no process can have, neither holds a run nor stops the server" {
   write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
   local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  printf 'Thu Jan  1 00:00:00 1970\n' > "$dir/active/run-all.999999999999"
   sleep 60 &
   HOLDER_PID=$!
   LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$dir/active/run-all.$HOLDER_PID"

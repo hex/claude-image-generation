@@ -151,10 +151,11 @@ def reduce_status(text, providers):
 
 
 def pid_alive(pid):
-    """True while a process of this user runs as pid. Another user's process there is not ours."""
+    """True while a process of this user runs as pid. Another user's process there is not ours, and
+    a pid too large for the system names no process."""
     try:
         os.kill(pid, 0)
-    except (ProcessLookupError, PermissionError):
+    except (ProcessLookupError, PermissionError, OverflowError):
         return False
     return True
 
