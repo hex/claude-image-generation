@@ -37,7 +37,7 @@ const FULL_SIZE_MS = 24 * 60 * 60 * 1000;
 
 const REVEAL_LABEL = /Mac/.test(navigator.platform) ? 'Reveal in Finder' : 'Show in folder';
 const NO_RUNS = 'No image runs yet. Images from Claude Code show up here while they generate.';
-const TITLE = 'Gallery \u00b7 Claude Image Generation';
+const TITLE = 'Gallery \u00b7 Image Generation';
 const LOUPE_MS = 200;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
