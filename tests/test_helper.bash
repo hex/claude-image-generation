@@ -3,6 +3,12 @@
 
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Every suite judges the tmux pane unless a test asks for the gallery itself. Should a test reach
+# the gallery anyway, its server and runs land in the bats temp dir and no browser opens.
+export IMAGE_DISPLAY=pane
+export IMAGE_GALLERY_DIR="${BATS_TMPDIR}/gallery-$$"
+export IMAGE_GALLERY_NO_OPEN=1
+
 # Dummy API keys for tests that need them (no real calls are made)
 export DUMMY_GEMINI_KEY="test-gemini-key-not-real"
 export DUMMY_OPENAI_KEY="test-openai-key-not-real"

@@ -44,6 +44,7 @@ export const register: Register = (on, options) => {
   const defaults = {
     defaultProviders: stringOption(options, 'defaultProviders'),
     outputDir: stringOption(options, 'outputDir'),
+    display: stringOption(options, 'display'),
   }
 
   on('session.start', async ($, e, next) => {
@@ -67,9 +68,12 @@ export const register: Register = (on, options) => {
     }
 
     // Outside a tmux pane the providers draw inline images to /dev/tty, which is Claude Code's own screen.
+    // An IMAGE_DISPLAY already in Claude Code's environment beats the /config row, as it does for
+    // the scripts run by hand; the env given here would otherwise be laid over it.
+    const display = (await $.env.get('IMAGE_DISPLAY')) ?? defaults.display
     const { exitCode, stdout, stderr } = await $.process.run(run.argv, {
       timeoutMs: RUN_TIMEOUT_MS,
-      env: { DISPLAY_IMAGE_TARGET: '/dev/null' },
+      env: { DISPLAY_IMAGE_TARGET: '/dev/null', IMAGE_DISPLAY: display },
     })
 
     // Every path was free before the run, so a file there now is one this run saved.
@@ -91,7 +95,7 @@ export const register: Register = (on, options) => {
   })
 }
 
-// plugin.json declares both fields as strings with defaults, so the engine always fills them in.
+// plugin.json declares these fields as strings with defaults, so the engine always fills them in.
 function stringOption(options: Parameters<Register>[1], field: string): string {
   const value = options[field]
   if (typeof value !== 'string') throw new Error(`option ${field} should be a string from plugin.json userConfig, got ${JSON.stringify(value)}`)

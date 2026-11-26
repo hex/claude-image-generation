@@ -109,7 +109,7 @@ fi
 
 use_remembered_fallback
 echo "Calling xAI API (model: ${MODEL}, mode: ${MODE})..." >&2
-display_pane_begin "$PROVIDER_NAME" "$MODEL"
+display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 
 # Build request body. Generation posts to /v1/images/generations; edit mode switches the
 # target to /v1/images/edits below and attaches source images as an images[] array. The model

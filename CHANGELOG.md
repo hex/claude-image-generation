@@ -5,6 +5,16 @@ This file lists every notable change to claude-image-generation. The format foll
 versioning in `YYYY.M.PATCH` format. [GitHub releases](https://github.com/hex/claude-image-generation/releases)
 cover the versions up to 2026.9.1.
 
+## Unreleased
+
+### Added
+- Browser gallery, the new default display: every image run from every Claude Code session shows on one local page served from 127.0.0.1, newest first, as a card with one frame per provider. A rail filters the runs by session, a run with a failed provider gets a Retry failed button, and a loupe shows each image large. Nothing splits the chat's tmux pane. It needs `python3` 3.9 or later and falls back to the pane without it.
+- `IMAGE_DISPLAY` (`gallery`, `pane` or `none`) and the matching **Image display** row in `/config` choose where images show. `pane` keeps the tmux pane and inline drawing as they were.
+
+### Changed
+- `SKIP_DISPLAY=1` also keeps `run-all.sh` and the providers from opening the tmux pane, not only from drawing inline.
+- In the gallery, provider output stays on `run-all.sh`'s own stderr instead of going to `$DISPLAY_PANE_DIR/logs/`, so the generate tool's result includes it.
+
 ## 2026.11.1 - 2026-11-05
 
 ### Added

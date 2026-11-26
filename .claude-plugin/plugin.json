@@ -24,6 +24,18 @@
         "openrouter"
       ]
     },
+    "display": {
+      "type": "string",
+      "title": "Image display",
+      "description": "Where images show while they generate: \"gallery\" is one browser page every session shares, \"pane\" a tmux pane beside the chat (inline images outside tmux), \"none\" nowhere. An IMAGE_DISPLAY environment variable overrides this.",
+      "required": false,
+      "default": "gallery",
+      "options": [
+        "gallery",
+        "pane",
+        "none"
+      ]
+    },
     "outputDir": {
       "type": "string",
       "title": "Output directory",

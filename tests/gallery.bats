@@ -1,0 +1,705 @@
+#!/usr/bin/env bats
+# ABOUTME: Image runs against the real gallery server, started under the test's temp directory:
+# ABOUTME: what its page reads from /events and /img, its request guards, liveness, reuse and retry.
+
+load test_helper
+
+SCRIPTS="${PLUGIN_ROOT}/scripts"
+DISPLAY_SH="${SCRIPTS}/display.sh"
+GALLERY_PY="${SCRIPTS}/gallery-server.py"
+# A 1x1 PNG, so the image the page is served is a real one its type can be read from.
+PNG_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+GEMINI_IMAGE="{\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"image/png\",\"data\":\"${PNG_B64}\"}}]}}]}"
+GEMINI_REFUSAL='{"candidates":[{"content":{"parts":[{"text":"no picture today"}]}}]}'
+
+setup() {
+  command -v python3 >/dev/null 2>&1 || skip "needs python3"
+  disable_display
+  isolate_tmpdir
+  export IMAGE_DISPLAY=gallery
+  export IMAGE_GALLERY_DIR="${BATS_TEST_TMPDIR}/gallery"
+  export IMAGE_GALLERY_NO_OPEN=1
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
+  export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
+  MOCK_DIR="${BATS_TEST_TMPDIR}/mock"
+  mkdir -p "$MOCK_DIR" "${BATS_TEST_TMPDIR}/out"
+  OUT_BASE="${BATS_TEST_TMPDIR}/out/picture"
+}
+
+teardown() {
+  [[ -n "${EVENTS_PID:-}" ]] && kill "$EVENTS_PID" 2>/dev/null
+  [[ -n "${HOLDER_PID:-}" ]] && kill "$HOLDER_PID" 2>/dev/null
+  [[ -n "${LISTENER_PID:-}" ]] && kill "$LISTENER_PID" 2>/dev/null
+  stop_gallery
+  cleanup_tmpdir
+}
+
+# stop_gallery — ends the running server and waits for it to go.
+stop_gallery() {
+  local pid i
+  pid=$(server_field pid) || return 0
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  kill "$pid" 2>/dev/null || return 0
+  for i in $(seq 1 30); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+}
+
+# server_field <name> — a field of the health the running server answers on its control socket,
+# asked from inside the gallery folder the way the client commands ask; fails with no server.
+server_field() {
+  (cd "$IMAGE_GALLERY_DIR" 2>/dev/null && python3 -I -c '
+import json, socket, sys
+with socket.socket(socket.AF_UNIX) as sock:
+    sock.settimeout(5)
+    sock.connect("server.sock")
+    sock.sendall(b"health\n")
+    print(json.loads(sock.makefile().readline())[sys.argv[1]])' "$1" 2>/dev/null)
+}
+
+# gallery_curl [curl args...] <path> — curl at the running server, the path under the page's token.
+gallery_curl() {
+  local path="${*: -1}"
+  curl -s --max-time 5 "${@:1:$#-1}" "http://127.0.0.1:$(server_field port)/$(server_field token)${path}"
+}
+
+origin() { printf 'Origin: http://127.0.0.1:%s' "$(server_field port)"; }
+
+# snapshot — the first runs snapshot /events sends a page that connects now.
+snapshot() {
+  gallery_curl -N --max-time 1 /events | sed -n 's/^data: //p' | head -1 || true
+}
+
+# wait_for_snapshot <jq filter> — waits up to ten seconds for a snapshot the filter holds for,
+# leaving it in SNAPSHOT.
+wait_for_snapshot() {
+  local i snap=""
+  for i in $(seq 1 10); do
+    snap=$(snapshot)
+    if [[ -n "$snap" ]] && jq -e "$1" >/dev/null <<< "$snap"; then
+      SNAPSHOT="$snap"
+      return 0
+    fi
+    # No server to answer yet returns at once; wait out the second a snapshot would have taken.
+    [[ -n "$snap" ]] || sleep 1
+  done
+  echo "no snapshot matched $1; the last one was: $snap"
+  return 1
+}
+
+# answer_provider_with <body>... — puts a curl first on PATH that sends each https request to
+# tests/one_request_server.py instead, answering the nth request with the nth body (the last
+# body answers every later one). Each request it served is counted in $MOCK_DIR/calls.
+answer_provider_with() {
+  local real_curl n=0 body
+  real_curl=$(command -v curl)
+  for body in "$@"; do
+    n=$((n + 1))
+    printf '%s' "$body" > "$MOCK_DIR/answer.$n"
+  done
+  cat > "$MOCK_DIR/curl" <<STUB
+#!/bin/bash
+d="$MOCK_DIR"
+case "\$*" in *https://*) ;; *) exec "$real_curl" "\$@" ;; esac
+n=\$(cat "\$d/calls" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$d/calls"
+answer="\$d/answer.\$n"; [ -f "\$answer" ] || answer="\$d/answer.$n"
+rm -f "\$d/port"
+python3 -I "${PLUGIN_ROOT}/tests/one_request_server.py" "\$d/port" "\$d/request.raw" "\$answer" &
+server_pid=\$!
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  [ -s "\$d/port" ] && break
+  sleep 0.1
+done
+port=\$(cat "\$d/port")
+args=()
+for a in "\$@"; do
+  case "\$a" in https://*) a="http://127.0.0.1:\$port/\${a#https://*/}" ;; esac
+  args+=("\$a")
+done
+"$real_curl" --max-time 5 "\${args[@]}"
+curl_status=\$?
+wait "\$server_pid"
+exit \$curl_status
+STUB
+  chmod +x "$MOCK_DIR/curl"
+  export PATH="$MOCK_DIR:$PATH"
+}
+
+# connect_page — holds /events open in the background the way an open page does, its curl's pid
+# in EVENTS_PID, and waits until the server counts it.
+connect_page() {
+  local i
+  curl -s -N --max-time 60 "http://127.0.0.1:$(server_field port)/$(server_field token)/events" > /dev/null &
+  EVENTS_PID=$!
+  for i in $(seq 1 50); do
+    [[ "$(server_field clients)" == 1 ]] && return 0
+    sleep 0.1
+  done
+  echo "the server never counted the page"
+  return 1
+}
+
+start_gallery() {
+  python3 -I "$GALLERY_PY" ensure --root "$IMAGE_GALLERY_DIR"
+}
+
+run_all_gemini() {
+  run bash "${SCRIPTS}/run-all.sh" --mode generate --prompt "a lighthouse at dusk" \
+    --output-base "$OUT_BASE" --providers gemini
+}
+
+@test "a run's image reaches the page through /events, and /img serves its bytes as image/png" {
+  # A carriage return in the output path is kept as it is in the status log and read back whole.
+  OUT_BASE="${BATS_TEST_TMPDIR}/out/pic"$'\r'"ture"
+  answer_provider_with "$GEMINI_IMAGE"
+  run_all_gemini
+  assert_status 0
+  wait_for_snapshot '.runs[0].status == "done"'
+  local run
+  run=$(jq -c '.runs[0]' <<< "$SNAPSHOT")
+  [[ "$(jq -r '[.prompt, .status, (.providers | length)] | @tsv' <<< "$run")" == $'a lighthouse at dusk\tdone\t1' ]] || {
+    echo "run: $run"; return 1; }
+  [[ "$(jq -r '.providers[0] | [.name, .state, .model, .image.n] | @tsv' <<< "$run")" == \
+    "gemini	complete	gemini-3-pro-image	0" ]] || { echo "run: $run"; return 1; }
+  [[ "$(jq -r '.providers[0].image.path' <<< "$run")" == "${OUT_BASE}-gemini.png" ]] || { echo "run: $run"; return 1; }
+  [[ "$(jq -r .cwd <<< "$run")" == "$PWD" ]] || { echo "run: $run"; return 1; }
+  local id type
+  id=$(jq -r .id <<< "$run")
+  type=$(gallery_curl -o "$MOCK_DIR/served.png" -w '%{http_code} %{content_type}' "/img/${id}/gemini/0")
+  [[ "$type" == "200 image/png" ]] || { echo "served: $type"; return 1; }
+  cmp "$MOCK_DIR/served.png" "${OUT_BASE}-gemini.png"
+}
+
+@test "with the gallery, a provider's stderr stays on run-all's own output" {
+  answer_provider_with "$GEMINI_IMAGE"
+  run_all_gemini
+  assert_status 0
+  assert_output_contains "Calling Gemini API (model: gemini-3-pro-image, mode: generate)..."
+  assert_output_contains "Image saved to: ${OUT_BASE}-gemini.png"
+  [[ ! -e "$(ls -d "$IMAGE_GALLERY_DIR"/runs/*)/logs" ]]
+}
+
+@test "the server answers 403 to a wrong Host, a missing or wrong token, a token in a cookie and a POST from another Origin, reading no POST body" {
+  start_gallery
+  local port url
+  port=$(server_field port)
+  url="http://127.0.0.1:${port}"
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -H "Host: localhost:${port}" /app.js)" == 403 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -H "Host: 127.0.0.1" /app.js)" == 403 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "${url}/app.js")" == 403 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "${url}/events")" == 403 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "${url}/wrong/app.js")" == 403 ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: gallery_token=$(server_field token)" "${url}/app.js")" == 403 ]]
+  local retry=/retry/20990101T000000Z-0000000000
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://localhost:${port}" "$retry")" == 403 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST "$retry")" == 403 ]]
+  # A POST that declares a body it never sends is answered at once, without reading it.
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H 'Content-Length: 100' "${url}/wrong${retry}")" == 403 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H "$(origin)" -H 'Content-Length: 100' "$retry")" == 413 ]]
+  [[ "$(printf 'body' | gallery_curl -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H "$(origin)" -H 'Transfer-Encoding: chunked' --data-binary @- "$retry")" == 413 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "$(origin)" "$retry")" == 404 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' /app.js)" == 200 ]]
+}
+
+@test "the page and its files are served under the token's path, and the server sets no cookie" {
+  start_gallery
+  local base headers
+  base="http://127.0.0.1:$(server_field port)/$(server_field token)"
+  headers=$(curl -s -D - -o /dev/null -w '%{http_code} %{content_type}' "${base}/" | tr -d '\r')
+  [[ "$headers" == *$'\n\n200 text/html; charset=utf-8' && "$headers" != *Set-Cookie* ]] || { echo "$headers"; return 1; }
+  [[ "$headers" == *$'\nContent-Security-Policy: default-src \'self\'; frame-ancestors \'none\'; base-uri \'none\'; form-action \'none\'\n'* ]] || {
+    echo "$headers"; return 1; }
+  [[ "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "${base}/app.js")" == "200 text/javascript; charset=utf-8" ]]
+  [[ "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "${base}/app.css")" == "200 text/css; charset=utf-8" ]]
+}
+
+@test "an image, reveal or retry of a run or provider the gallery does not have is a 404" {
+  answer_provider_with "$GEMINI_IMAGE"
+  run_all_gemini
+  assert_status 0
+  wait_for_snapshot '.runs | length == 1'
+  local id
+  id=$(jq -r '.runs[0].id' <<< "$SNAPSHOT")
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' /img/20990101T000000Z-0000000000/gemini/0)" == 404 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' "/img/${id}/openai/0")" == 404 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' "/img/${id}/gemini/1")" == 404 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' "/img/${id}/..%2F..%2Ftoken/0")" == 404 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "$(origin)" "/reveal/${id}/openai/0")" == 404 ]]
+  [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "$(origin)" /retry/20990101T000000Z-0000000000)" == 404 ]]
+  [[ "$(gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" "/retry/${id}")" == \
+    "{\"error\": \"run ${id} has no retry offer open\"} 409" ]]
+  rm "${OUT_BASE}-gemini.png"
+  [[ "$(gallery_curl -w ' %{http_code}' "/img/${id}/gemini/0")" == \
+    "{\"error\": \"file moved or deleted\", \"path\": \"${OUT_BASE}-gemini.png\"} 404" ]]
+}
+
+@test "a run whose process was killed shows as interrupted, its provider too" {
+  bash -c 'source "$1"; display_pane_begin gemini gemini-3-pro-image "a fox in snow"; exec sleep 30' \
+    _ "$DISPLAY_SH" &
+  local pid=$!
+  wait_for_snapshot '.runs[0].providers[0].state == "querying"'
+  [[ "$(jq -r '.runs[0] | [.prompt, .providers[0].name, .providers[0].state] | @tsv' <<< "$SNAPSHOT")" == \
+    $'a fox in snow\tgemini\tquerying' ]] || { echo "$SNAPSHOT"; return 1; }
+  kill -9 "$pid"
+  wait "$pid" 2>/dev/null || true
+  wait_for_snapshot '.runs[0].status == "interrupted"'
+  [[ "$(jq -r '.runs[0].providers[0].state' <<< "$SNAPSHOT")" == interrupted ]] || { echo "$SNAPSHOT"; return 1; }
+}
+
+@test "runs started together share one server and open one page" {
+  # Each start finds no page connected and asks for one; a browser slow to open still opens once.
+  # The gallery folder is too deep for its control socket's path to fit a socket address.
+  export IMAGE_GALLERY_DIR="${BATS_TEST_TMPDIR}/a-gallery-folder-whose-control-socket-path-is-longer-than-a-socket-address-holds"
+  [[ ${#IMAGE_GALLERY_DIR} -gt 104 ]]
+  stub_browser
+  printf 'sleep 1\n' | tee -a "$MOCK_DIR/browser/open" >> "$MOCK_DIR/browser/xdg-open"
+  local first second status=0 pid i root
+  start_gallery &
+  first=$!
+  start_gallery &
+  second=$!
+  wait "$first" || status=$?
+  [[ $status -eq 0 ]] || { echo "the first start exited $status"; return 1; }
+  wait "$second" || status=$?
+  [[ $status -eq 0 ]] || { echo "the second start exited $status"; return 1; }
+  pid=$(server_field pid)
+  # The server is started with the root resolved, /var becoming /private/var on macOS.
+  root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
+  start_gallery
+  [[ "$(server_field pid)" == "$pid" && "$(python3 -I "$GALLERY_PY" clients --root "$IMAGE_GALLERY_DIR")" == 0 ]]
+  [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
+  # The racer that lost the lock gives up within its five-second wait.
+  for i in $(seq 1 70); do
+    [[ "$(pgrep -f "gallery-server.py serve --root ${root}" | tr '\n' ' ')" == "$pid " ]] && return 0
+    sleep 0.1
+  done
+  echo "servers for this root: $(pgrep -f "gallery-server.py serve --root ${root}" | tr '\n' ' '), expected $pid"
+  return 1
+}
+
+@test "a server of another version is replaced by one of this plugin's version, which a run that found the old one too keeps" {
+  # The old server exits the moment it is told to stop, so only an answer sent before that reaches the run.
+  python3 -I "${PLUGIN_ROOT}/tests/gallery_race.py" "$GALLERY_PY" serve-stopping-at-once "$IMAGE_GALLERY_DIR"
+  local i old version replacement root
+  for i in $(seq 1 50); do
+    [[ "$(server_field version)" == 0.0.0-other ]] && break
+    sleep 0.1
+  done
+  [[ "$(server_field version)" == 0.0.0-other ]]
+  old=$(server_field pid)
+  # The second run read the old server's health before the first replaced it, and asks to stop it after.
+  replacement=$(python3 -I "${PLUGIN_ROOT}/tests/gallery_race.py" "$GALLERY_PY" ensure-after-another "$IMAGE_GALLERY_DIR")
+  # A server asked to stop exits within one scan, a quarter second.
+  sleep 1
+  version=$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")
+  [[ "$(server_field pid)" == "$replacement" && "$(server_field version)" == "$version" ]] || {
+    echo "serving: $(server_field pid) $(server_field version), expected $replacement $version"; return 1; }
+  [[ "$replacement" != "$old" ]]
+  ! kill -0 "$old" 2>/dev/null
+  root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
+  [[ "$(pgrep -f "gallery-server.py serve --root ${root}" | tr '\n' ' ')" == "$replacement " ]]
+}
+
+# stub_browser — puts an open and an xdg-open first on PATH that record each call in
+# $MOCK_DIR/opened instead of opening a browser, and lets ensure try to open one.
+stub_browser() {
+  mkdir -p "$MOCK_DIR/browser"
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> %q\n' "$MOCK_DIR/opened" > "$MOCK_DIR/browser/open"
+  cp "$MOCK_DIR/browser/open" "$MOCK_DIR/browser/xdg-open"
+  chmod +x "$MOCK_DIR/browser/open" "$MOCK_DIR/browser/xdg-open"
+  export PATH="$MOCK_DIR/browser:$PATH" DISPLAY=:99
+  unset IMAGE_GALLERY_NO_OPEN SSH_CONNECTION SSH_TTY
+}
+
+# serve_other_version — starts a server that reports another version, the way an older install's does.
+serve_other_version() {
+  local i
+  python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version 0.0.0-other
+  for i in $(seq 1 50); do
+    [[ "$(server_field version)" == 0.0.0-other ]] && return 0
+    sleep 0.1
+  done
+  echo "the server of another version never answered on its control socket"
+  return 1
+}
+
+@test "replacing a server of another version opens the page only when no page was connected to it" {
+  stub_browser
+  serve_other_version
+  start_gallery
+  [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
+  stop_gallery
+  serve_other_version
+  connect_page
+  start_gallery
+  # The page reconnects to the server that replaced it on the same port, so no second tab opens.
+  [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
+}
+
+@test "runs started together each print the page's address when the browser never finishes opening" {
+  # The first run's answer comes when the server gives up on its launch after ten seconds. The
+  # second run's own launch then hangs past its fifteen-second wait, and the server answers it
+  # after the run is gone, with nothing in server.log.
+  stub_browser
+  printf 'echo $$ >> %q\nexec sleep 30\n' "$MOCK_DIR/launched" | tee -a "$MOCK_DIR/browser/open" >> "$MOCK_DIR/browser/xdg-open"
+  local first second status=0 address pid i
+  start_gallery 2> "$MOCK_DIR/first.err" &
+  first=$!
+  start_gallery 2> "$MOCK_DIR/second.err" &
+  second=$!
+  wait "$first" || status=$?
+  [[ $status -eq 0 ]] || { echo "the first start exited $status: $(cat "$MOCK_DIR/first.err")"; return 1; }
+  wait "$second" || status=$?
+  [[ $status -eq 0 ]] || { echo "the second start exited $status: $(cat "$MOCK_DIR/second.err")"; return 1; }
+  address="image gallery: open http://127.0.0.1:$(server_field port)/$(server_field token)/ to watch the images"
+  [[ "$(cat "$MOCK_DIR/first.err")" == "$address" && "$(cat "$MOCK_DIR/second.err")" == "$address" ]] || {
+    echo "first: $(cat "$MOCK_DIR/first.err")"; echo "second: $(cat "$MOCK_DIR/second.err")"; return 1; }
+  [[ "$(wc -l < "$MOCK_DIR/launched" | tr -d ' ')" == 2 ]]
+  for pid in $(cat "$MOCK_DIR/launched"); do
+    for i in $(seq 1 100); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+  done
+  # The server writes its answer once the launch it waited on is killed.
+  sleep 0.5
+  [[ ! -s "$IMAGE_GALLERY_DIR/server.log" ]] || { cat "$IMAGE_GALLERY_DIR/server.log"; return 1; }
+}
+
+@test "the browser is opened at a one-time address without the token, which sends it on to the page once" {
+  stub_browser
+  start_gallery
+  local opened url location
+  opened=$(cat "$MOCK_DIR/opened")
+  [[ "$opened" != *"$(server_field token)"* ]] || { echo "opened with: $opened"; return 1; }
+  url=${opened##* }
+  location=$(curl -s -D - -o /dev/null "$url" | tr -d '\r' | sed -n 's/^Location: //p')
+  [[ "$location" == "/$(server_field token)/" ]] || { echo "$url sent the browser to: $location"; return 1; }
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' "$url")" == 403 ]]
+}
+
+@test "over SSH the run prints the page's address, token included, instead of opening a browser" {
+  stub_browser
+  export SSH_CONNECTION="198.51.100.7 50000 192.0.2.1 22"
+  run start_gallery
+  assert_status 0
+  [[ "$output" == "image gallery: open http://127.0.0.1:$(server_field port)/$(server_field token)/ to watch the images" ]] || {
+    echo "output: $output"; return 1; }
+  [[ ! -e "$MOCK_DIR/opened" ]]
+}
+
+@test "the token never reaches a listener on the port the gallery folder records" {
+  # The folder's last-port names a port another listener now holds. The listener records whatever
+  # it is sent.
+  mkdir -p "$IMAGE_GALLERY_DIR"
+  printf 'null' > "$MOCK_DIR/answer"
+  python3 -I "${PLUGIN_ROOT}/tests/one_request_server.py" "$MOCK_DIR/port" "$MOCK_DIR/request.raw" "$MOCK_DIR/answer" &
+  LISTENER_PID=$!
+  local i
+  for i in $(seq 1 50); do
+    [[ -s "$MOCK_DIR/port" ]] && break
+    sleep 0.1
+  done
+  cp "$MOCK_DIR/port" "$IMAGE_GALLERY_DIR/last-port"
+  start_gallery
+  python3 -I "$GALLERY_PY" clients --root "$IMAGE_GALLERY_DIR"
+  [[ ! -e "$MOCK_DIR/request.raw" ]] || { echo "the listener was sent:"; cat "$MOCK_DIR/request.raw"; return 1; }
+  [[ "$(server_field version)" == "$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")" ]]
+}
+
+@test "the Retry button's POST /retry runs the failed provider again" {
+  answer_provider_with "$GEMINI_REFUSAL" "$GEMINI_IMAGE"
+  start_gallery
+  connect_page
+  DISPLAY_PANE_RETRY_WAIT=30 bash "${SCRIPTS}/run-all.sh" --mode generate --prompt "a lighthouse at dusk" \
+    --output-base "$OUT_BASE" --providers gemini > "$MOCK_DIR/run.out" 2>&1 &
+  local run_pid=$!
+  wait_for_snapshot '.runs[0].retry == ["gemini"]'
+  [[ "$(jq -r '.runs[0].providers[0] | [.state, .error] | @tsv' <<< "$SNAPSHOT")" == \
+    $'error\tNo image data in response. Model said: no picture today' ]] || { echo "$SNAPSHOT"; return 1; }
+  # The offer closes DISPLAY_PANE_RETRY_WAIT seconds after it opened, which was moments ago.
+  local now_ms left_ms
+  now_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
+  left_ms=$(( $(jq -r '.runs[0].retry_ends_ms' <<< "$SNAPSHOT") - now_ms ))
+  [[ "$(jq -r '.runs[0].retry_seconds' <<< "$SNAPSHOT")" == 30 && $left_ms -gt 15000 && $left_ms -le 30000 ]] || {
+    echo "left_ms=$left_ms; $SNAPSHOT"; return 1; }
+  local id
+  id=$(jq -r '.runs[0].id' <<< "$SNAPSHOT")
+  [[ "$(gallery_curl -X POST -H "$(origin)" "/retry/${id}")" == "{\"retrying\": \"${id}\"}" ]]
+  local status=0
+  wait "$run_pid" || status=$?
+  [[ $status -eq 0 ]] || { echo "run-all exited $status:"; cat "$MOCK_DIR/run.out"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done"'
+  [[ "$(jq -r '.runs[0] | [.retry, (.providers[0] | .state, .round, .image.n)] | @tsv' <<< "$SNAPSHOT")" == \
+    $'\tcomplete\t1\t0' ]] || { echo "$SNAPSHOT"; return 1; }
+  [[ "$(cat "$MOCK_DIR/calls")" == 2 ]]
+}
+
+@test "a page that hangs up stops counting as connected within two seconds" {
+  start_gallery
+  connect_page
+  kill "$EVENTS_PID"
+  sleep 2
+  [[ "$(server_field clients)" == 0 ]]
+}
+
+@test "a provider that exits before it starts shows as failed, saying so" {
+  answer_provider_with "$GEMINI_IMAGE"
+  unset GEMINI_API_KEY
+  run_all_gemini
+  assert_status 1
+  assert_output_contains "Error: GEMINI_API_KEY environment variable is not set"
+  wait_for_snapshot '.runs[0].status == "done"'
+  [[ "$(jq -r '.runs[0].providers[0] | [.state, .error] | @tsv' <<< "$SNAPSHOT")" == \
+    $'error\tgemini exited 1 before reporting a result; its error output says why' ]] || { echo "$SNAPSHOT"; return 1; }
+  [[ ! -e "$MOCK_DIR/calls" ]]
+}
+
+@test "with no page connected, a failed run makes no retry offer and returns at once" {
+  answer_provider_with "$GEMINI_REFUSAL"
+  local started=$SECONDS
+  DISPLAY_PANE_RETRY_WAIT=45 run_all_gemini
+  assert_status 1
+  [[ $((SECONDS - started)) -lt 15 ]] || { echo "run-all took $((SECONDS - started)) s"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done"'
+  [[ "$(jq -r '.runs[0].retry' <<< "$SNAPSHOT")" == null ]]
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 ]]
+}
+
+@test "an IMAGE_GALLERY_DIR that already exists keeps its mode, and one other users can write is not used" {
+  answer_provider_with "$GEMINI_IMAGE"
+  mkdir -m 755 "$IMAGE_GALLERY_DIR"
+  run_all_gemini
+  assert_status 0
+  [[ "$(ls -ld "$IMAGE_GALLERY_DIR" | cut -c1-10)" == drwxr-xr-x ]] || { ls -ld "$IMAGE_GALLERY_DIR"; return 1; }
+  wait_for_snapshot '.runs | length == 1'
+  chmod 775 "$IMAGE_GALLERY_DIR"
+  OUT_BASE="${OUT_BASE}-again"
+  run_all_gemini
+  assert_status 0
+  [[ "$(grep -c '^image display: ' <<< "$output")" == 1 ]] || { echo "output: $output"; return 1; }
+  assert_output_contains "image display: IMAGE_GALLERY_DIR ${IMAGE_GALLERY_DIR} can be written by other users; using the terminal instead"
+  [[ "$(ls -ld "$IMAGE_GALLERY_DIR" | cut -c1-10)" == drwxrwxr-x ]] || { ls -ld "$IMAGE_GALLERY_DIR"; return 1; }
+  [[ "$(ls "$IMAGE_GALLERY_DIR/runs" | wc -l | tr -d ' ')" == 1 ]]
+}
+
+@test "a file named server.sock that is not a socket stays where it is, and the run and the server say so" {
+  mkdir -m 700 "$IMAGE_GALLERY_DIR"
+  printf 'notes\n' > "$IMAGE_GALLERY_DIR/server.sock"
+  local root message i
+  root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
+  message="${root}/server.sock is not a socket; move it so the server can make its control socket there"
+  run start_gallery
+  assert_status 1
+  [[ "$output" == "image gallery: ${message}" ]] || { echo "output: $output"; return 1; }
+  # A server started on the folder directly refuses it too, and exits.
+  python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version 0.0.0-other
+  for i in $(seq 1 50); do
+    [[ -z "$(pgrep -f "gallery-server.py serve --root ${IMAGE_GALLERY_DIR}")" ]] && break
+    sleep 0.1
+  done
+  [[ -z "$(pgrep -f "gallery-server.py serve --root ${IMAGE_GALLERY_DIR}")" ]]
+  [[ "$(tail -n 1 "$IMAGE_GALLERY_DIR/server.log")" == "image gallery: ${message}" ]] || { cat "$IMAGE_GALLERY_DIR/server.log"; return 1; }
+  [[ "$(cat "$IMAGE_GALLERY_DIR/server.sock")" == notes ]]
+}
+
+@test "an IMAGE_DISPLAY that is not gallery, pane or none stops run-all before any provider runs" {
+  answer_provider_with "$GEMINI_IMAGE"
+  IMAGE_DISPLAY=bogus run_all_gemini
+  assert_status 1
+  [[ "$output" == "IMAGE_DISPLAY must be gallery, pane or none, got 'bogus'" ]] || { echo "output: $output"; return 1; }
+  [[ ! -e "$MOCK_DIR/calls" && ! -e "$IMAGE_GALLERY_DIR" ]]
+}
+
+@test "display_mode: unset means gallery, SKIP_DISPLAY=1 means none, and no python3 means pane" {
+  run env -u IMAGE_DISPLAY bash -c 'source "$1"; display_mode' _ "$DISPLAY_SH"
+  [[ "$status" -eq 0 && "$output" == gallery ]] || { echo "unset: $status $output"; return 1; }
+  run env SKIP_DISPLAY=1 IMAGE_DISPLAY=pane bash -c 'source "$1"; display_mode' _ "$DISPLAY_SH"
+  [[ "$status" -eq 0 && "$output" == none ]] || { echo "skip: $status $output"; return 1; }
+  mkdir -p "$MOCK_DIR/nopython"
+  printf '#!/bin/bash\nexit 1\n' > "$MOCK_DIR/nopython/python3"
+  chmod +x "$MOCK_DIR/nopython/python3"
+  run env PATH="$MOCK_DIR/nopython:$PATH" bash -c 'source "$1"; display_mode 2>"$2"' _ "$DISPLAY_SH" "$MOCK_DIR/err"
+  [[ "$status" -eq 0 && "$output" == pane ]] || { echo "no python: $status $output"; return 1; }
+  [[ "$(cat "$MOCK_DIR/err")" == "image display: the gallery needs python3 3.9 or later, none found; using the terminal instead" ]]
+}
+
+@test "the gallery draws nothing in the terminal: no pane split in tmux, no inline image outside it" {
+  command -v tmux >/dev/null 2>&1 || skip "tmux is not installed"
+  answer_provider_with "$GEMINI_IMAGE"
+  # A tmux server of this test's own, never the one the suite runs in.
+  local socket="bats-gallery-$$-${BATS_TEST_NUMBER}" real_tmux socket_path pane
+  real_tmux=$(command -v tmux)
+  mkdir -p "$MOCK_DIR/bin"
+  printf '#!/bin/bash\nexec %q -L %q "$@"\n' "$real_tmux" "$socket" > "$MOCK_DIR/bin/tmux"
+  chmod +x "$MOCK_DIR/bin/tmux"
+  "$MOCK_DIR/bin/tmux" -f /dev/null new-session -d -x 200 -y 50
+  socket_path=$("$MOCK_DIR/bin/tmux" display-message -p '#{socket_path}')
+  pane=$("$MOCK_DIR/bin/tmux" display-message -p '#{pane_id}')
+  : > "$MOCK_DIR/tty"
+  run env PATH="$MOCK_DIR/bin:$PATH" TMUX="${socket_path},0,0" TMUX_PANE="$pane" LC_TERMINAL=iTerm2 \
+    DISPLAY_IMAGE_TARGET="$MOCK_DIR/tty" bash "${SCRIPTS}/gemini.sh" --mode generate --prompt "a quiet harbour" \
+    --output "${OUT_BASE}-gemini.png"
+  local panes
+  panes=$("$MOCK_DIR/bin/tmux" list-panes -a | wc -l | tr -d ' ')
+  "$MOCK_DIR/bin/tmux" kill-server 2>/dev/null || true
+  rm -f "$socket_path"
+  assert_status 0
+  [[ "$panes" == 1 ]] || { echo "the run split the pane: $panes panes"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done"'
+  [[ "$(jq -r '.runs[0] | [.prompt, .providers[0].state] | @tsv' <<< "$SNAPSHOT")" == $'a quiet harbour\tcomplete' ]]
+  run env TERM_PROGRAM=iTerm.app DISPLAY_IMAGE_TARGET="$MOCK_DIR/tty" bash -c 'source "$1"; display_image "$2"' \
+    _ "$DISPLAY_SH" "${OUT_BASE}-gemini.png"
+  assert_status 0
+  [[ ! -s "$MOCK_DIR/tty" ]] || { echo "drew $(wc -c < "$MOCK_DIR/tty") bytes on the terminal"; return 1; }
+}
+
+# write_run <run-id> <cwd> <status lines> [done] — writes a run directory by hand the way display.sh
+# lays one out, the providers read from the status lines; "done" marks it finished.
+write_run() {
+  local dir="$IMAGE_GALLERY_DIR/runs/$1" providers
+  mkdir -p "$dir/active"
+  printf '%b' "$3" > "$dir/status"
+  providers=$(cut -f1 "$dir/status" | sort -u | jq -R . | jq -sc .)
+  jq -n --arg cwd "$2" --argjson providers "$providers" \
+    '{prompt: "a kettle", cwd: $cwd, started_at: "2026-11-25T10:00:00Z", providers: $providers}' > "$dir/meta.json"
+  [[ "${4:-}" == done ]] && touch "$dir/.done"
+  return 0
+}
+
+@test "a token whose pid now belongs to another process, of this user or another, does not keep its run live" {
+  # pid 1 is another user's process; the sleep is this user's, started after the token's time.
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
+  printf 'Thu Jan  1 00:00:00 1970\n' > "$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1/active/gemini.1"
+  sleep 60 &
+  HOLDER_PID=$!
+  write_run 20261125T100100Z-00000000b2 /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
+  printf 'Thu Jan  1 00:00:00 1970\n' > "$IMAGE_GALLERY_DIR/runs/20261125T100100Z-00000000b2/active/gemini.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  [[ "$(jq -r '[.runs[] | .status, .providers[0].state] | @tsv' <<< "$SNAPSHOT")" == \
+    $'interrupted\tinterrupted\tinterrupted\tinterrupted' ]] || { echo "$SNAPSHOT"; return 1; }
+}
+
+@test "a retry offer whose wait is too long to count still shows, with no countdown" {
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\terror\t\tmodel-a\t\n'
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$dir/active/run-all.$HOLDER_PID"
+  printf '%s\ngemini\n' "$(printf '9%.0s' $(seq 1 400))" > "$dir/retry-offer"
+  start_gallery
+  wait_for_snapshot '.runs[0].status == "live"'
+  [[ "$(jq -c '.runs[0] | [.retry, .retry_seconds, .retry_ends_ms]' <<< "$SNAPSHOT")" == '[["gemini"],null,null]' ]] || {
+    echo "$SNAPSHOT"; return 1; }
+}
+
+@test "a run directory that does not parse is left out with one line in server.log, and the server serves the rest" {
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' done
+  local runs="$IMAGE_GALLERY_DIR/runs"
+  mkdir -p "$runs/20261125T100100Z-00000000b2" "$runs/20261125T100200Z-00000000c3"
+  printf '[]' > "$runs/20261125T100100Z-00000000b2/meta.json"
+  printf '{"prompt": "a kettle", "cwd": 5, "started_at": "", "providers": []}' > "$runs/20261125T100200Z-00000000c3/meta.json"
+  printf 'not a run' > "$runs/20261125T100300Z-00000000d4"
+  # A run still being assembled under its dot name that is gone by the time the server looks.
+  ln -s "$runs/nowhere" "$runs/.20261125T100400Z-00000000e5"
+  start_gallery
+  wait_for_snapshot '.runs | length == 1'
+  [[ "$(jq -r '.runs[0].id' <<< "$SNAPSHOT")" == 20261125T100000Z-00000000a1 ]] || { echo "$SNAPSHOT"; return 1; }
+  # Each rejected run is named once, however many scans have passed.
+  sleep 1
+  local root
+  root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
+  [[ "$(cat "$IMAGE_GALLERY_DIR/server.log")" == "image gallery: skipping run $root/runs/20261125T100300Z-00000000d4: meta.json: Not a directory
+image gallery: skipping run $root/runs/20261125T100200Z-00000000c3: meta.json's cwd is 5, not a string
+image gallery: skipping run $root/runs/20261125T100100Z-00000000b2: meta.json holds [], not an object" ]] || {
+    cat "$IMAGE_GALLERY_DIR/server.log"; return 1; }
+}
+
+# cpu_seconds <pid> — the CPU time, user and system, a process has used so far, in seconds.
+cpu_seconds() {
+  if [[ -r "/proc/$1/stat" ]]; then
+    awk -v tick="$(getconf CLK_TCK)" '{ printf "%.2f\n", ($14 + $15) / tick }' "/proc/$1/stat"
+  else
+    ps -o time= -p "$1" | awk -F: '{ printf "%.2f\n", $1 * 60 + $2 }'
+  fi
+}
+
+@test "a server holding 200 finished runs stays under a quarter CPU-second in five idle seconds" {
+  local i id dir
+  for i in $(seq 1 200); do
+    id=$(printf '20261125T%06dZ-%010x' "$i" "$i")
+    dir="$IMAGE_GALLERY_DIR/runs/$id"
+    mkdir -p "$dir/active" "$dir/errors"
+    printf '{"prompt": "a kettle", "cwd": "/work/alpha", "started_at": "2026-11-25T10:00:00Z", "providers": ["gemini", "openai"]}' > "$dir/meta.json"
+    printf 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\nopenai\terror\t\tmodel-b\t\n' > "$dir/status"
+    printf 'refused' > "$dir/errors/openai.txt"
+    touch "$dir/.done"
+  done
+  start_gallery
+  wait_for_snapshot '.runs | length == 200'
+  local pid before after
+  pid=$(server_field pid)
+  before=$(cpu_seconds "$pid")
+  sleep 5
+  after=$(cpu_seconds "$pid")
+  awk -v a="$before" -v b="$after" 'BEGIN { exit !(b - a < 0.25) }' || {
+    echo "the server used $before s before and $after s after five idle seconds"; return 1; }
+}
+
+@test "each run in the snapshot names its session by the last folder of its working directory" {
+  write_run 20261125T100000Z-00000000a1 /work/projects/alpha 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' done
+  write_run 20261125T100100Z-00000000b2 /work/beta 'gemini\tcomplete\t1000\tmodel-a\t/tmp/b.png\n' done
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  [[ "$(jq -r '[.runs[].session] | @tsv' <<< "$SNAPSHOT")" == $'beta\talpha' ]] || { echo "$SNAPSHOT"; return 1; }
+}
+
+@test "a provider at work carries usual_ms, the median time of the last five frames its model completed" {
+  # Oldest first: the 100000 ms frame is sixth newest, so it falls outside the five that count.
+  local ms n=0
+  for ms in 100000 1000 3000 2000 4000 5000; do
+    n=$((n + 1))
+    write_run "20261125T10000${n}Z-000000000${n}" /work/alpha "gemini\tcomplete\t${ms}\tmodel-a\t/tmp/${n}.png\nopenai\tcomplete\t9000\tmodel-b\t/tmp/o${n}.png\n" done
+  done
+  write_run 20261125T110000Z-00000000ff /work/alpha 'gemini\tquerying\t\tmodel-a\t\nopenai\tquerying\t\tmodel-c\t\nxai\tretrying\t2/3\tmodel-a\t\n'
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/20261125T110000Z-00000000ff/active/test.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs[0].status == "live"'
+  # gemini on model-a: median of 1000 3000 2000 4000 5000. openai has no history on model-c, and
+  # xai none at all, so theirs is absent; a finished frame carries none.
+  [[ "$(jq -c '.runs[0].providers | map({(.name): .usual_ms}) | add' <<< "$SNAPSHOT")" == \
+    '{"gemini":3000,"openai":null,"xai":null}' ]] || { echo "$SNAPSHOT"; return 1; }
+  [[ "$(jq -c '[.runs[0].providers[] | has("usual_ms")]' <<< "$SNAPSHOT")" == '[true,false,false]' ]]
+  [[ "$(jq -c '[.runs[1:][].providers[] | has("usual_ms")] | unique' <<< "$SNAPSHOT")" == '[false]' ]]
+}
+
+@test "a run held by a session in another timezone stays live on a server started in UTC" {
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  TZ=Pacific/Kiritimati bash -c 'source "$1/scripts/display.sh"; DISPLAY_PANE_DIR="$2"; __pane_acquire run-all; sleep 60' _ "$PLUGIN_ROOT" "$dir" &
+  HOLDER_PID=$!
+  local waited=0
+  until compgen -G "$dir/active/run-all.*" > /dev/null; do sleep 0.1; waited=$((waited + 1)); [[ $waited -lt 50 ]]; done
+  TZ=UTC start_gallery
+  wait_for_snapshot '.runs[0].status == "live"'
+  [[ "$(jq -r '.runs[0].providers[0].state' <<< "$SNAPSHOT")" == querying ]] || { echo "$SNAPSHOT"; return 1; }
+}
+
+@test "an entry in active/ that is not a file, or names a pid no process can have, neither holds a run nor stops the server" {
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  printf 'Thu Jan  1 00:00:00 1970\n' > "$dir/active/run-all.999999999999"
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$dir/active/run-all.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs[0].status == "live"'
+  kill "$HOLDER_PID"
+  wait "$HOLDER_PID" 2>/dev/null || true
+  mkdir "$dir/active/run-all.123"
+  wait_for_snapshot '.runs[0].status == "interrupted"'
+}

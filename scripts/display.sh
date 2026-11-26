@@ -1,6 +1,9 @@
 # ABOUTME: Multi-protocol terminal image display utility.
 # ABOUTME: Supports iTerm2, Kitty, Sixel protocols and tmux pane display.
 
+# The directory holding this library, for the gallery server that sits beside it.
+__DISPLAY_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ── Terminal Detection ─────────────────────────────────────────────────
 
 # Returns 0 if running in iTerm2, 1 otherwise.
@@ -369,6 +372,128 @@ display_image_in_pane() {
   tmux split-window -v -l '40%' ${target_args[@]+"${target_args[@]}"} "${__TMUX_WORDS[@]}"
 }
 
+# ── Display Mode ───────────────────────────────────────────────────────
+
+# Reports whether a python3 able to run the gallery server (3.9 or later) is on PATH. On macOS
+# /usr/bin/python3 is a stub until the Command Line Tools are installed, and running the stub
+# opens an install dialog instead of Python, so it counts only once xcode-select names a path.
+__gallery_python_usable() {
+  local py
+  py=$(command -v python3) || return 1
+  if [[ "$py" == /usr/bin/python3 && "$(uname -s)" == Darwin ]]; then
+    xcode-select -p >/dev/null 2>&1 || return 1
+  fi
+  "$py" -I -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1
+}
+
+# Reports whether the folder IMAGE_GALLERY_DIR names can hold the gallery's token and runs. One
+# that already exists keeps its own mode, so it must be this user's and writable by no one else:
+# another user able to write it could plant a token they know or a control socket of their own.
+# A link is judged by the folder it points to. ACLs are not read, and the folder or link can
+# still change after this check. The default folder, and one that does not exist yet,
+# gallery_begin_run makes readable by this user only.
+__gallery_root_private() {
+  local root="${IMAGE_GALLERY_DIR:-}"
+  [[ -n "$root" && -d "$root" ]] || return 0
+  local writable
+  writable=$(find -H "$root" -maxdepth 0 \( -perm -020 -o -perm -002 \) -print) || return 1
+  [[ -O "$root" && -z "$writable" ]]
+}
+
+# Prints where images go, the one place that decides it: gallery (the browser gallery page),
+# pane (the tmux pane, or inline drawing outside tmux) or none. SKIP_DISPLAY=1 means none;
+# otherwise IMAGE_DISPLAY chooses, gallery when unset. Gallery without a usable python3, or with
+# an IMAGE_GALLERY_DIR other users can write, becomes pane, saying so on stderr. Any other
+# IMAGE_DISPLAY value fails, naming it. Usage: display_mode
+display_mode() {
+  if [[ "${SKIP_DISPLAY:-}" == "1" ]]; then
+    echo none
+    return 0
+  fi
+  local mode="${IMAGE_DISPLAY:-gallery}"
+  case "$mode" in
+    pane|none) echo "$mode" ;;
+    gallery)
+      if ! __gallery_python_usable; then
+        echo "image display: the gallery needs python3 3.9 or later, none found; using the terminal instead" >&2
+        echo pane
+      elif ! __gallery_root_private; then
+        echo "image display: IMAGE_GALLERY_DIR ${IMAGE_GALLERY_DIR} can be written by other users; using the terminal instead" >&2
+        echo pane
+      else
+        echo gallery
+      fi
+      ;;
+    *)
+      echo "IMAGE_DISPLAY must be gallery, pane or none, got '${mode}'" >&2
+      return 1
+      ;;
+  esac
+}
+
+# ── Browser Gallery ────────────────────────────────────────────────────
+
+# Prints the gallery's state directory: the server's files and one directory per image run.
+gallery_root() {
+  printf '%s' "${IMAGE_GALLERY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/claude-image-generation/gallery}"
+}
+
+# Creates a gallery run directory and points DISPLAY_PANE_DIR at it, holding a token for
+# <owner> so the run counts as live until that owner releases it. The run is assembled under a
+# dot name and renamed into runs/ only once its token and meta.json are in place, so the server
+# never sees a run without them. Fails with one line on stderr, leaving DISPLAY_PANE_DIR unset.
+# Usage: gallery_begin_run <owner> <prompt> <provider>...
+gallery_begin_run() {
+  local owner="$1" prompt="$2"
+  shift 2
+  local root run_id staging started keep_mode=""
+  root=$(gallery_root)
+  # A folder IMAGE_GALLERY_DIR names that already exists keeps its own mode, which display_mode
+  # has checked; any other is made, or kept, readable by this user only.
+  [[ -n "${IMAGE_GALLERY_DIR:-}" && -d "$root" ]] && keep_mode=1
+  if ! (umask 077 && mkdir -p "$root/runs" && { [[ -n "$keep_mode" ]] || chmod 700 "$root"; }); then
+    echo "image gallery: cannot create $root/runs" >&2
+    return 1
+  fi
+  run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(od -An -N5 -tx1 /dev/urandom | tr -d ' \n')"
+  staging="$root/runs/.$run_id"
+  started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if ! mkdir -m 700 "$staging"; then
+    echo "image gallery: cannot create run directory $staging" >&2
+    return 1
+  fi
+  DISPLAY_PANE_DIR="$staging"
+  __pane_acquire "$owner"
+  if ! jq -n --arg prompt "$prompt" --arg cwd "$PWD" --arg started "$started" \
+      '{prompt: $prompt, cwd: $cwd, started_at: $started, providers: $ARGS.positional}' \
+      --args "$@" > "$staging/meta.json" \
+    || ! mv "$staging" "$root/runs/$run_id"; then
+    echo "image gallery: cannot write the run in $staging" >&2
+    rm -rf "$staging"
+    DISPLAY_PANE_DIR=""
+    __PANE_SELF_ATTACHED=""
+    return 1
+  fi
+  DISPLAY_PANE_DIR="$root/runs/$run_id"
+}
+
+# Makes sure the gallery server is running at this plugin's version and that a page shows it:
+# reuses the running server, replaces one of another version, starts one when there is none,
+# then opens the page in the browser when no page is connected (IMAGE_GALLERY_NO_OPEN=1 skips
+# that), printing its address instead when the browser cannot be opened. A failure costs one
+# line on stderr and never stops the image run. Usage: gallery_ensure
+gallery_ensure() {
+  python3 -I "${__DISPLAY_SH_DIR}/gallery-server.py" ensure --root "$(gallery_root)" || true
+}
+
+# Succeeds when at least one gallery page is connected to the server right now.
+# Usage: gallery_page_connected
+gallery_page_connected() {
+  local clients
+  clients=$(python3 -I "${__DISPLAY_SH_DIR}/gallery-server.py" clients --root "$(gallery_root)" 2>/dev/null) || return 1
+  [[ "$clients" =~ ^[0-9]+$ && "$clients" -gt 0 ]]
+}
+
 # ── Streaming Display Pane ────────────────────────────────────────────
 
 # Escapes backslash, tab and newline in a value bound for one line of the manifest or the status
@@ -448,20 +573,28 @@ __pane_now_ms() {
 }
 
 # Provider-script helpers, safe to call unconditionally. begin joins this window's shared pane
-# when the caller has none, then records the querying state and starts the timer — outside tmux
-# it does nothing, but inside it costs a tmux round-trip and can wait briefly for another
-# provider to finish opening the pane. finish/fail compute elapsed ms, emit the complete/error
+# (pane mode) or starts a gallery run of its own (gallery mode, where the prompt goes into the
+# run's meta.json) when the caller has none, then records the querying state and starts the
+# timer — in pane mode outside tmux it does nothing, but inside it costs a tmux round-trip and
+# can wait briefly for another provider to finish opening the pane. finish/fail compute elapsed ms, emit the complete/error
 # event, and release this participant's hold on the pane.
 display_pane_begin() {
-  local provider="$1" model="$2"
+  local provider="$1" model="$2" prompt="${3:-}"
   # A provider launched on its own inherits no DISPLAY_PANE_DIR, so it joins (or opens) this
-  # window's shared pane here. Doing it at begin rather than at render time is what keeps a
-  # batch to one pane: every provider lands on the same surface before any image exists.
-  if [[ -z "${DISPLAY_PANE_DIR:-}" ]] && is_tmux; then
-    local watch_dir
-    if watch_dir=$(display_pane_attach_or_open 2>/dev/null); then
-      DISPLAY_PANE_DIR="$watch_dir"
-      __PANE_SELF_ATTACHED=1
+  # window's shared pane here, or starts a gallery run of its own. Doing it at begin rather than
+  # at render time is what keeps a batch to one pane: every provider lands on the same surface
+  # before any image exists.
+  if [[ -z "${DISPLAY_PANE_DIR:-}" ]]; then
+    local mode
+    mode=$(display_mode) || return 1
+    if [[ "$mode" == gallery ]]; then
+      gallery_begin_run "$provider" "$prompt" "$provider" && gallery_ensure
+    elif [[ "$mode" == pane ]] && is_tmux; then
+      local watch_dir
+      if watch_dir=$(display_pane_attach_or_open 2>/dev/null); then
+        DISPLAY_PANE_DIR="$watch_dir"
+        __PANE_SELF_ATTACHED=1
+      fi
     fi
   fi
   [[ -z "${DISPLAY_PANE_DIR:-}" ]] && return 0
@@ -483,7 +616,14 @@ display_pane_begin() {
 __pane_acquire() {
   __PANE_SELF_ATTACHED=1
   mkdir -p "$DISPLAY_PANE_DIR/active"
-  : > "$DISPLAY_PANE_DIR/active/${1}.$$"
+  # The token holds this process's start time, so the gallery can tell this process from another
+  # that later gets the same pid. It is read in UTC, as the gallery server reads it, whatever
+  # timezone this session or the server's runs in. It is written under a dot name and renamed into place, so the
+  # gallery never reads one half written.
+  local started=""
+  started=$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$ 2>/dev/null) || started=""
+  printf '%s\n' "$started" > "$DISPLAY_PANE_DIR/active/.${1}.$$"
+  mv -f "$DISPLAY_PANE_DIR/active/.${1}.$$" "$DISPLAY_PANE_DIR/active/${1}.$$"
 }
 
 # Drops this participant's active token and closes the shared pane once the last one has released.
@@ -508,7 +648,7 @@ __pane_release() {
   # Retire the entry before dismissing the pane so a provider starting up in this instant opens
   # a fresh pane rather than attaching to one that is about to stop accepting images.
   local reg
-  reg=$(cat "$DISPLAY_PANE_DIR/registry" 2>/dev/null)
+  reg=$(cat "$DISPLAY_PANE_DIR/registry" 2>/dev/null) || reg=""
   [[ -n "$reg" ]] && rm -rf "$reg"
   touch "$DISPLAY_PANE_DIR/.done"
   return 0
@@ -1265,7 +1405,10 @@ display_pane_attach_or_open() {
 display_image() {
   local file_path="$1"
 
-  if [[ "${SKIP_DISPLAY:-}" == "1" ]]; then
+  # Only the pane mode draws in the terminal; the gallery shows images in the browser.
+  local mode
+  mode=$(display_mode) || return 1
+  if [[ "$mode" != pane ]]; then
     return 0
   fi
 
@@ -1399,7 +1542,9 @@ display_images() {
     return 0
   fi
 
-  if [[ "${SKIP_DISPLAY:-}" == "1" ]]; then
+  local mode
+  mode=$(display_mode) || return 1
+  if [[ "$mode" != pane ]]; then
     return 0
   fi
 

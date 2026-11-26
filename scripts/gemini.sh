@@ -165,7 +165,7 @@ REQUEST_BODY=$(build_request_body)
 
 use_remembered_fallback
 echo "Calling Gemini API (model: ${MODEL}, mode: ${MODE})..." >&2
-display_pane_begin "$PROVIDER_NAME" "$MODEL"
+display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 
 # send_request <model> — posts the body to this model's URL, which is where gemini takes the
 # model, and prints curl_with_retry's body and status. The body embeds the base64 image in edit

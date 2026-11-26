@@ -69,7 +69,8 @@ You are an image generation agent that creates and edits images using Google Gem
    - Pass `providers`, `outputBase` or `aspectRatio` only when the request gives them. Leave
      them out otherwise: the tool falls back to the person's `/config` defaults, so there is
      nothing to ask.
-   - It opens the same streaming pane and retry offer as `run-all.sh`, and its result lists
+   - It shows the run where `run-all.sh` does (the browser gallery by default, the streaming
+     pane with `IMAGE_DISPLAY=pane`) with the same retry offer, and its result lists
      each expected file as `saved` or `missing`. Go to step 5 with it. If it refuses the
      call, fix the input from its message rather than retrying unchanged. It never
      overwrites: a refusal that names a path that `already exists` means pick an unused
@@ -110,9 +111,9 @@ You are an image generation agent that creates and edits images using Google Gem
 4. Execute the scripts:
 
    **Single provider:**
-   Run the script directly via Bash, then mark the task completed. The script streams the
-   resulting image into this tmux window's shared display pane (or renders it directly to
-   the terminal outside tmux).
+   Run the script directly via Bash, then mark the task completed. The script shows the
+   resulting image on the browser gallery page (with `IMAGE_DISPLAY=pane`, in this tmux
+   window's shared display pane, or directly in the terminal outside tmux).
 
    ```bash
    # Generation
@@ -129,17 +130,18 @@ You are an image generation agent that creates and edits images using Google Gem
    ```
 
    **Multiple providers (parallel):**
-   Use `run-all.sh` — one Bash call that forks all providers in parallel into a single
-   shared streaming pane. Each provider produces `<base>-<provider>.png`, and the pane
+   Use `run-all.sh` — one Bash call that forks all providers in parallel as one run: one card
+   with a frame per provider on the browser gallery, or with `IMAGE_DISPLAY=pane` a single shared
+   streaming pane. Each provider produces `<base>-<provider>.png`, and the pane
    shows colored banners as results land, with a line naming the providers still pending
    (animated until the first image, then written once under each new block).
 
    Providers share a pane only while they overlap in time. Running the three scripts as
-   three separate sequential Bash calls gives three panes, one per call — so reach for
+   three separate sequential Bash calls gives three panes (or three gallery runs), one per call, so reach for
    `run-all.sh` whenever more than one provider is wanted.
 
-   When a provider fails, the pane offers a retry for up to 45 seconds, so `run-all.sh`
-   can return later than the slowest provider.
+   When a provider fails, the pane, or the gallery while a gallery page is open, offers a
+   retry for up to 45 seconds, so `run-all.sh` can return later than the slowest provider.
 
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \
@@ -166,8 +168,9 @@ You are an image generation agent that creates and edits images using Google Gem
      --xai-extra    "--resolution 2k"
    ```
 
-   Per-provider stderr/stdout is captured under `$DISPLAY_PANE_DIR/logs/<provider>.{out,err}`
-   while the pane is open — useful if a provider fails and you want to diagnose.
+   With `IMAGE_DISPLAY=pane`, run-all.sh captures each provider's stderr/stdout under
+   `$DISPLAY_PANE_DIR/logs/<provider>.{out,err}` while the pane is open, for diagnosing a
+   provider that fails. In the gallery that output stays in the Bash call's output.
 
 5. Report the output file path(s) back. If multiple providers were used, mention all files so the user can compare.
 
