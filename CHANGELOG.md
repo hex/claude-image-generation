@@ -8,12 +8,19 @@ cover the versions up to 2026.9.1.
 ## Unreleased
 
 ### Added
-- Browser gallery, the new default display: every image run from every Claude Code session shows on one local page served from 127.0.0.1, newest first, as a card with one frame per provider. A rail filters the runs by session, a run with a failed provider gets a Retry failed button, and a loupe shows each image large. Nothing splits the chat's tmux pane. It needs `python3` 3.9 or later and falls back to the pane without it.
+- Browser gallery, the new default display: every image run from every Claude Code session shows on one local page served from 127.0.0.1, newest first, as a section with one frame per provider in that provider's own column. A rail filters the runs by project, a run with a failed provider gets a Retry failed button that counts down the time left, a loupe shows each image large, and a switch picks Auto, Light or Dark. Nothing splits the chat's tmux pane. It needs `python3` 3.9 or later and falls back to the pane without it.
+- Deleting from the gallery: a finished run's trash button, a project's trash button in the rail and **Delete project…** remove runs from the page and delete the image files they saved, after a dialog that lists each file. The server deletes only files that the dialog listed and a run's own records name as its images, and only when the name ends in `-<provider>` and an image extension. A file with another name, such as `generated.png` from a single provider script, stays on disk, and the dialog says so and why. It removes a symlink, not its target. It keeps a file that another run in the gallery also names or used as an input image, by any path, and the dialog marks it as kept. It deletes nothing while a run's status log or `meta.json` does not parse, and names that run. It never deletes a run that is still generating. Anyone who has the page's address can now delete those files.
+- Resending from the gallery: a run that `run-all.sh` started has **Edit prompt**, which opens its prompt in an editor with a button per provider. **Resend** has the server start `run-all.sh` again with the edited prompt and the chosen providers, keeping the run's mode, input images and extra arguments, and saving as `image-<stamp>-<provider>.png` in the folder of the run's output base, so a run whose providers all failed can be resent too. It refuses, and starts nothing, when one of those files exists. The images are readable by you only. A resend still starting after 15 seconds closes the editor with a note, and its run shows once it begins. The results show only in the gallery. `run-all.sh` now records its arguments in the run's `meta.json` for this; runs from before, or from a single provider script, have no Edit prompt. Anyone who has the page's address can now spend API money on any provider whose key the server holds.
 - `IMAGE_DISPLAY` (`gallery`, `pane` or `none`) and the matching **Image display** row in `/config` choose where images show. `pane` keeps the tmux pane and inline drawing as they were.
 
 ### Changed
+- `run-all.sh` refuses a `--mode` other than `generate` or `edit` before any provider runs, instead of leaving each provider to fail on it.
 - `SKIP_DISPLAY=1` also keeps `run-all.sh` and the providers from opening the tmux pane, not only from drawing inline.
 - In the gallery, provider output stays on `run-all.sh`'s own stderr instead of going to `$DISPLAY_PANE_DIR/logs/`, so the generate tool's result includes it.
+
+### Fixed
+- The record of an image saved under a relative `outputBase` names it under the run's working directory, even with `CDPATH` in the environment. With a `CDPATH` folder of the same name, the run's status record named a file in that other folder, with a newline in its path.
+- The record of an image saved under a relative `outputBase` names the folder the file is really in, symlinks resolved. A base such as `out/../hero` behind a symlinked `out/` named the working directory in its record while the file went where the symlink leads.
 
 ## 2026.11.1 - 2026-11-05
 

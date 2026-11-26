@@ -170,6 +170,54 @@ STUB
   [[ "$(cat "$PANE/errors/xai.txt")" == "xai exited 3 before reporting a result; its error output says why" ]]
 }
 
+@test "run-all records a relative output base's image under the run's working directory, whatever CDPATH holds" {
+  fake_pane
+  # The provider saves where --output says and records it the way gemini.sh does.
+  cat > "$WORK_DIR/gemini.sh" <<'STUB'
+#!/bin/bash
+source "$(dirname "$0")/display.sh"
+while [ $# -gt 0 ]; do [ "$1" = --output ] && output="$2"; shift; done
+printf 'png' > "$output"
+display_pane_finish gemini model-g "$output"
+STUB
+  chmod +x "$WORK_DIR/gemini.sh"
+  mkdir -p "$WORK_DIR/project/art" "$WORK_DIR/elsewhere/art"
+  cd "$WORK_DIR/project"
+  # An exported CDPATH with its own art/ is how a cd inside the record could land elsewhere.
+  CDPATH="$WORK_DIR/elsewhere" DISPLAY_PANE_RETRY_WAIT=0 run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" \
+    --output-base art/hero --providers gemini
+  assert_status 0
+  # The folder as it really is: on macOS the temp folder is under /var, which is /private/var.
+  local project
+  project=$(cd "$WORK_DIR/project" && pwd -P)
+  [[ "$(cat "$PANE/status")" == $'gemini\tcomplete\t\tmodel-g\t'"$project/art/hero-gemini.png" ]] || {
+    cat "$PANE/status"; return 1; }
+}
+
+@test "run-all records a relative output base's image where the file is, through a symlinked folder and .." {
+  fake_pane
+  cat > "$WORK_DIR/gemini.sh" <<'STUB'
+#!/bin/bash
+source "$(dirname "$0")/display.sh"
+while [ $# -gt 0 ]; do [ "$1" = --output ] && output="$2"; shift; done
+printf 'png' > "$output"
+display_pane_finish gemini model-g "$output"
+STUB
+  chmod +x "$WORK_DIR/gemini.sh"
+  mkdir -p "$WORK_DIR/project" "$WORK_DIR/real/deep/inner"
+  ln -s "$WORK_DIR/real/deep/inner" "$WORK_DIR/project/out"
+  cd "$WORK_DIR/project"
+  # out/.. is real/deep, where the provider writes, not project.
+  DISPLAY_PANE_RETRY_WAIT=0 run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" \
+    --output-base out/../hero --providers gemini
+  assert_status 0
+  local real
+  real=$(cd "$WORK_DIR/real/deep" && pwd -P)
+  [[ -f "$real/hero-gemini.png" && ! -e "$WORK_DIR/project/hero-gemini.png" ]] || { ls -laR "$WORK_DIR"; return 1; }
+  [[ "$(cat "$PANE/status")" == $'gemini\tcomplete\t\tmodel-g\t'"$real/hero-gemini.png" ]] || {
+    cat "$PANE/status"; return 1; }
+}
+
 @test "run-all treats a pane that closed during the offer as no retry" {
   stub_provider gemini
   stub_flaky_provider xai
@@ -258,4 +306,12 @@ STUB
       return 1
     }
   done
+}
+
+@test "run-all refuses a mode other than generate or edit before any provider runs" {
+  stub_provider gemini
+  run bash "$WORK_DIR/run-all.sh" --mode genrate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini
+  assert_status 1
+  assert_output_contains "Error: --mode must be generate or edit, got 'genrate'"
+  [[ ! -e "$WORK_DIR/gemini.argv" ]]
 }

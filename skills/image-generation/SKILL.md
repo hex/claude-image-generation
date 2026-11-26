@@ -122,7 +122,10 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter.sh" \
 
 Use `scripts/run-all.sh` — a single Bash call that forks all providers in parallel as one run.
 By default (`IMAGE_DISPLAY=gallery`) the run shows on the browser gallery page every session
-shares: a card with one frame per provider, filled in as each finishes, with nothing drawn in the terminal.
+shares: a section with one frame per provider, filled in as each finishes, with nothing drawn in the terminal.
+The page can also delete a finished run, or every finished run of a project, with the image files they saved,
+after a dialog that lists each file. Its Edit prompt button sends a run-all.sh run's prompt again, edited, to the
+providers the person picks; the server starts run-all.sh for it and the results show only on the page, never reaching Claude.
 With `IMAGE_DISPLAY=pane` it streams into one shared tmux pane instead, whose watcher renders per-provider colored banners (gemini
 blue / openai gray / xai red / openrouter indigo) with model + timing, plus a bottom `waiting on`
 line naming the pending providers. It animates until the first image renders; after that it is
@@ -157,7 +160,7 @@ pane (or a gallery run) per call, which is why `run-all.sh` is the way to reach 
 In pane mode, run-all.sh captures each provider's stderr/stdout under
 `$DISPLAY_PANE_DIR/logs/<provider>.{out,err}` while the pane is open, and errors render as a
 red error banner inline. In the gallery, provider output stays on run-all.sh's own output and
-errors show in the provider's frame on the run's card. After all providers finish, run-all.sh closes the pane (or
+errors show in the provider's frame of the run. After all providers finish, run-all.sh closes the pane (or
 marks the gallery run finished) and exits with status 0 if every provider succeeded, 1
 otherwise.
 

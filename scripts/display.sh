@@ -305,6 +305,21 @@ __tmux_words() {
   done
 }
 
+# Sets <var> to <path> made absolute against the working directory, its folder spelled as the
+# folder it really is: symlinks resolved before .. is, the way the kernel opens the path, so the
+# result names the file the path does. CDPATH is cleared, or cd could pick a folder of the same name
+# somewhere else. Fails, leaving <var> as it was, when the folder cannot be entered.
+# Usage: __absolute_path <var> <path>
+__absolute_path() {
+  local __dir
+  if [[ "$2" == /* ]]; then
+    printf -v "$1" '%s' "$2"
+    return 0
+  fi
+  __dir=$(CDPATH='' cd -P -- "$(dirname -- "$2")" && pwd -P) || return 1
+  printf -v "$1" '%s/%s' "$__dir" "${2##*/}"
+}
+
 # Opens a tmux split pane that displays an image and closes on keypress.
 # Usage: display_image_in_pane <file_path>
 display_image_in_pane() {
@@ -315,10 +330,7 @@ display_image_in_pane() {
     return 1
   fi
 
-  # Resolve to absolute path
-  if [[ "$file_path" != /* ]]; then
-    file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
-  fi
+  __absolute_path file_path "$file_path" || return 1
 
   if [[ ! -f "$file_path" ]]; then
     echo "File not found: $file_path" >&2
@@ -441,11 +453,15 @@ gallery_root() {
 # Creates a gallery run directory and points DISPLAY_PANE_DIR at it, holding a token for
 # <owner> so the run counts as live until that owner releases it. The run is assembled under a
 # dot name and renamed into runs/ only once its token and meta.json are in place, so the server
-# never sees a run without them. Fails with one line on stderr, leaving DISPLAY_PANE_DIR unset.
-# Usage: gallery_begin_run <owner> <prompt> <provider>...
+# never sees a run without them. <arguments> is a JSON object of what run-all.sh was started with,
+# recorded so the page can resend the run, or empty for a run that cannot be resent. A run the
+# gallery server started for a resend also records the IMAGE_GALLERY_LAUNCH_ID it was given, by
+# which the server tells its run from any other. Fails with one line on stderr, leaving
+# DISPLAY_PANE_DIR unset.
+# Usage: gallery_begin_run <owner> <prompt> <arguments> <provider>...
 gallery_begin_run() {
-  local owner="$1" prompt="$2"
-  shift 2
+  local owner="$1" prompt="$2" arguments="$3"
+  shift 3
   local root run_id staging started keep_mode=""
   root=$(gallery_root)
   # A folder IMAGE_GALLERY_DIR names that already exists keeps its own mode, which display_mode
@@ -464,8 +480,11 @@ gallery_begin_run() {
   fi
   DISPLAY_PANE_DIR="$staging"
   __pane_acquire "$owner"
-  if ! jq -n --arg prompt "$prompt" --arg cwd "$PWD" --arg started "$started" \
-      '{prompt: $prompt, cwd: $cwd, started_at: $started, providers: $ARGS.positional}' \
+  if ! jq -n --arg prompt "$prompt" --arg cwd "$PWD" --arg started "$started" --arg arguments "$arguments" \
+      --arg launch "${IMAGE_GALLERY_LAUNCH_ID:-}" \
+      '{prompt: $prompt, cwd: $cwd, started_at: $started, providers: $ARGS.positional}
+       + if $arguments == "" then {} else {arguments: ($arguments | fromjson)} end
+       + if $launch == "" then {} else {launch: $launch} end' \
       --args "$@" > "$staging/meta.json" \
     || ! mv "$staging" "$root/runs/$run_id"; then
     echo "image gallery: cannot write the run in $staging" >&2
@@ -516,9 +535,7 @@ display_pane_add() {
     return 1
   fi
   local file_path="$1"
-  if [[ "$file_path" != /* ]]; then
-    file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
-  fi
+  __absolute_path file_path "$file_path" || return 1
   __pane_escape_field file_path "$file_path"
   printf '%s\n' "$file_path" >> "$DISPLAY_PANE_DIR/manifest"
 }
@@ -544,8 +561,8 @@ display_pane_status() {
     return 1
   fi
   local provider="$1" state="$2" ms="${3:-}" model="${4:-}" path="${5:-}"
-  if [[ -n "$path" && "$path" != /* ]]; then
-    path="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+  if [[ -n "$path" ]]; then
+    __absolute_path path "$path" || return 1
   fi
   # Model and path come from the caller's arguments; the other fields are fixed words.
   __pane_escape_field model "$model"
@@ -588,7 +605,7 @@ display_pane_begin() {
     local mode
     mode=$(display_mode) || return 1
     if [[ "$mode" == gallery ]]; then
-      gallery_begin_run "$provider" "$prompt" "$provider" && gallery_ensure
+      gallery_begin_run "$provider" "$prompt" "" "$provider" && gallery_ensure
     elif [[ "$mode" == pane ]] && is_tmux; then
       local watch_dir
       if watch_dir=$(display_pane_attach_or_open 2>/dev/null); then
@@ -750,10 +767,7 @@ display_pane_open() {
   # The render script sources this library so it can reuse normalize_for_display. Resolve to an
   # absolute path because render.sh runs in a pane whose working directory may differ.
   local self="${BASH_SOURCE[0]}"
-  case "$self" in
-    /*) ;;
-    *) self="$(cd "$(dirname "$self")" && pwd)/$(basename "$self")" ;;
-  esac
+  __absolute_path self "$self" || return 1
 
   local terminal
   terminal=$(get_outer_terminal) || true
@@ -1508,9 +1522,7 @@ display_images_in_pane() {
 
   local -a paths=()
   for file_path in "${files[@]}"; do
-    if [[ "$file_path" != /* ]]; then
-      file_path="$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")"
-    fi
+    __absolute_path file_path "$file_path" || continue
     if [[ ! -f "$file_path" ]]; then
       continue
     fi

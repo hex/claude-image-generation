@@ -13,7 +13,7 @@ Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output-base <ba
 
 Runs Gemini, OpenAI, and xAI in parallel and shows them as one run. Where the
 run shows is IMAGE_DISPLAY's choice:
-  gallery (default)  one card on the browser gallery page, a frame per provider
+  gallery (default)  one section on the browser gallery page, a frame per provider
   pane               a single tmux pane with per-provider colored banners
                      (blue / gray / red) and an animated spinner
   none               nowhere; the images are only saved
@@ -71,6 +71,11 @@ if [[ -z "$MODE" || -z "$PROMPT" || -z "$OUTPUT_BASE" ]]; then
   usage
 fi
 
+if [[ "$MODE" != generate && "$MODE" != edit ]]; then
+  echo "Error: --mode must be generate or edit, got '$MODE'" >&2
+  usage
+fi
+
 if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   echo "Error: --input-image is required for edit mode" >&2
   usage
@@ -80,6 +85,25 @@ IFS=',' read -ra provider_list <<< "$PROVIDERS"
 for i in "${!provider_list[@]}"; do
   provider_list[$i]="${provider_list[$i]// /}"
 done
+
+# run_arguments — prints this run's arguments as the JSON object the gallery records, so its page can
+# resend the run: the mode, the output base and input images made absolute against the working
+# directory, and each provider's extra arguments.
+run_arguments() {
+  local path
+  local -a inputs=()
+  for path in ${INPUT_IMAGES[@]+"${INPUT_IMAGES[@]}"}; do
+    [[ "$path" == /* ]] || path="$PWD/$path"
+    inputs+=("$path")
+  done
+  path="$OUTPUT_BASE"
+  [[ "$path" == /* ]] || path="$PWD/$path"
+  jq -n --arg mode "$MODE" --arg base "$path" --arg gemini "$GEMINI_EXTRA" --arg openai "$OPENAI_EXTRA" \
+    --arg xai "$XAI_EXTRA" --arg openrouter "$OPENROUTER_EXTRA" \
+    '{mode: $mode, output_base: $base, input_images: $ARGS.positional,
+      extras: {gemini: $gemini, openai: $openai, xai: $xai, openrouter: $openrouter}}' \
+    --args ${inputs[@]+"${inputs[@]}"}
+}
 
 # Decided once here and handed down, so the providers neither probe python3 again nor repeat
 # the fallback notice. A bad IMAGE_DISPLAY ends the run here, before any provider is paid.
@@ -98,7 +122,7 @@ if [[ "$DISPLAY_MODE" == pane ]]; then
   fi
 elif [[ "$DISPLAY_MODE" == gallery && -z "${DISPLAY_PANE_DIR:-}" ]]; then
   # The run directory comes first, so a server deciding whether it is idle already sees a live run.
-  if gallery_begin_run run-all "$PROMPT" "${provider_list[@]}"; then
+  if gallery_begin_run run-all "$PROMPT" "$(run_arguments)" "${provider_list[@]}"; then
     export DISPLAY_PANE_DIR
     trap '__pane_release run-all' EXIT
     gallery_ensure
