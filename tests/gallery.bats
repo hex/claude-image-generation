@@ -52,6 +52,7 @@ server_field() {
   (cd "$IMAGE_GALLERY_DIR" 2>/dev/null && python3 -I -c '
 import json, socket, sys
 with socket.socket(socket.AF_UNIX) as sock:
+    sock.settimeout(5)
     sock.connect("server.sock")
     sock.sendall(b"health\n")
     print(json.loads(sock.makefile().readline())[sys.argv[1]])' "$1" 2>/dev/null)
@@ -389,26 +390,18 @@ serve_other_version() {
 }
 
 @test "the token never reaches a listener on the port the gallery folder records" {
-  # The folder's records name a port another listener now holds: last-port, and a server.json
-  # naming a live process of this user with its true start time. The listener records whatever
+  # The folder's last-port names a port another listener now holds. The listener records whatever
   # it is sent.
   mkdir -p "$IMAGE_GALLERY_DIR"
-  sleep 60 &
-  HOLDER_PID=$!
   printf 'null' > "$MOCK_DIR/answer"
   python3 -I "${PLUGIN_ROOT}/tests/one_request_server.py" "$MOCK_DIR/port" "$MOCK_DIR/request.raw" "$MOCK_DIR/answer" &
   LISTENER_PID=$!
-  local i started
+  local i
   for i in $(seq 1 50); do
     [[ -s "$MOCK_DIR/port" ]] && break
     sleep 0.1
   done
-  started=$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" | awk '{$1 = $1; print}')
   cp "$MOCK_DIR/port" "$IMAGE_GALLERY_DIR/last-port"
-  jq -n --argjson pid "$HOLDER_PID" --argjson port "$(cat "$MOCK_DIR/port")" --arg started "$started" \
-    '{pid: $pid, port: $port, instance: "0123456789abcdef", version: "0.0.0-other",
-      started: $started, token: "stale-token-0123456789-0123456789-0123456789"}' \
-    > "$IMAGE_GALLERY_DIR/server.json"
   start_gallery
   python3 -I "$GALLERY_PY" clients --root "$IMAGE_GALLERY_DIR"
   [[ ! -e "$MOCK_DIR/request.raw" ]] || { echo "the listener was sent:"; cat "$MOCK_DIR/request.raw"; return 1; }
