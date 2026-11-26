@@ -1109,6 +1109,8 @@ write_resendable_run() {
   new=${BASH_REMATCH[1]}
   [[ "$(jq -r '[.prompt, (.launch | test("^[0-9a-f]{16}$"))] | @tsv' "$IMAGE_GALLERY_DIR/runs/$new/meta.json")" == $'a teapot\ttrue' ]] || {
     cat "$IMAGE_GALLERY_DIR/runs/$new/meta.json"; return 1; }
+  # Once the run is done, its run-all has made its last call to the server, so teardown stops the only one.
+  wait_for_snapshot "any(.runs[]; .id == \"$new\" and .status == \"done\")"
 }
 
 @test "a resent run-all that starts no run within 15 s is answered 202 with its launch id, and its run shows once it starts" {
