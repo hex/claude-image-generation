@@ -151,12 +151,14 @@ function imagePlate(run, card, frame) {
   return [view, el('div', { class: 'actions slab' }, revealButton(() => url, frame.note), fullSizeLink(url))];
 }
 
-// The error text, clamped to the square; "show all" appears only when the text runs past it.
+// The error text, clamped to the square; "show all" appears only when the text runs past it. A
+// frame drawn while its run is filtered out has no size yet, so the check runs whenever it gets one.
 function errorPlate(run, card, frame) {
   if (!card.error) return [];
   const text = el('pre', { class: 'error', text: card.error });
-  requestAnimationFrame(() => {
+  const sized = new ResizeObserver(() => {
     if (text.scrollHeight <= text.clientHeight + 1) return;
+    sized.disconnect();
     const more = el('button', { type: 'button', class: 'more', 'aria-expanded': 'false', 'data-key': 'more', text: 'show all' });
     more.addEventListener('click', () => {
       const open = frame.node.classList.toggle('expanded');
@@ -165,6 +167,7 @@ function errorPlate(run, card, frame) {
     });
     frame.plate.append(more);
   });
+  sized.observe(text);
   return [text];
 }
 
