@@ -336,6 +336,36 @@ serve_other_version() {
   [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
 }
 
+@test "runs started together each print the page's address when the browser never finishes opening" {
+  # The first run's answer comes when the server gives up on its launch after ten seconds. The
+  # second run's own launch then hangs past its fifteen-second wait, and the server answers it
+  # after the run is gone, with nothing in server.log.
+  stub_browser
+  printf 'echo $$ >> %q\nexec sleep 30\n' "$MOCK_DIR/launched" | tee -a "$MOCK_DIR/browser/open" >> "$MOCK_DIR/browser/xdg-open"
+  local first second status=0 address pid i
+  start_gallery 2> "$MOCK_DIR/first.err" &
+  first=$!
+  start_gallery 2> "$MOCK_DIR/second.err" &
+  second=$!
+  wait "$first" || status=$?
+  [[ $status -eq 0 ]] || { echo "the first start exited $status: $(cat "$MOCK_DIR/first.err")"; return 1; }
+  wait "$second" || status=$?
+  [[ $status -eq 0 ]] || { echo "the second start exited $status: $(cat "$MOCK_DIR/second.err")"; return 1; }
+  address="image gallery: open http://127.0.0.1:$(server_field port)/$(server_field token)/ to watch the images"
+  [[ "$(cat "$MOCK_DIR/first.err")" == "$address" && "$(cat "$MOCK_DIR/second.err")" == "$address" ]] || {
+    echo "first: $(cat "$MOCK_DIR/first.err")"; echo "second: $(cat "$MOCK_DIR/second.err")"; return 1; }
+  [[ "$(wc -l < "$MOCK_DIR/launched" | tr -d ' ')" == 2 ]]
+  for pid in $(cat "$MOCK_DIR/launched"); do
+    for i in $(seq 1 100); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+  done
+  # The server writes its answer once the launch it waited on is killed.
+  sleep 0.5
+  [[ ! -s "$IMAGE_GALLERY_DIR/server.log" ]] || { cat "$IMAGE_GALLERY_DIR/server.log"; return 1; }
+}
+
 @test "the browser is opened at a one-time address without the token, which sends it on to the page once" {
   stub_browser
   start_gallery

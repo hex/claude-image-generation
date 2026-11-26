@@ -767,7 +767,12 @@ class ControlHandler(socketserver.StreamRequestHandler):
 
     def handle(self):
         gallery = self.server.gallery
-        command, _, argument = self.rfile.readline(64).decode(errors="replace").strip().partition(" ")
+        try:
+            line = self.rfile.readline(64)
+        except socket.timeout:
+            # A client that sends no command within the timeout gets no answer.
+            return
+        command, _, argument = line.decode(errors="replace").strip().partition(" ")
         if command == "health":
             answer = {"pid": os.getpid(), "port": gallery.port, "token": gallery.token,
                       "version": gallery.version, "clients": gallery.clients}
@@ -779,7 +784,12 @@ class ControlHandler(socketserver.StreamRequestHandler):
             answer = {"stopping": argument == str(os.getpid())}
         else:
             answer = {"error": "no such command: %r" % command}
-        self.wfile.write(json.dumps(answer).encode() + b"\n")
+        try:
+            self.wfile.write(json.dumps(answer).encode() + b"\n")
+        except (BrokenPipeError, ConnectionResetError):
+            # The client stopped waiting, as one does after 15 s on a browser slow to open, and
+            # nothing is left to answer. What it asked for still happens.
+            pass
         # Only once the answer is sent: the main thread exits as soon as it sees the stop.
         if answer.get("stopping"):
             gallery.stop.set()
