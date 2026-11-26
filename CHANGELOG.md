@@ -8,7 +8,7 @@ cover the versions up to 2026.9.1.
 ## Unreleased
 
 ### Added
-- Browser gallery, the new default display: every image run from every Claude Code session shows on one local page served from 127.0.0.1, newest first, as a card with one frame per provider. A rail filters the runs by session, a run with a failed provider gets a Retry failed button, and a loupe shows each image large. Nothing splits the chat's tmux pane. It needs `python3` 3.9 or later and falls back to the pane without it.
+- Browser gallery, the new default display: every image run from every Claude Code session shows on one local page served from 127.0.0.1, newest first, as a section with one frame per provider in that provider's own column. A rail filters the runs by project, a run with a failed provider gets a Retry failed button that counts down the time left, a loupe shows each image large, and a switch picks Auto, Light or Dark. Nothing splits the chat's tmux pane. It needs `python3` 3.9 or later and falls back to the pane without it.
 - `IMAGE_DISPLAY` (`gallery`, `pane` or `none`) and the matching **Image display** row in `/config` choose where images show. `pane` keeps the tmux pane and inline drawing as they were.
 
 ### Changed

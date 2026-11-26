@@ -8,8 +8,7 @@ Phosphor Icons
 https://phosphoricons.com
 
 The interface icons in scripts/gallery/app.js are path data from Phosphor
-Icons, regular weight. The folder mark is Phosphor's folder-notch, as the
-Agents sidebar draws it.
+Icons, regular weight.
 
 MIT License
 
