@@ -822,3 +822,20 @@ cpu_seconds() {
     echo "$answer"; return 1; }
   [[ -z "$(ls "$out")" ]] || { ls -la "$out"; return 1; }
 }
+
+@test "a run in the gallery whose status log the server cannot read stops a delete, since it may name the same files" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2
+  printf 'png' > "$out/hero-gemini.png"
+  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\n" done
+  write_run "$b" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/other-gemini.png\n" done
+  rm "$IMAGE_GALLERY_DIR/runs/$b/status"
+  mkdir "$IMAGE_GALLERY_DIR/runs/$b/status"
+  start_gallery
+  wait_for_snapshot '.runs | length == 1'
+  local answer runs
+  runs=$(cd "$IMAGE_GALLERY_DIR/runs" && pwd -P)
+  answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a")
+  [[ "$answer" == "{\"error\": \"could not read $runs/$b/status: Is a directory, so which runs share an image is unknown; nothing was deleted\"} 500" ]] || {
+    echo "$answer"; return 1; }
+  [[ -f "$out/hero-gemini.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
+}

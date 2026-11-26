@@ -878,8 +878,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 namers = self.gallery.image_namers()
             except OSError as e:
-                self.send_json(500, {"deleted": [], "kept": [], "error": "could not read %s: %s, so which runs share "
-                                     "an image is unknown; nothing was deleted" % (e.filename, e.strerror)})
+                self.send_json(500, {"error": "could not read %s: %s, so which runs share an image is unknown; "
+                                              "nothing was deleted" % (e.filename, e.strerror)})
                 return
             for run_id in dict.fromkeys(run_ids):
                 outcomes.append(self.gallery.delete(run_id, namers))
