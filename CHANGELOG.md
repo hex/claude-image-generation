@@ -17,7 +17,7 @@ cover the versions up to 2026.9.1.
 - In the gallery, provider output stays on `run-all.sh`'s own stderr instead of going to `$DISPLAY_PANE_DIR/logs/`, so the generate tool's result includes it.
 
 ### Fixed
-- The record of an image saved under a relative `outputBase` names it under the run's working directory, even with `CDPATH` in the environment. With a `CDPATH` folder of the same name, the gallery and the pane named a file in that other folder, with a newline in its path, and showed the image as moved or deleted.
+- The record of an image saved under a relative `outputBase` names it under the run's working directory, even with `CDPATH` in the environment. With a `CDPATH` folder of the same name, the run's status record named a file in that other folder, with a newline in its path.
 
 ## 2026.11.1 - 2026-11-05
 
