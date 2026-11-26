@@ -558,21 +558,29 @@ function counted(n, noun) {
   return n + ' ' + noun + (n === 1 ? '' : 's');
 }
 
-// Asks before deleting runs, none of them live: the dialog names every image file that goes, and
-// how many of a project's runs stay because they are still generating. Cancel has the focus.
+// Asks before deleting runs, none of them live: the dialog names every image file that goes, marks
+// as kept each one a run outside the delete also names, as the server keeps it, and says how many
+// of a project's runs stay because they are still generating. Cancel has the focus.
 function askToDelete(chosen, project, generating) {
-  const paths = [...new Set(chosen.flatMap(run => run.images))];
   const ids = chosen.map(run => run.id);
+  const named = [...new Set(chosen.flatMap(run => run.images))];
+  const others = runs.filter(run => !ids.includes(run.id));
+  const shared = named.filter(path => others.some(run => run.images.includes(path)));
+  const paths = named.filter(path => !shared.includes(path));
   const selected = selectedSession();
   const empties = selected !== null && runs.filter(run => run.cwd === selected).every(run => ids.includes(run.id));
-  deleting = { ids, empties, busy: false };
+  deleting = { ids, empties, shared, busy: false };
   confirmTitle.textContent = project ? 'Delete ' + project.name + ' from the gallery?' : 'Delete this run?';
   const removes = project ? 'Removes its ' + counted(chosen.length, 'run') + ' from the gallery' : 'Removes it from the gallery';
-  const files = paths.length ? ' and deletes ' + counted(paths.length, 'image') + ' from disk.' : '. ' + (project ? 'They have' : 'It has') + ' no saved images.';
+  const files = paths.length ? ' and deletes ' + counted(paths.length, 'image') + ' from disk.' : named.length ? '. It deletes no images.' : '. ' + (project ? 'They have' : 'It has') + ' no saved images.';
+  const keeps = shared.length ? ' ' + counted(shared.length, 'image') + ' another run uses ' + (shared.length === 1 ? 'stays' : 'stay') + '.' : '';
   const stays = generating ? ' ' + counted(generating, 'run') + ' still generating ' + (generating === 1 ? 'stays' : 'stay') + '.' : '';
-  confirmBody.textContent = removes + files + stays + ' This can\u2019t be undone.';
-  confirmFiles.replaceChildren(...paths.map(path => el('li', { text: path })));
-  confirmFiles.hidden = !paths.length;
+  confirmBody.textContent = removes + files + keeps + stays + ' This can\u2019t be undone.';
+  confirmFiles.replaceChildren(
+    ...paths.map(path => el('li', { text: path })),
+    ...shared.map(path => el('li', { text: path + ': kept, another run uses it' })),
+  );
+  confirmFiles.hidden = !named.length;
   confirmDelete.hidden = false;
   confirmDelete.disabled = false;
   confirmCancel.disabled = false;
@@ -603,7 +611,12 @@ async function deleteListed() {
     answer = null;
   }
   asked.busy = false;
-  if (answer && Array.isArray(answer.kept) && !answer.kept.length) {
+  // A file a run of this request named stays when a run the page did not list names it too.
+  const outcomes = answer && Array.isArray(answer.kept) ? [...answer.deleted, ...answer.kept] : [];
+  const gone = new Set(outcomes.flatMap(run => [...(run.removed || []), ...(run.missing || [])]));
+  const unforeseen = outcomes.flatMap(run => run.shared || [])
+    .filter(file => !gone.has(file.path) && !asked.shared.includes(file.path));
+  if (answer && Array.isArray(answer.kept) && !answer.kept.length && !unforeseen.length) {
     confirmDialog.close();
     if (asked.empties) location.hash = '';
     document.getElementById('strips').focus();
@@ -619,15 +632,18 @@ async function deleteListed() {
     confirmFiles.hidden = true;
     return;
   }
-  const outcomes = [...answer.deleted, ...answer.kept];
   const images = outcomes.reduce((sum, run) => sum + (run.removed ? run.removed.length : 0), 0);
   confirmTitle.textContent = answer.deleted.length || images ? 'Not everything was deleted' : 'Nothing was deleted';
   const done = answer.deleted.length || images ? 'Deleted ' + counted(answer.deleted.length, 'run') + ' and ' + counted(images, 'image') + '. ' : '';
-  confirmBody.textContent = done + 'Kept ' + counted(answer.kept.length, 'run') + ':';
-  confirmFiles.replaceChildren(...answer.kept.flatMap(run => [
-    el('li', { text: run.error }),
-    ...(run.refused || []).map(file => el('li', { text: file.path + ': ' + file.reason })),
-  ]));
+  const kept = [answer.kept.length && counted(answer.kept.length, 'run'), unforeseen.length && counted(unforeseen.length, 'image')];
+  confirmBody.textContent = done + 'Kept ' + kept.filter(Boolean).join(' and ') + ':';
+  confirmFiles.replaceChildren(
+    ...answer.kept.flatMap(run => [
+      el('li', { text: run.error }),
+      ...(run.refused || []).map(file => el('li', { text: file.path + ': ' + file.reason })),
+    ]),
+    ...unforeseen.map(file => el('li', { text: file.path + ': ' + file.reason })),
+  );
   confirmFiles.hidden = false;
 }
 
