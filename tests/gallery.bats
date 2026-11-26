@@ -1071,6 +1071,31 @@ write_resendable_run() {
     cat "$IMAGE_GALLERY_DIR/runs/$new/meta.json"; return 1; }
 }
 
+@test "a resent run-all that starts no run within 15 s is answered 202 with its launch id, and its run shows once it starts" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash answer launch new
+  printf 'png' > "$out/hero-gemini.png"
+  write_resendable_run "$a" "$out" "$out/hero-gemini.png"
+  start_gallery
+  wait_for_snapshot '.runs[0].resendable'
+  # The server finds bash on its PATH when it starts the run; this one holds run-all.sh back until the
+  # test lets it go, and runs every other script at once.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh) while [ ! -e %q ]; do sleep 0.1; done ;; esac\nexec %q "$@"\n' \
+    "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  answer=$(gallery_curl --max-time 30 -w ' %{http_code}' -X POST -H "$(origin)" -H 'Content-Type: application/json' \
+    --data-binary '{"prompt": "a teapot", "providers": ["gemini"]}' "/resend/$a")
+  [[ "$answer" =~ ^\{\"pending\":\ true,\ \"launch\":\ \"([0-9a-f]{16})\"\}\ 202$ ]] || { echo "answer: $answer"; return 1; }
+  launch=${BASH_REMATCH[1]}
+  touch "$MOCK_DIR/go"
+  wait_for_snapshot '(.runs | length == 2) and .runs[0].status == "done"'
+  new=$(jq -r '.runs[0].id' <<< "$SNAPSHOT")
+  [[ "$(jq -r '[.prompt, .launch] | @tsv' "$IMAGE_GALLERY_DIR/runs/$new/meta.json")" == "a teapot	$launch" ]] || {
+    cat "$IMAGE_GALLERY_DIR/runs/$new/meta.json"; return 1; }
+  rm "$MOCK_DIR/bash"
+}
+
 @test "a resend keeps the newest 50 logs in resend-logs, its own among them" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 logs="$IMAGE_GALLERY_DIR/resend-logs" n

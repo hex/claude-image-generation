@@ -50,6 +50,8 @@ const RESEND_KEYS = ON_MAC ? '\u2318\u21a9' : 'Ctrl+\u21a9';
 const NO_RUNS = 'No image runs yet. Images from Claude Code show up here while they generate.';
 const TITLE = 'Gallery \u00b7 Image Generation';
 const LOUPE_MS = 200;
+// How long the note that a resend started stays under its run's line.
+const RESEND_NOTE_MS = 10000;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const dayAndClock = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
@@ -554,8 +556,10 @@ function readyToSend(editor) {
 }
 
 // Sends the edited prompt and the chosen providers. The server answers once the new run has started,
-// which the next snapshot shows at the top; the editor closes then. Otherwise it stays open with
-// the server's reason, so nothing is resent without the page saying what became of it.
+// which the next snapshot shows at the top; the editor closes then. When run-all.sh is still starting
+// as the server stops waiting, the editor closes too and a note under the run's line says the resend
+// started. Otherwise it stays open with the server's reason, so nothing is resent without the page
+// saying what became of it.
 async function resend(entry) {
   const editor = entry.editor;
   const providers = editor.chips.filter(chip => chip.getAttribute('aria-pressed') === 'true').map(chip => chip.dataset.provider);
@@ -564,6 +568,7 @@ async function resend(entry) {
   editor.error.textContent = '';
   readyToSend(editor);
   let failure = null;
+  let pending = false;
   try {
     const response = await fetch('resend/' + encodeURIComponent(entry.run.id), {
       method: 'POST',
@@ -572,6 +577,7 @@ async function resend(entry) {
     });
     const answer = await response.json().catch(() => ({}));
     if (!response.ok) failure = answer.error || 'The server answered ' + response.status + '.';
+    else pending = answer.pending === true;
   } catch (error) {
     failure = 'Could not reach the gallery server.';
   }
@@ -580,6 +586,7 @@ async function resend(entry) {
   if (entry.editor !== editor) return;
   if (failure === null) {
     closeEditor(entry);
+    if (pending) noteResendStarted(entry);
     return;
   }
   editor.error.textContent = failure;
@@ -587,6 +594,15 @@ async function resend(entry) {
   // Resend was disabled while the request was out, which drops the focus it had; it goes back to the
   // prompt, so Escape and another try work from the keyboard.
   if (document.activeElement === document.body) editor.prompt.focus();
+}
+
+// A note under the run's line, beside its head rather than in it, so a snapshot that redraws the head
+// keeps it. The text goes in once the empty status node is in place, so a screen reader announces it.
+function noteResendStarted(entry) {
+  const note = el('p', { class: 'editor-note', role: 'status' });
+  entry.head.after(note);
+  requestAnimationFrame(() => { note.textContent = 'The resend started and will appear in the gallery.'; });
+  setTimeout(() => note.remove(), RESEND_NOTE_MS);
 }
 
 // ── Sessions ─────────────────────────────────────────────────────

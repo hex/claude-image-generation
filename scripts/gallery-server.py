@@ -705,7 +705,8 @@ class Gallery:
     def resend(self, run_id, prompt, providers):
         """Starts run-all.sh again for a run that recorded its arguments, with prompt and providers in
         place of its own, saving in the folder of the run's output base under a fresh image-<stamp>
-        base. Answers (HTTP status, body) once the new run's directory exists, or with why none was
+        base. Answers (HTTP status, body) once the new run's directory exists, with 202 and the launch
+        id when run-all.sh is still starting after RESEND_START_SECONDS, or with why none was
         started."""
         run_dir = self.runs_dir / run_id
         if not RUN_ID.match(run_id) or not run_dir.is_dir():
@@ -767,8 +768,9 @@ class Gallery:
             if code is not None:
                 return 502, {"error": "run-all.sh exited %d before it started a run: %s" % (code, self.log_tail(log_path))}
             if time.monotonic() > deadline:
-                return 504, {"error": "run-all.sh started no run within %d s; its output goes to %s"
-                                      % (RESEND_START_SECONDS, log_path)}
+                # Only a run-all.sh that exited has failed. One still starting may yet start its run,
+                # which the page then shows; calling it failed would invite the page to pay again.
+                return 202, {"pending": True, "launch": launch}
             time.sleep(0.05)
 
     def resend_environment(self, cwd, launch):
