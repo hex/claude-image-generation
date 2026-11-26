@@ -665,8 +665,8 @@ class Gallery:
     def delete(self, run_id, listed, namers):
         """Deletes a run: each file its complete records name as an image that the page listed for it
         in listed, keep_reason lets go and no other run in namers (image_namers) names or uses as an
-        input image, by any path, then its directory. Every other file a record names stays, and so does every listed path no
-        record names: the page's list only narrows what goes. Answers (HTTP status, outcome): 200
+        input image, by any path, then its directory. Every other file a record names stays, and so
+        does every listed path no record names: the page's list only narrows what goes. Answers (HTTP status, outcome): 200
         with the paths removed, those already gone and those kept with why, or the error that kept
         the run in place. A deleted run leaves namers. Call it holding runs_lock."""
         run_dir = self.runs_dir / run_id
