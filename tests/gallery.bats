@@ -727,7 +727,7 @@ cpu_seconds() {
   [[ -f "$out/one-gemini.png" && -L "$out/link-openai.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
   local answer
   answer=$(gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" "/delete/$a")
-  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/one-gemini.png\", \"$out/two-gemini.png\", \"$out/link-openai.png\"], \"missing\": [\"$out/gone-xai.png\"]}], \"kept\": []} 200" ]] || {
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/one-gemini.png\", \"$out/two-gemini.png\", \"$out/link-openai.png\"], \"missing\": [\"$out/gone-xai.png\"], \"shared\": []}], \"kept\": []} 200" ]] || {
     echo "$answer"; return 1; }
   [[ "$(ls "$out" | tr '\n' ' ')" == "keep-gemini.png notes.txt one-xai.png target.png " ]] || { ls -la "$out"; return 1; }
   [[ ! -e "$IMAGE_GALLERY_DIR/runs/$a" && -d "$IMAGE_GALLERY_DIR/runs/$b" ]]
@@ -787,8 +787,38 @@ cpu_seconds() {
   wait_for_snapshot '.runs | length == 4'
   local answer
   answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a1/$a2/$a3")
-  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a1\", \"removed\": [\"$out/a1-gemini.png\"], \"missing\": []}, {\"id\": \"$a2\", \"removed\": [], \"missing\": []}], \"kept\": [{\"id\": \"$a3\", \"error\": \"run $a3 is still generating\"}]} 200" ]] || {
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a1\", \"removed\": [\"$out/a1-gemini.png\"], \"missing\": [], \"shared\": []}, {\"id\": \"$a2\", \"removed\": [], \"missing\": [], \"shared\": []}], \"kept\": [{\"id\": \"$a3\", \"error\": \"run $a3 is still generating\"}]} 200" ]] || {
     echo "$answer"; return 1; }
   [[ "$(ls "$out" | tr '\n' ' ')" == "a3-gemini.png b1-gemini.png " ]] || { ls -la "$out"; return 1; }
   [[ "$(snapshot | jq -r '[.runs[].id] | @tsv')" == "$b1"$'\t'"$a3" ]]
+}
+
+@test "deleting a run keeps an image file another run names too, saying which, and the last run naming it removes it" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 \
+    c=20261125T100200Z-00000000c3 d=20261125T100300Z-00000000d4
+  # The older run's file was deleted by hand and the same path generated again by the newer run.
+  printf 'png' > "$out/hero-gemini.png"
+  printf 'png' > "$out/hero-openai.png"
+  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\n" done
+  write_run "$b" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\n" done
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  local answer
+  answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/hero-openai.png\"], \"missing\": [], \"shared\": [{\"path\": \"$out/hero-gemini.png\", \"reason\": \"run $b names it too\"}]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ "$(ls "$out" | tr '\n' ' ')" == "hero-gemini.png " ]] || { ls -la "$out"; return 1; }
+  answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$b")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$b\", \"removed\": [\"$out/hero-gemini.png\"], \"missing\": [], \"shared\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ -z "$(ls "$out")" ]] || { ls -la "$out"; return 1; }
+  # Runs deleted together: the file goes with the last of them that names it.
+  printf 'png' > "$out/pair-gemini.png"
+  write_run "$c" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/pair-gemini.png\n" done
+  write_run "$d" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/pair-gemini.png\n" done
+  wait_for_snapshot '.runs | length == 2'
+  answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$c/$d")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$c\", \"removed\": [], \"missing\": [], \"shared\": [{\"path\": \"$out/pair-gemini.png\", \"reason\": \"run $d names it too\"}]}, {\"id\": \"$d\", \"removed\": [\"$out/pair-gemini.png\"], \"missing\": [], \"shared\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ -z "$(ls "$out")" ]] || { ls -la "$out"; return 1; }
 }

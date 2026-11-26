@@ -538,11 +538,32 @@ class Gallery:
         self.read_runs[run_dir.name] = (files, run)
         return run
 
-    def delete(self, run_id):
+    def image_namers(self):
+        """Each image path a run in the gallery names, mapped to the ids of the runs that name it,
+        oldest first. A run whose status log stops parsing names the images of the records before
+        that point, as the page shows it. Raises OSError naming a run whose status log cannot be
+        read. Call it holding runs_lock."""
+        namers = {}
+        for name in sorted(os.listdir(str(self.runs_dir))):
+            if not RUN_ID.match(name):
+                continue
+            providers = {}
+            try:
+                reduce_status(read_status_log(self.runs_dir / name), providers)
+            except FileNotFoundError:
+                continue
+            except ValueError:
+                pass
+            for path in unique_paths(recorded_images(providers)):
+                namers.setdefault(path, []).append(name)
+        return namers
+
+    def delete(self, run_id, namers):
         """Deletes a run: the files its complete records name as images, then its directory, once
-        unsafe_image passes every one of them. Answers (HTTP status, outcome): 200 with the paths
-        removed and those already gone, or the error that kept the run in place. Call it holding
-        runs_lock."""
+        unsafe_image passes every one of them. A file another run in namers (image_namers) names too
+        stays, as shared. Answers (HTTP status, outcome): 200 with the paths removed, those already
+        gone and those shared, or the error that kept the run in place. A deleted run leaves namers.
+        Call it holding runs_lock."""
         run_dir = self.runs_dir / run_id
         if not RUN_ID.match(run_id) or not run_dir.is_dir():
             return 404, {"id": run_id, "error": "no run %s" % run_id}
@@ -569,7 +590,12 @@ class Gallery:
                          "refused": refused}
         removed = []
         missing = []
+        shared = []
         for path in unique_paths(images):
+            others = [name for name in namers.get(path, []) if name != run_id]
+            if others:
+                shared.append({"path": path, "reason": "run %s names it too" % others[-1]})
+                continue
             try:
                 os.unlink(path)
                 removed.append(path)
@@ -577,12 +603,15 @@ class Gallery:
                 missing.append(path)
             except OSError as e:
                 return 500, {"id": run_id, "error": "could not delete %s: %s; the run is kept" % (path, e.strerror),
-                             "removed": removed, "missing": missing}
+                             "removed": removed, "missing": missing, "shared": shared}
         shutil.rmtree(str(run_dir), ignore_errors=True)
         if os.path.lexists(str(run_dir)):
             return 500, {"id": run_id, "error": "could not remove the run's folder %s" % run_dir,
-                         "removed": removed, "missing": missing}
-        return 200, {"id": run_id, "removed": removed, "missing": missing}
+                         "removed": removed, "missing": missing, "shared": shared}
+        for names in namers.values():
+            if run_id in names:
+                names.remove(run_id)
+        return 200, {"id": run_id, "removed": removed, "missing": missing, "shared": shared}
 
     def reject(self, run_dir, reason):
         """Leaves a run directory out of the snapshot, naming it in server.log."""
@@ -846,8 +875,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         the status of what kept them, 404 when no run named exists."""
         outcomes = []
         with self.gallery.runs_lock:
+            try:
+                namers = self.gallery.image_namers()
+            except OSError as e:
+                self.send_json(500, {"deleted": [], "kept": [], "error": "could not read %s: %s, so which runs share "
+                                     "an image is unknown; nothing was deleted" % (e.filename, e.strerror)})
+                return
             for run_id in dict.fromkeys(run_ids):
-                outcomes.append(self.gallery.delete(run_id))
+                outcomes.append(self.gallery.delete(run_id, namers))
         self.gallery.scan()
         deleted = [outcome for code, outcome in outcomes if code == 200]
         kept = [outcome for code, outcome in outcomes if code != 200]
