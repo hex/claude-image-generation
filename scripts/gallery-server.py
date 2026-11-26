@@ -392,6 +392,7 @@ def read_run(run_dir):
         "problem": problem,
         "providers": cards,
         "files": [{"path": path, "provider": name} for name, path in unique_images(recorded_images(providers))],
+        "input_images": meta["arguments"]["input_images"] if "arguments" in meta else [],
         "resendable": "arguments" in meta,
     }
 
@@ -504,15 +505,23 @@ def file_entry(path):
 
 
 def mark_files(runs):
-    """Gives each file a run names kept: why deleting the run would keep it (keep_reason), or None;
-    and entry: a number the files of runs share when they are one file on disk (file_entry), however
-    their paths are spelled. Read on every scan, since a file can change while the runs' own files
-    do not."""
+    """Gives each file a run names kept: why deleting the run would keep it (keep_reason, or the newest
+    other run of runs using it as an input image), or None; and entry: a number the files of runs
+    share when they are one file on disk (file_entry), however their paths are spelled. Read on every
+    scan, since a file can change while the runs' own files do not. runs are newest first."""
+    inputs = {}
+    for run in runs:
+        for path in run["input_images"]:
+            inputs.setdefault(file_entry(path), []).append(run["id"])
     entries = {}
     for run in runs:
         for f in run["files"]:
+            entry = file_entry(f["path"])
+            users = [name for name in inputs.get(entry, []) if name != run["id"]]
             f["kept"] = keep_reason(f["provider"], f["path"])
-            f["entry"] = entries.setdefault(file_entry(f["path"]), len(entries))
+            if f["kept"] is None and users:
+                f["kept"] = "run %s uses it as an input image" % users[0]
+            f["entry"] = entries.setdefault(entry, len(entries))
 
 
 def image_type(head):
@@ -624,31 +633,39 @@ class Gallery:
         return run
 
     def image_namers(self):
-        """Each image file a run in the gallery names, by its file_entry, mapped to the ids of the
-        runs that name it, oldest first and each once. A run whose status log stops parsing names the
-        images of the records before that point, as the page shows it. Raises OSError naming a run
-        whose status log cannot be read. Call it holding runs_lock."""
+        """Each file a run in the gallery names as its image or uses as an input image, by its
+        file_entry, mapped to the ids of those runs, oldest first, each with why deleting another run
+        keeps the file for it. Raises RunRejected naming a run whose status log or meta.json does not
+        parse, and OSError naming one that cannot be read: either way the files that run needs are
+        unknown. Call it holding runs_lock."""
         namers = {}
         for name in sorted(os.listdir(str(self.runs_dir))):
             if not RUN_ID.match(name):
                 continue
+            run_dir = self.runs_dir / name
             providers = {}
             try:
-                reduce_status(read_status_log(self.runs_dir / name), providers)
+                reduce_status(read_status_log(run_dir), providers)
             except FileNotFoundError:
-                continue
-            except ValueError:
                 pass
-            for provider, path in unique_images(recorded_images(providers)):
-                names = namers.setdefault(file_entry(path), [])
-                if name not in names:
-                    names.append(name)
+            except ValueError as e:
+                raise RunRejected("run %s's status log is unreadable (%s), so which images it names is unknown"
+                                  % (name, e))
+            try:
+                meta = read_meta(run_dir)
+            except RunRejected as e:
+                raise RunRejected("run %s cannot be read: %s, so which images it uses is unknown" % (name, e))
+            uses = [(path, "run %s names it too" % name) for provider, path in unique_images(recorded_images(providers))]
+            if "arguments" in meta:
+                uses += [(path, "run %s uses it as an input image" % name) for path in meta["arguments"]["input_images"]]
+            for path, reason in uses:
+                namers.setdefault(file_entry(path), {}).setdefault(name, reason)
         return namers
 
     def delete(self, run_id, listed, namers):
         """Deletes a run: each file its complete records name as an image that the page listed for it
-        in listed, keep_reason lets go and no other run in namers (image_namers) names, by any path,
-        then its directory. Every other file a record names stays, and so does every listed path no
+        in listed, keep_reason lets go and no other run in namers (image_namers) names or uses as an
+        input image, by any path, then its directory. Every other file a record names stays, and so does every listed path no
         record names: the page's list only narrows what goes. Answers (HTTP status, outcome): 200
         with the paths removed, those already gone and those kept with why, or the error that kept
         the run in place. A deleted run leaves namers. Call it holding runs_lock."""
@@ -673,9 +690,9 @@ class Gallery:
         images = unique_images(recorded_images(providers))
         for provider, path in images:
             reason = keep_reason(provider, path)
-            others = [name for name in namers.get(file_entry(path), []) if name != run_id]
+            others = [why for name, why in namers.get(file_entry(path), {}).items() if name != run_id]
             if reason is None and others:
-                reason = "run %s names it too" % others[-1]
+                reason = others[-1]
             if reason is None and path not in listed:
                 reason = "the delete did not list it"
             if reason is not None:
@@ -697,9 +714,8 @@ class Gallery:
         if os.path.lexists(str(run_dir)):
             return 500, {"id": run_id, "error": "could not remove the run's folder %s" % run_dir,
                          "removed": removed, "missing": missing, "kept_files": kept}
-        for names in namers.values():
-            if run_id in names:
-                names.remove(run_id)
+        for users in namers.values():
+            users.pop(run_id, None)
         return 200, {"id": run_id, "removed": removed, "missing": missing, "kept_files": kept}
 
     def resend(self, run_id, prompt, providers):
@@ -1143,6 +1159,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with self.gallery.runs_lock:
             try:
                 namers = self.gallery.image_namers()
+            except RunRejected as e:
+                self.send_json(409, {"error": "%s; nothing was deleted" % e})
+                return
             except OSError as e:
                 self.send_json(500, {"error": "could not read %s: %s, so which runs share an image is unknown; "
                                               "nothing was deleted" % (e.filename, e.strerror)})

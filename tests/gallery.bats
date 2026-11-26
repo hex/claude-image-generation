@@ -906,6 +906,46 @@ cpu_seconds() {
   [[ -f "$out/hero-gemini.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
 }
 
+@test "deleting a run keeps an image file another run uses as an input image, by any spelling, saying which" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 answer
+  printf 'png' > "$out/hero-gemini.png"
+  printf 'png' > "$out/edit-gemini.png"
+  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\n" done
+  # b edited a's image, which it names with a doubled slash.
+  write_run "$b" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/edit-gemini.png\n" done
+  record_arguments "$b" "$out/edit" edit "$out//hero-gemini.png"
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  answer=$(delete_runs "$(listing "$a")")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [], \"missing\": [], \"kept_files\": [{\"path\": \"$out/hero-gemini.png\", \"reason\": \"run $b uses it as an input image\"}]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ "$(ls "$out" | tr '\n' ' ')" == "edit-gemini.png hero-gemini.png " ]] || { ls -la "$out"; return 1; }
+  # The page was told before it asked, so its dialog listed the file as kept, with the same reason.
+  [[ "$(jq -c --arg a "$a" '[.runs[] | select(.id == $a) | .files[] | {path, kept}]' <<< "$SNAPSHOT")" == \
+    "[{\"path\":\"$out/hero-gemini.png\",\"kept\":\"run $b uses it as an input image\"}]" ]] || { echo "$SNAPSHOT"; return 1; }
+}
+
+@test "a run whose status log or meta.json does not parse stops a delete, naming it, since what it names past that is unknown" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 answer
+  printf 'png' > "$out/hero-gemini.png"
+  write_run "$a" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\n" done
+  # b's second line does not parse, which hides the record after it that names a's image.
+  write_run "$b" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/other-gemini.png\ngarbage\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-gemini.png\n" done
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  answer=$(delete_runs "$(listing "$a")")
+  [[ "$answer" == "{\"error\": \"run $b's status log is unreadable (status line 2 has 1 fields, not 5), so which images it names is unknown; nothing was deleted\"} 409" ]] || {
+    echo "$answer"; return 1; }
+  [[ -f "$out/hero-gemini.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
+  # A meta.json that does not parse hides the input images the run uses.
+  printf 'openai\tcomplete\t1000\tmodel-b\t%s\n' "$out/other-openai.png" > "$IMAGE_GALLERY_DIR/runs/$b/status"
+  printf '{"prompt": ' > "$IMAGE_GALLERY_DIR/runs/$b/meta.json"
+  answer=$(delete_runs "$(listing "$a")")
+  [[ "$answer" == "{\"error\": \"run $b cannot be read: meta.json is not JSON: Expecting value: line 1 column 12 (char 11), so which images it uses is unknown; nothing was deleted\"} 409" ]] || {
+    echo "$answer"; return 1; }
+  [[ -f "$out/hero-gemini.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
+}
+
 # resend <run id> <body> — POSTs a resend the way the page's Resend button does, printing the answer
 # and then its status.
 resend() {
