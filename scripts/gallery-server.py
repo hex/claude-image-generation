@@ -387,7 +387,7 @@ def read_run(run_dir):
         "problem": problem,
         "providers": cards,
         "images": unique_paths(recorded_images(providers)),
-        "resendable": "arguments" in meta and bool(recorded_images(providers)),
+        "resendable": "arguments" in meta,
     }
 
 
@@ -663,8 +663,9 @@ class Gallery:
 
     def resend(self, run_id, prompt, providers):
         """Starts run-all.sh again for a run that recorded its arguments, with prompt and providers in
-        place of its own, saving beside the run's first image under a fresh image-<stamp> base. Answers
-        (HTTP status, body) once the new run's directory exists, or with why none was started."""
+        place of its own, saving in the folder of the run's output base under a fresh image-<stamp>
+        base. Answers (HTTP status, body) once the new run's directory exists, or with why none was
+        started."""
         run_dir = self.runs_dir / run_id
         if not RUN_ID.match(run_id) or not run_dir.is_dir():
             return 404, {"error": "no run %s" % run_id}
@@ -677,17 +678,7 @@ class Gallery:
         arguments = meta.get("arguments")
         if arguments is None:
             return 409, {"error": "run %s did not record the arguments it was started with, so it cannot be resent" % run_id}
-        recorded = {}
-        try:
-            reduce_status(read_status_log(run_dir), recorded)
-        except FileNotFoundError:
-            pass
-        except ValueError as e:
-            return 409, {"error": "run %s's status log is unreadable (%s), so where it saved its images is unknown" % (run_id, e)}
-        images = unique_paths(recorded_images(recorded))
-        if not images:
-            return 409, {"error": "run %s saved no image, so there is no folder to save a resend beside" % run_id}
-        folder = os.path.dirname(images[0])
+        folder = os.path.dirname(arguments["output_base"])
         cwd = meta["cwd"]
         for path, what in ((cwd, "working folder"), (folder, "image folder")):
             if not os.path.isdir(path):

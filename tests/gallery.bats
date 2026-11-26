@@ -885,19 +885,26 @@ resend() {
   [[ -z "$(grep -rIlF --devices=skip "$DUMMY_GEMINI_KEY" "$IMAGE_GALLERY_DIR")" && "$answer" != *"$DUMMY_GEMINI_KEY"* ]]
 }
 
-# write_resendable_run <run-id> <cwd> <image> [<mode> <input image>...] — a finished run whose gemini
-# saved image, with the arguments a gallery-mode run-all records: generate mode unless one is given.
-write_resendable_run() {
-  local id="$1" cwd="$2" image="$3" mode="${4:-generate}" meta
-  shift 3
+# record_arguments <run-id> <output base> [<mode> <input image>...] — adds to a run write_run wrote
+# the arguments a gallery-mode run-all records: generate mode unless one is given.
+record_arguments() {
+  local meta="$IMAGE_GALLERY_DIR/runs/$1/meta.json" base="$2" mode="${3:-generate}"
+  shift 2
   [[ $# -gt 0 ]] && shift
-  write_run "$id" "$cwd" "gemini\tcomplete\t1000\tmodel-a\t$image\n" done
-  meta="$IMAGE_GALLERY_DIR/runs/$id/meta.json"
-  jq --arg mode "$mode" --arg base "${image%-gemini.png}" \
+  jq --arg mode "$mode" --arg base "$base" \
     '. + {arguments: {mode: $mode, output_base: $base, input_images: $ARGS.positional,
                       extras: {gemini: "", openai: "", xai: "", openrouter: ""}}}' \
     "$meta" --args "$@" > "$meta.tmp"
   mv "$meta.tmp" "$meta"
+}
+
+# write_resendable_run <run-id> <cwd> <image> [<mode> <input image>...] — a finished run whose gemini
+# saved image, with the arguments a gallery-mode run-all records: generate mode unless one is given.
+write_resendable_run() {
+  local id="$1" image="$3"
+  write_run "$id" "$2" "gemini\tcomplete\t1000\tmodel-a\t$image\n" done
+  shift 3
+  record_arguments "$id" "${image%-gemini.png}" "$@"
 }
 
 @test "a run that did not record its arguments cannot be resent: the page is told so, and a resend is refused" {
@@ -971,4 +978,21 @@ write_resendable_run() {
     '{"error": "run-all.sh exited 3 before it started a run: using key [GEMINI_API_KEY]\nno run today"} 502' ]]
   rm "$MOCK_DIR/bash"
   [[ "$(snapshot | jq '.runs | length')" == 1 ]]
+}
+
+@test "a run whose providers all failed can be resent, saving in the folder of its output base" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1
+  mkdir "$out/art"
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/art/hero"
+  start_gallery
+  wait_for_snapshot '.runs[0].resendable'
+  local answer new saved
+  answer=$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini"]}')
+  [[ "$answer" =~ ^\{\"run\":\ \"([0-9]{8}T[0-9]{6}Z-[0-9a-f]{10})\"\}\ 200$ ]] || { echo "answer: $answer"; return 1; }
+  new=${BASH_REMATCH[1]}
+  wait_for_snapshot "(.runs[0].id == \"$new\") and (.runs[0].status == \"done\")"
+  saved=$(jq -r '.runs[0].providers[0].image.path' <<< "$SNAPSHOT")
+  [[ "$saved" =~ ^"$out"/art/image-[0-9]{8}-[0-9]{6}-gemini\.png$ && -f "$saved" ]] || { echo "saved: $saved"; ls -laR "$out"; return 1; }
 }
