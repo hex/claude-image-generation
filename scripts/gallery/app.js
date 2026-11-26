@@ -98,9 +98,25 @@ function applyTheme(choice) {
   for (const input of themeInputs) input.checked = input.value === choice;
 }
 
+// A browser that blocks site data throws on any use of localStorage. The page then starts on Auto,
+// and a theme chosen on it lasts until the page reloads.
 function savedTheme() {
-  const saved = localStorage.getItem(THEME_KEY);
-  return saved === 'light' || saved === 'dark' ? saved : 'auto';
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    return saved === 'light' || saved === 'dark' ? saved : 'auto';
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+    return 'auto';
+  }
+}
+
+function rememberTheme(choice) {
+  try {
+    if (choice === 'auto') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, choice);
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+  }
 }
 
 applyTheme(savedTheme());
@@ -601,7 +617,7 @@ async function resend(entry) {
 function noteResendStarted(entry) {
   const note = el('p', { class: 'editor-note', role: 'status' });
   entry.head.after(note);
-  requestAnimationFrame(() => { note.textContent = 'The resend started and will appear in the gallery.'; });
+  setTimeout(() => { note.textContent = 'The resend started and will appear in the gallery.'; }, 100);
   setTimeout(() => note.remove(), RESEND_NOTE_MS);
 }
 
@@ -996,9 +1012,8 @@ window.addEventListener('hashchange', () => {
 
 for (const input of themeInputs) {
   input.addEventListener('change', () => {
-    if (input.value === 'auto') localStorage.removeItem(THEME_KEY);
-    else localStorage.setItem(THEME_KEY, input.value);
     applyTheme(input.value);
+    rememberTheme(input.value);
   });
 }
 
