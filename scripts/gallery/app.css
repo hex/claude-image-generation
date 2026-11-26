@@ -288,6 +288,67 @@ body {
 }
 .trash:hover { background: var(--matte); color: var(--fail); }
 
+/* Edit prompt, on the line of a run that can be resent: it opens the editor in the prompt's place. */
+.edit-prompt {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px 4px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--raise);
+  color: var(--ink);
+  font: inherit; font-weight: 600;
+  cursor: default;
+}
+.edit-prompt svg { width: 14px; height: 14px; }
+.edit-prompt:hover { background: var(--matte); }
+.compact .edit-prompt { padding: 2px 10px 2px 8px; }
+
+/* The editor: the prompt to resend, a chip per provider, Cancel and Resend, and what a resend does. */
+.head:has(+ .editor) { margin-bottom: 0; }
+.editor { max-width: 700px; margin: 0 0 16px; }
+.editor-prompt {
+  display: block; box-sizing: border-box;
+  width: 100%; min-height: 92px;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid var(--rule-strong); border-radius: 6px;
+  background: var(--raise); color: var(--ink);
+  font: inherit; font-size: 17px; line-height: 1.4; font-weight: 500;
+}
+.editor-prompt:focus { outline: 2px solid var(--signal); outline-offset: 1px; border-color: transparent; }
+.editor-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 4px 10px;
+  border: 1px solid var(--rule-strong); border-radius: 999px;
+  background: none; color: var(--ink-3);
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  cursor: default;
+}
+.chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--canvas); }
+.editor-bar .cancel {
+  margin-left: auto;
+  padding: 6px 10px;
+  border: 0; border-radius: 999px;
+  background: none; color: var(--ink-2);
+  font: inherit; font-size: 13px; font-weight: 600;
+  cursor: default;
+}
+.editor-bar .cancel:hover { background: var(--matte); }
+.send {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px;
+  border: 0; border-radius: 999px;
+  background: var(--signal); color: var(--canvas);
+  font: inherit; font-size: 13px; font-weight: 600;
+  cursor: default;
+}
+.send kbd { font: inherit; font-weight: 500; opacity: .75; }
+.send:disabled, .editor-bar .cancel:disabled { opacity: .5; }
+.editor-note { margin: 8px 0 0; font-size: 12px; color: var(--ink-3); }
+.editor-error { margin: 6px 0 0; font: 12px/1.4 var(--mono); color: var(--fail); overflow-wrap: anywhere; white-space: pre-wrap; }
+.editor-error:empty { display: none; }
+
 /* What a delete will remove, every image file by its path, asked before anything goes; then, when
    not everything went, what stayed and why. */
 .confirm {

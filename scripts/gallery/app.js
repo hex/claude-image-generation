@@ -11,6 +11,7 @@ const ICONS = {
   'folder-open': 'M245,110.64A16,16,0,0,0,232,104H216V88a16,16,0,0,0-16-16H130.67L102.94,51.2a16.14,16.14,0,0,0-9.6-3.2H40A16,16,0,0,0,24,64V208h0a8,8,0,0,0,8,8H211.1a8,8,0,0,0,7.59-5.47l28.49-85.47A16.05,16.05,0,0,0,245,110.64ZM93.34,64,123.2,86.4A8,8,0,0,0,128,88h72v16H69.77a16,16,0,0,0-15.18,10.94L40,158.7V64Zm112,136H43.1l26.67-80H232Z',
   'arrows-out': 'M216,48V96a8,8,0,0,1-16,0V67.31l-42.34,42.35a8,8,0,0,1-11.32-11.32L188.69,56H160a8,8,0,0,1,0-16h48A8,8,0,0,1,216,48ZM98.34,146.34,56,188.69V160a8,8,0,0,0-16,0v48a8,8,0,0,0,8,8H96a8,8,0,0,0,0-16H67.31l42.35-42.34a8,8,0,0,0-11.32-11.32ZM208,152a8,8,0,0,0-8,8v28.69l-42.34-42.35a8,8,0,0,0-11.32,11.32L188.69,200H160a8,8,0,0,0,0,16h48a8,8,0,0,0,8-8V160A8,8,0,0,0,208,152ZM67.31,56H96a8,8,0,0,0,0-16H48a8,8,0,0,0-8,8V96a8,8,0,0,0,16,0V67.31l42.34,42.35a8,8,0,0,0,11.32-11.32Z',
   'trash': 'M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z',
+  'pencil-simple': 'M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z',
   'x': 'M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z',
 };
 
@@ -43,7 +44,9 @@ const THEME_KEY = 'gallery-theme';
 // A run started within this long ago shows full size; an older one is a compact strip.
 const FULL_SIZE_MS = 24 * 60 * 60 * 1000;
 
-const REVEAL_LABEL = /Mac/.test(navigator.platform) ? 'Reveal in Finder' : 'Show in folder';
+const ON_MAC = /Mac/.test(navigator.platform);
+const REVEAL_LABEL = ON_MAC ? 'Reveal in Finder' : 'Show in folder';
+const RESEND_KEYS = ON_MAC ? '\u2318\u21a9' : 'Ctrl+\u21a9';
 const NO_RUNS = 'No image runs yet. Images from Claude Code show up here while they generate.';
 const TITLE = 'Gallery \u00b7 Image Generation';
 const LOUPE_MS = 200;
@@ -51,7 +54,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const dayAndClock = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
-// run id -> { run, node, head, headKey, recency, frameList, frames: Map(provider -> { key, node }), roundSeen }
+// run id -> { run, node, head, headKey, recency, frameList, frames: Map(provider -> { key, node }), roundSeen, editor }
 const strips = new Map();
 let runs = [];
 let railKey = '';
@@ -379,8 +382,9 @@ function whenNode(run) {
   return run.status === 'live' ? el('span', { class: 'fact' }, 'Started ', time) : el('span', { class: 'fact' }, time);
 }
 
-// The run's head: its line (state, folder, time, how long ago a live run last moved, then the
-// retry offer while it is open), the prompt under it, and any problem reading the run.
+// The run's head: its line (state, folder, time, how long ago a live run last moved, then Edit
+// prompt when the run can be resent and the retry offer while it is open), the prompt under it, and
+// any problem reading the run.
 function headNode(run) {
   const state = runState(run);
   const line = el('div', { class: 'line' },
@@ -388,6 +392,12 @@ function headNode(run) {
     el('span', { class: 'fact folder', title: run.cwd, text: run.session || run.id }),
     whenNode(run),
     run.updated_ms ? el('span', { class: 'fact recency', text: updatedAgo(run.updated_ms) }) : null);
+  if (run.resendable) {
+    const edit = el('button', { type: 'button', class: 'edit-prompt', 'data-key': 'edit', 'aria-expanded': 'false' },
+      icon('pencil-simple'), el('span', { text: 'Edit prompt' }));
+    edit.addEventListener('click', () => openEditor(strips.get(run.id)));
+    line.append(edit);
+  }
   if (run.retry && run.retry.length) {
     const note = el('span', { class: 'note', 'aria-live': 'polite' });
     const left = run.retry_seconds && run.retry_ends_ms
@@ -422,7 +432,7 @@ function swap(old, next) {
 function newStrip(run) {
   const frameList = el('ol', { class: 'frames' });
   const node = el('li', { class: 'strip', 'data-id': run.id });
-  const entry = { run, node, head: null, headKey: '', frameList, frames: new Map(), roundSeen: new Map() };
+  const entry = { run, node, head: null, headKey: '', frameList, frames: new Map(), roundSeen: new Map(), editor: null };
   node.append(el('article', run.prompt ? { 'aria-labelledby': 'prompt-' + run.id } : { 'aria-label': run.session || run.id }, frameList));
   updateStrip(entry, run);
   return entry;
@@ -432,13 +442,15 @@ function updateStrip(entry, run) {
   entry.run = run;
   const state = runState(run);
   entry.node.dataset.state = state;
-  const headKey = JSON.stringify([state, run.prompt, run.session, run.cwd, run.started_at, run.retry, run.retry_ends_ms, run.problem]);
+  const headKey = JSON.stringify([state, run.prompt, run.session, run.cwd, run.started_at, run.retry, run.retry_ends_ms, run.problem, run.resendable]);
   if (headKey !== entry.headKey) {
     const head = headNode(run);
     if (entry.head) swap(entry.head, head);
     else entry.frameList.before(head);
     entry.head = head;
     entry.headKey = headKey;
+    if (entry.editor && !run.resendable) closeEditor(entry);
+    else showEditing(entry);
   }
   const recency = entry.head.querySelector('.recency');
   if (recency && run.updated_ms) recency.textContent = updatedAgo(run.updated_ms);
@@ -464,6 +476,116 @@ function updateStrip(entry, run) {
       entry.frames.delete(name);
     }
   }
+}
+
+// ── Resending ────────────────────────────────────────────────────
+
+// Opens the editor that resends a run's prompt in place of the prompt: the prompt to edit, a chip per
+// provider with the run's own pressed, Cancel and Resend. It sits beside the run's head, not in it,
+// so a snapshot that redraws the head leaves what is typed, and the caret, alone.
+function openEditor(entry) {
+  if (entry.editor) {
+    entry.editor.prompt.focus();
+    return;
+  }
+  const run = entry.run;
+  const prompt = el('textarea', { class: 'editor-prompt', 'aria-label': 'Prompt', rows: '3' });
+  prompt.value = run.prompt;
+  const own = new Set(run.providers.map(card => card.name));
+  const chips = PROVIDERS.map(([key, name]) => el('button', { type: 'button', class: 'chip', 'data-provider': key, 'aria-pressed': String(own.has(key)), text: name }));
+  const cancel = el('button', { type: 'button', class: 'cancel', text: 'Cancel' });
+  const send = el('button', { type: 'button', class: 'send' }, el('span', { text: 'Resend' }), el('kbd', { 'aria-hidden': 'true', text: RESEND_KEYS }));
+  const error = el('p', { class: 'editor-error', 'aria-live': 'polite' });
+  const node = el('div', { class: 'editor' },
+    prompt,
+    el('div', { class: 'editor-bar' }, el('span', { class: 'chips', role: 'group', 'aria-label': 'Providers' }, ...chips), cancel, send),
+    el('p', { class: 'editor-note', text: 'Starts a new run in ' + (run.session || run.cwd) + '. Claude won\u2019t see its results.' }),
+    error);
+  const editor = { node, prompt, chips, cancel, send, error, busy: false };
+  for (const chip of chips) {
+    chip.addEventListener('click', () => {
+      chip.setAttribute('aria-pressed', String(chip.getAttribute('aria-pressed') !== 'true'));
+      readyToSend(editor);
+    });
+  }
+  prompt.addEventListener('input', () => readyToSend(editor));
+  node.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !editor.busy) {
+      event.preventDefault();
+      closeEditor(entry);
+    } else if (event.key === 'Enter' && (ON_MAC ? event.metaKey : event.ctrlKey) && !send.disabled) {
+      event.preventDefault();
+      resend(entry);
+    }
+  });
+  cancel.addEventListener('click', () => closeEditor(entry));
+  send.addEventListener('click', () => resend(entry));
+  entry.editor = editor;
+  readyToSend(editor);
+  showEditing(entry);
+  prompt.focus();
+  prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+}
+
+// Puts the open editor under the run's line in place of its prompt, or brings the prompt back.
+function showEditing(entry) {
+  const editing = entry.editor !== null;
+  const prompt = entry.head.querySelector('.prompt');
+  if (prompt) prompt.hidden = editing;
+  const button = entry.head.querySelector('.edit-prompt');
+  if (button) button.setAttribute('aria-expanded', String(editing));
+  if (editing && entry.head.nextSibling !== entry.editor.node) entry.head.after(entry.editor.node);
+}
+
+function closeEditor(entry) {
+  entry.editor.node.remove();
+  entry.editor = null;
+  showEditing(entry);
+  const button = entry.head.querySelector('.edit-prompt');
+  (button || document.getElementById('strips')).focus();
+}
+
+// Resend waits for a prompt that is not blank and at least one provider, and for no resend in flight.
+function readyToSend(editor) {
+  const chosen = editor.chips.some(chip => chip.getAttribute('aria-pressed') === 'true');
+  editor.send.disabled = editor.busy || !editor.prompt.value.trim() || !chosen;
+  editor.cancel.disabled = editor.busy;
+}
+
+// Sends the edited prompt and the chosen providers. The server answers once the new run has started,
+// which the next snapshot shows at the top; the editor closes then. Otherwise it stays open with
+// the server's reason, so nothing is resent without the page saying what became of it.
+async function resend(entry) {
+  const editor = entry.editor;
+  const providers = editor.chips.filter(chip => chip.getAttribute('aria-pressed') === 'true').map(chip => chip.dataset.provider);
+  editor.busy = true;
+  editor.send.setAttribute('aria-busy', 'true');
+  editor.error.textContent = '';
+  readyToSend(editor);
+  let failure = null;
+  try {
+    const response = await fetch('resend/' + encodeURIComponent(entry.run.id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: editor.prompt.value, providers }),
+    });
+    const answer = await response.json().catch(() => ({}));
+    if (!response.ok) failure = answer.error || 'The server answered ' + response.status + '.';
+  } catch (error) {
+    failure = 'Could not reach the gallery server.';
+  }
+  editor.busy = false;
+  editor.send.removeAttribute('aria-busy');
+  if (entry.editor !== editor) return;
+  if (failure === null) {
+    closeEditor(entry);
+    return;
+  }
+  editor.error.textContent = failure;
+  readyToSend(editor);
+  // Resend was disabled while the request was out, which drops the focus it had; it goes back to the
+  // prompt, so Escape and another try work from the keyboard.
+  if (document.activeElement === document.body) editor.prompt.focus();
 }
 
 // ── Sessions ─────────────────────────────────────────────────────
