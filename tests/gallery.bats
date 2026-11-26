@@ -384,6 +384,18 @@ serve_other_version() {
   [[ "$(gallery_curl /health | jq -r .clients)" == 0 ]]
 }
 
+@test "a provider that exits before it starts shows as failed, saying so" {
+  answer_provider_with "$GEMINI_IMAGE"
+  unset GEMINI_API_KEY
+  run_all_gemini
+  assert_status 1
+  assert_output_contains "Error: GEMINI_API_KEY environment variable is not set"
+  wait_for_snapshot '.runs[0].status == "done"'
+  [[ "$(jq -r '.runs[0].providers[0] | [.state, .error] | @tsv' <<< "$SNAPSHOT")" == \
+    $'error\tgemini exited 1 before reporting a result; its error output says why' ]] || { echo "$SNAPSHOT"; return 1; }
+  [[ ! -e "$MOCK_DIR/calls" ]]
+}
+
 @test "with no page connected, a failed run makes no retry offer and returns at once" {
   answer_provider_with "$GEMINI_REFUSAL"
   local started=$SECONDS

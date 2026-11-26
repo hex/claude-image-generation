@@ -145,11 +145,22 @@ spawn_named() {
   spawn_provider "$p" "${SCRIPT_DIR}/${p}.sh" "${args[@]}"
 }
 
+# record_unreported_failure <provider> <exit status> — gives a provider that exited before it
+# wrote any status record (a missing key, a bad option) an error record, so the run does not show
+# it as never started once the run is over. Its own error output says why it stopped.
+record_unreported_failure() {
+  local p="$1" code="$2" dir="${DISPLAY_PANE_DIR:-}"
+  [[ -n "$dir" && -d "$dir" ]] || return 0
+  grep -q "^${p}"$'\t' "$dir/status" 2>/dev/null && return 0
+  display_pane_error "$p" "$p exited $code before reporting a result; its error output says why"
+  display_pane_status "$p" error "" "" ""
+}
+
 # run_round <provider>... — forks the named providers, waits for all, and leaves the names of
 # those that exited non-zero in FAILED. Returns 1 when any failed.
 run_round() {
   local -a names=() pids=()
-  local p pid i
+  local p pid i code
   FAILED=()
   for p in "$@"; do
     spawn_named "$p" || continue
@@ -158,7 +169,11 @@ run_round() {
   done
   i=0
   for pid in ${pids[@]+"${pids[@]}"}; do
-    wait "$pid" || FAILED+=("${names[$i]}")
+    wait "$pid" || {
+      code=$?
+      FAILED+=("${names[$i]}")
+      record_unreported_failure "${names[$i]}" "$code"
+    }
     i=$((i + 1))
   done
   [[ ${#FAILED[@]} -eq 0 ]]
