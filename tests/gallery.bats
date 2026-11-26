@@ -29,6 +29,7 @@ setup() {
 teardown() {
   [[ -n "${EVENTS_PID:-}" ]] && kill "$EVENTS_PID" 2>/dev/null
   [[ -n "${HOLDER_PID:-}" ]] && kill "$HOLDER_PID" 2>/dev/null
+  [[ -n "${LISTENER_PID:-}" ]] && kill "$LISTENER_PID" 2>/dev/null
   stop_gallery
   cleanup_tmpdir
 }
@@ -319,6 +320,29 @@ serve_other_version() {
   [[ "$output" == "image gallery: open http://127.0.0.1:$(server_field port)/$(server_field token)/ to watch the images" ]] || {
     echo "output: $output"; return 1; }
   [[ ! -e "$MOCK_DIR/opened" ]]
+}
+
+@test "the token goes only to the server process server.json names, never to another process on its port" {
+  # A server that died without removing server.json: its pid is now another process of this
+  # user's, and its port is held by a listener that records whatever it is sent.
+  mkdir -p "$IMAGE_GALLERY_DIR"
+  sleep 60 &
+  HOLDER_PID=$!
+  printf 'null' > "$MOCK_DIR/answer"
+  python3 -I "${PLUGIN_ROOT}/tests/one_request_server.py" "$MOCK_DIR/port" "$MOCK_DIR/request.raw" "$MOCK_DIR/answer" &
+  LISTENER_PID=$!
+  local i
+  for i in $(seq 1 50); do
+    [[ -s "$MOCK_DIR/port" ]] && break
+    sleep 0.1
+  done
+  jq -n --argjson pid "$HOLDER_PID" --argjson port "$(cat "$MOCK_DIR/port")" \
+    '{pid: $pid, port: $port, instance: "0123456789abcdef", version: "0.0.0-other",
+      started: "Thu Jan  1 00:00:00 1970", token: "stale-token-0123456789-0123456789-0123456789"}' \
+    > "$IMAGE_GALLERY_DIR/server.json"
+  start_gallery
+  [[ ! -e "$MOCK_DIR/request.raw" ]] || { echo "the listener was sent:"; cat "$MOCK_DIR/request.raw"; return 1; }
+  [[ "$(gallery_curl /health | jq -r .version)" == "$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")" ]]
 }
 
 @test "the Retry button's POST /retry runs the failed provider again" {

@@ -815,7 +815,8 @@ def serve(root, version):
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     write_private(root / "last-port", str(port))
     write_private(root / "server.json", json.dumps({
-        "pid": os.getpid(), "port": port, "instance": gallery.instance, "version": version, "token": gallery.token,
+        "pid": os.getpid(), "started": process_started(os.getpid()), "port": port, "instance": gallery.instance,
+        "version": version, "token": gallery.token,
     }))
     busy_at = time.time()
     while not gallery.stop.wait(SCAN_SECONDS):
@@ -853,9 +854,13 @@ def request(info, method, path, timeout=2):
 
 
 def running_server(root):
-    """server.json and /health of the server answering for root, or (None, None)."""
+    """server.json and /health of the server answering for root, or (None, None). The token is
+    sent only while the process server.json names is still the one that wrote it: that process
+    keeps its port bound until it exits, so nothing else can be listening there."""
     try:
         info = json.loads(read_text(root / "server.json"))
+        if not holder_alive(info["pid"], info["started"]):
+            return None, None
         status, health = request(info, "GET", "/health")
     except (FileNotFoundError, ValueError, KeyError, TypeError, OSError, http.client.HTTPException):
         return None, None
