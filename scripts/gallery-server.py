@@ -56,6 +56,8 @@ HOLDER_CHECK_SECONDS = 10
 IN_FLIGHT = ("waiting", "querying", "retrying")
 RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{10}$")
 PROVIDER = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# The endings of an image file the gallery may delete, after -<provider>.
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 PAGE_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
@@ -402,9 +404,6 @@ def recorded_images(providers):
     """(provider, path) for each image a complete record names, in the order of the providers and
     of their records. A provider that completed again in a later round names each of its images."""
     return [(p["name"], path) for p in providers.values() for path in p["images"]]
-
-
-IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
 
 def unsafe_image(provider, path):
@@ -839,7 +838,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         self.send_json(200, {"retrying": run_id})
 
-
     def delete(self, run_ids):
         """Deletes each run named that may go and publishes the change. Answers which runs were
         deleted, with their files, and which were kept and why: 200 when any run was deleted, else
@@ -857,6 +855,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         codes = {code for code, outcome in outcomes}
         code = 500 if 500 in codes else 409 if 409 in codes else 404
         self.send_json(code, {"deleted": deleted, "kept": kept, "error": kept[0]["error"]})
+
 
 
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
