@@ -781,11 +781,11 @@ class Gallery:
         newest RESEND_LOGS_KEPT of them."""
         logs = self.root / "resend-logs"
         logs.mkdir(mode=0o700, exist_ok=True)
+        path = logs / ("%s-%s.log" % (time.strftime("%Y%m%d-%H%M%S"), secrets.token_hex(4)))
+        os.close(os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
         for old in sorted(os.listdir(str(logs)))[:-RESEND_LOGS_KEPT]:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(str(logs / old))
-        path = logs / ("%s-%s.log" % (time.strftime("%Y%m%d-%H%M%S"), secrets.token_hex(4)))
-        os.close(os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
         return path
 
     def log_tail(self, path):

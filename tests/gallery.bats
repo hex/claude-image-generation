@@ -1046,6 +1046,26 @@ write_resendable_run() {
   [[ "$(snapshot | jq '.runs | length')" == 1 ]]
 }
 
+@test "a resend keeps the newest 50 logs in resend-logs, its own among them" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 logs="$IMAGE_GALLERY_DIR/resend-logs" n
+  printf 'png' > "$out/hero-gemini.png"
+  write_resendable_run "$a" "$out" "$out/hero-gemini.png"
+  mkdir -p "$logs"
+  for n in $(seq 10 59); do
+    : > "$logs/20000101-0000$n-00000000.log"
+  done
+  start_gallery
+  wait_for_snapshot '.runs[0].resendable'
+  printf '#!/bin/sh\necho "no run today" >&2\nexit 3\n' > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  [[ "$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini"]}')" == \
+    '{"error": "run-all.sh exited 3 before it started a run: no run today"} 502' ]]
+  rm "$MOCK_DIR/bash"
+  [[ "$(ls "$logs" | wc -l | tr -d ' ')" == 50 && ! -e "$logs/20000101-000010-00000000.log" ]] || { ls "$logs"; return 1; }
+  [[ "$(cat "$(ls -d "$logs"/* | tail -1)")" == "no run today" ]] || { ls "$logs"; return 1; }
+}
+
 @test "a run whose providers all failed can be resent, saving in the folder of its output base" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1
