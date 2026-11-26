@@ -1135,7 +1135,10 @@ def parse_resend(body):
         raise ValueError("the prompt is blank")
     if "\0" in prompt:
         raise ValueError("the prompt holds a NUL character, which no program argument can carry")
-    size = len(prompt.encode("utf-8", "surrogatepass"))
+    try:
+        size = len(prompt.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise ValueError("the prompt holds a lone surrogate, which is not text a program argument can carry")
     if size > PROMPT_LIMIT_BYTES:
         raise ValueError("the prompt is %d bytes; the most a prompt can carry to the providers is %d bytes"
                          % (size, PROMPT_LIMIT_BYTES))
