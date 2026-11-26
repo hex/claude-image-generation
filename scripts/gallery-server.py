@@ -194,6 +194,15 @@ def holder_alive(pid, started):
     return False
 
 
+def forget_unchecked_holders():
+    """Drops each holder no check has confirmed in HOLDER_CHECK_SECONDS. holder_alive asks ps again
+    about those anyway, and a finished run's holders are never asked about again."""
+    now = time.monotonic()
+    for key, confirmed in list(confirmed_holders.items()):
+        if now - confirmed >= HOLDER_CHECK_SECONDS:
+            del confirmed_holders[key]
+
+
 def run_is_held(run_dir):
     """True while any process holding a token on the run is still alive. A token is named
     <name>.<pid> and holds its process's start time; a dot name is one still being written."""
@@ -424,6 +433,7 @@ class Gallery:
     def scan(self):
         """Reads every run whose files changed or whose holder went away, newest first, prunes
         beyond KEEP_RUNS and publishes a change."""
+        forget_unchecked_holders()
         names = []
         now = time.time()
         for entry in os.scandir(str(self.runs_dir)):
