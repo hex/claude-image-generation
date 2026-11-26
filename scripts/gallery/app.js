@@ -10,6 +10,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const ICONS = {
   'folder-open': 'M245,110.64A16,16,0,0,0,232,104H216V88a16,16,0,0,0-16-16H130.67L102.94,51.2a16.14,16.14,0,0,0-9.6-3.2H40A16,16,0,0,0,24,64V208h0a8,8,0,0,0,8,8H211.1a8,8,0,0,0,7.59-5.47l28.49-85.47A16.05,16.05,0,0,0,245,110.64ZM93.34,64,123.2,86.4A8,8,0,0,0,128,88h72v16H69.77a16,16,0,0,0-15.18,10.94L40,158.7V64Zm112,136H43.1l26.67-80H232Z',
   'arrows-out': 'M216,48V96a8,8,0,0,1-16,0V67.31l-42.34,42.35a8,8,0,0,1-11.32-11.32L188.69,56H160a8,8,0,0,1,0-16h48A8,8,0,0,1,216,48ZM98.34,146.34,56,188.69V160a8,8,0,0,0-16,0v48a8,8,0,0,0,8,8H96a8,8,0,0,0,0-16H67.31l42.35-42.34a8,8,0,0,0-11.32-11.32ZM208,152a8,8,0,0,0-8,8v28.69l-42.34-42.35a8,8,0,0,0-11.32,11.32L188.69,200H160a8,8,0,0,0,0,16h48a8,8,0,0,0,8-8V160A8,8,0,0,0,208,152ZM67.31,56H96a8,8,0,0,0,0-16H48a8,8,0,0,0-8,8V96a8,8,0,0,0,16,0V67.31l42.34,42.35a8,8,0,0,0,11.32-11.32Z',
+  'trash': 'M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z',
   'x': 'M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z',
 };
 
@@ -26,6 +27,13 @@ const loupePrint = document.getElementById('loupe-print');
 const loupeNote = document.getElementById('loupe-note');
 const loupePrompt = document.getElementById('loupe-prompt');
 const themeInputs = [...document.querySelectorAll('.theme input')];
+const deleteProject = document.getElementById('delete-project');
+const confirmDialog = document.getElementById('confirm');
+const confirmTitle = document.getElementById('confirm-title');
+const confirmBody = document.getElementById('confirm-body');
+const confirmFiles = document.getElementById('confirm-files');
+const confirmCancel = document.getElementById('confirm-cancel');
+const confirmDelete = document.getElementById('confirm-delete');
 
 // The four providers run-all.sh can run, in the order of their columns, with the names the page
 // shows. A frame of any other provider takes the first free cell.
@@ -51,6 +59,8 @@ let unseen = 0;
 let firstSnapshot = true;
 let loupeAt = null;
 let loupeClosing = 0;
+// What the open delete dialog asks to delete: { ids, project, generating, busy }, or null.
+let deleting = null;
 
 function el(tag, attrs, ...children) {
   const node = document.createElement(tag);
@@ -387,6 +397,11 @@ function headNode(run) {
     button.addEventListener('click', () => post('retry/' + encodeURIComponent(run.id), button, note));
     line.append(el('span', { class: 'offer' }, button, note));
   }
+  if (run.status !== 'live') {
+    const trash = el('button', { type: 'button', class: 'trash', 'data-key': 'delete', 'aria-label': 'Delete this run and its images', title: 'Delete run' }, icon('trash'));
+    trash.addEventListener('click', () => askToDelete([strips.get(run.id).run], null, 0));
+    line.append(trash);
+  }
   return el('header', { class: 'head' },
     line,
     run.prompt ? el('p', { class: 'prompt', id: 'prompt-' + run.id, text: run.prompt }) : null,
@@ -479,9 +494,10 @@ function renderRail() {
   const sessions = new Map();
   for (const run of runs) {
     if (!run.session) continue;
-    const session = sessions.get(run.cwd) || { name: run.session, runs: 0, live: false };
+    const session = sessions.get(run.cwd) || { name: run.session, runs: 0, live: false, finished: 0 };
     session.runs += 1;
     session.live = session.live || run.status === 'live';
+    if (run.status !== 'live') session.finished += 1;
     sessions.set(run.cwd, session);
   }
   const selected = selectedSession();
@@ -492,7 +508,13 @@ function renderRail() {
   const focused = sessionList.contains(document.activeElement) && document.activeElement.dataset.key;
   const rows = [railRow('All projects', '#', runs.length, anyLive, selected === null, 'all')];
   for (const [cwd, session] of sessions) {
-    rows.push(railRow(session.name, '#s=' + encodeURIComponent(cwd), session.runs, session.live, selected === cwd, 'session:' + cwd, cwd));
+    const row = railRow(session.name, '#s=' + encodeURIComponent(cwd), session.runs, session.live, selected === cwd, 'session:' + cwd, cwd);
+    if (session.finished) {
+      const button = el('button', { type: 'button', class: 'rail-delete', 'data-key': 'delete:' + cwd, 'aria-label': 'Delete ' + session.name + ' runs and images', title: 'Delete project' }, icon('trash'));
+      button.addEventListener('click', () => askToDeleteProject(cwd));
+      row.append(button);
+    }
+    rows.push(row);
   }
   sessionList.replaceChildren(...rows);
   if (focused) {
@@ -512,6 +534,7 @@ function applyFilter() {
   empty.hidden = shown > 0;
   const session = selected !== null && runs.find(run => run.cwd === selected);
   here.textContent = selected === null ? 'All projects' : session ? session.session : selected;
+  deleteProject.hidden = !runs.some(run => run.cwd === selected && run.status !== 'live');
   runCount.textContent = shown + (shown === 1 ? ' run' : ' runs');
   sizeStrips();
 }
@@ -526,6 +549,82 @@ function sizeStrips() {
     node.classList.toggle('compact', !newest && !(Date.now() - started < FULL_SIZE_MS));
     newest = false;
   }
+}
+
+// ── Deleting ─────────────────────────────────────────────────────
+
+function counted(n, noun) {
+  return n + ' ' + noun + (n === 1 ? '' : 's');
+}
+
+// Asks before deleting runs, none of them live: the dialog names every image file that goes, and
+// how many of a project's runs stay because they are still generating. Cancel has the focus.
+function askToDelete(chosen, project, generating) {
+  const paths = [...new Set(chosen.flatMap(run => run.images))];
+  deleting = { ids: chosen.map(run => run.id), project, generating, busy: false };
+  confirmTitle.textContent = project ? 'Delete ' + project.name + ' from the gallery?' : 'Delete this run?';
+  const removes = project ? 'Removes its ' + counted(chosen.length, 'run') + ' from the gallery' : 'Removes it from the gallery';
+  const files = paths.length ? ' and deletes ' + counted(paths.length, 'image') + ' from disk.' : '. ' + (project ? 'They have' : 'It has') + ' no saved images.';
+  const stays = generating ? ' ' + counted(generating, 'run') + ' still generating ' + (generating === 1 ? 'stays' : 'stay') + '.' : '';
+  confirmBody.textContent = removes + files + stays + ' This can\u2019t be undone.';
+  confirmFiles.replaceChildren(...paths.map(path => el('li', { text: path })));
+  confirmFiles.hidden = !paths.length;
+  confirmDelete.hidden = false;
+  confirmDelete.disabled = false;
+  confirmCancel.disabled = false;
+  confirmCancel.textContent = 'Cancel';
+  confirmDialog.showModal();
+  confirmCancel.focus();
+}
+
+// A project's runs that are not live; those at work stay.
+function askToDeleteProject(cwd) {
+  const own = runs.filter(run => run.cwd === cwd);
+  const generating = own.filter(run => run.status === 'live').length;
+  askToDelete(own.filter(run => run.status !== 'live'), { name: own[0].session, cwd }, generating);
+}
+
+// Sends the runs the dialog listed, by id, so a run it did not list never goes. When every one went
+// the dialog closes; otherwise it says what the server deleted and why each run it kept stayed.
+async function deleteListed() {
+  const asked = deleting;
+  asked.busy = true;
+  confirmDelete.disabled = true;
+  confirmCancel.disabled = true;
+  let answer = null;
+  try {
+    const response = await fetch('delete/' + asked.ids.map(encodeURIComponent).join('/'), { method: 'POST' });
+    answer = await response.json();
+  } catch (error) {
+    answer = null;
+  }
+  asked.busy = false;
+  if (answer && Array.isArray(answer.kept) && !answer.kept.length) {
+    confirmDialog.close();
+    if (asked.project && !asked.generating && selectedSession() === asked.project.cwd) location.hash = '';
+    document.getElementById('strips').focus();
+    return;
+  }
+  confirmDelete.hidden = true;
+  confirmCancel.disabled = false;
+  confirmCancel.textContent = 'Close';
+  confirmCancel.focus();
+  if (!answer || !Array.isArray(answer.kept)) {
+    confirmTitle.textContent = 'Could not delete';
+    confirmBody.textContent = answer && answer.error ? answer.error : 'Could not reach the gallery server.';
+    confirmFiles.hidden = true;
+    return;
+  }
+  const outcomes = [...answer.deleted, ...answer.kept];
+  const images = outcomes.reduce((sum, run) => sum + (run.removed ? run.removed.length : 0), 0);
+  confirmTitle.textContent = answer.deleted.length || images ? 'Not everything was deleted' : 'Nothing was deleted';
+  const done = answer.deleted.length || images ? 'Deleted ' + counted(answer.deleted.length, 'run') + ' and ' + counted(images, 'image') + '. ' : '';
+  confirmBody.textContent = done + 'Kept ' + counted(answer.kept.length, 'run') + ':';
+  confirmFiles.replaceChildren(...answer.kept.flatMap(run => [
+    el('li', { text: run.error }),
+    ...(run.refused || []).map(file => el('li', { text: file.path + ': ' + file.reason })),
+  ]));
+  confirmFiles.hidden = false;
 }
 
 // ── Keeping your place ───────────────────────────────────────────
@@ -698,6 +797,15 @@ loupe.addEventListener('click', event => {
 });
 
 // ── Wiring ───────────────────────────────────────────────────────
+
+deleteProject.addEventListener('click', () => askToDeleteProject(selectedSession()));
+confirmDelete.addEventListener('click', deleteListed);
+confirmCancel.addEventListener('click', () => confirmDialog.close());
+// Escape closes the dialog, except while a delete it sent is still unanswered.
+confirmDialog.addEventListener('cancel', event => {
+  if (deleting && deleting.busy) event.preventDefault();
+});
+confirmDialog.addEventListener('close', () => { deleting = null; });
 
 fresh.addEventListener('click', () => {
   window.scrollTo(0, 0);

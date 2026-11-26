@@ -25,11 +25,20 @@
 </nav>
 <main id="strips" class="canvas" tabindex="-1">
   <h1 class="sr">Gallery</h1>
-  <p class="top"><span id="here" class="here"></span><span id="run-count"></span><span id="connection" role="status" aria-live="polite"></span></p>
+  <p class="top"><span id="here" class="here"></span><span id="run-count"></span><span id="connection" role="status" aria-live="polite"></span><button id="delete-project" class="delete-project" type="button" hidden>Delete project…</button></p>
   <button id="fresh" class="fresh slab" type="button" hidden></button>
   <p id="empty" class="empty" hidden></p>
   <ol id="strip-list" class="strips"></ol>
 </main>
+<dialog id="confirm" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+  <h2 id="confirm-title"></h2>
+  <p id="confirm-body" aria-live="polite"></p>
+  <ul id="confirm-files" class="confirm-files"></ul>
+  <div class="confirm-bar">
+    <button id="confirm-cancel" class="confirm-cancel" type="button" autofocus>Cancel</button>
+    <button id="confirm-delete" class="confirm-delete" type="button">Delete</button>
+  </div>
+</dialog>
 <div id="loupe" class="loupe slab" role="dialog" aria-modal="true" aria-labelledby="loupe-print" tabindex="-1" hidden>
   <div id="loupe-actions" class="loupe-actions"></div>
   <figure class="loupe-frame">

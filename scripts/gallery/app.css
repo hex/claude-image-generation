@@ -15,6 +15,8 @@
   --rule-strong: light-dark(rgb(0 0 0 / .18), rgb(255 255 255 / .2));
   --signal: light-dark(#2563eb, #79a2ff);
   --fail: light-dark(#b42318, #ff8a7f);
+  /* The fill of the Delete button, under white text. */
+  --fail-solid: light-dark(#b42318, #c8372b);
   --done: light-dark(#1f7a4a, #62c793);
   --hatch: light-dark(rgb(0 0 0 / .055), rgb(255 255 255 / .045));
   --ease-power2: cubic-bezier(.33, 1, .68, 1);
@@ -129,6 +131,22 @@ body {
 .session-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-row .count { font-size: 12px; font-weight: 400; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
+/* A project's delete button, over its count while the row is hovered or the button has focus. */
+.sessions > li { position: relative; }
+.rail-delete {
+  position: absolute; top: 50%; right: 4px; translate: 0 -50%;
+  display: grid; place-items: center;
+  width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: 5px;
+  background: none; color: var(--ink-3);
+  cursor: default;
+  opacity: 0;
+}
+.sessions > li:hover .rail-delete, .rail-delete:focus-visible { opacity: 1; }
+.sessions > li:hover:has(.rail-delete) .count, .sessions > li:has(.rail-delete:focus-visible) .count { visibility: hidden; }
+.rail-delete:hover { background: var(--rule); color: var(--fail); }
+.rail-delete svg, .trash svg { width: 15px; height: 15px; }
+
 /* A dot beside a project with a run at work, nothing otherwise. */
 .lamp { width: 6px; height: 6px; border-radius: 50%; }
 .lamp.live { background: var(--signal); }
@@ -169,7 +187,15 @@ body {
   min-height: 28px; margin: 0 0 22px;
   font-size: 12.5px; color: var(--ink-3);
 }
-.top > :not(:empty) ~ :not(:empty)::before { content: "\00b7"; margin-right: 8px; }
+.top > span:not(:empty) ~ span:not(:empty)::before { content: "\00b7"; margin-right: 8px; }
+.delete-project {
+  margin-left: 2px; padding: 4px 12px;
+  border: 1px solid var(--rule-strong); border-radius: 999px;
+  background: none; color: var(--fail);
+  font: inherit; font-weight: 600;
+  cursor: default;
+}
+.delete-project:hover { background: var(--matte); }
 .here { color: var(--ink); font-weight: 600; }
 
 .empty { margin: 0; padding: 24px 0; color: var(--ink-3); }
@@ -251,6 +277,48 @@ body {
 }
 .note:empty { display: none; }
 .offer .note { margin: 0; }
+
+/* The run's delete button, last on its line; a run at work has none. */
+.trash {
+  display: grid; place-items: center;
+  width: 28px; height: 28px; padding: 0;
+  border: 0; border-radius: 999px;
+  background: none; color: var(--ink-3);
+  cursor: default;
+}
+.trash:hover { background: var(--matte); color: var(--fail); }
+
+/* What a delete will remove, every image file by its path, asked before anything goes; then, when
+   not everything went, what stayed and why. */
+.confirm {
+  width: min(520px, 90vw);
+  padding: 22px 24px 18px;
+  border: 1px solid var(--rule-strong); border-radius: 10px;
+  background: var(--raise); color: var(--ink);
+  box-shadow: 0 20px 60px rgb(0 0 0 / .25);
+}
+.confirm::backdrop { background: rgb(0 0 0 / .35); }
+.confirm h2 { margin: 0 0 6px; font-size: 16px; }
+.confirm p { margin: 0 0 10px; font-size: 13.5px; color: var(--ink-2); }
+.confirm-files {
+  max-height: 180px; overflow: auto;
+  margin: 0 0 18px; padding: 10px 12px;
+  list-style: none;
+  border-radius: 6px;
+  background: var(--matte); color: var(--ink-2);
+  font: 12px/1.6 var(--mono);
+  overflow-wrap: anywhere;
+}
+.confirm-bar { display: flex; justify-content: flex-end; gap: 8px; }
+.confirm-bar button {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font: inherit; font-size: 13px; font-weight: 600;
+  cursor: default;
+}
+.confirm-bar button:disabled { opacity: .5; }
+.confirm-cancel { border: 1px solid var(--rule-strong); background: none; color: var(--ink); }
+.confirm-delete { border: 1px solid var(--fail-solid); background: var(--fail-solid); color: #fff; }
 
 /* ── Frames ────────────────────────────────────────────────────── */
 
@@ -548,6 +616,8 @@ body {
   .sessions { order: 3; flex: 1 0 100%; flex-direction: row; gap: 6px; overflow-x: auto; }
   .sessions > li { flex: none; }
   .session-row { grid-template-columns: auto auto auto; gap: 6px; padding: 3px 10px; background: var(--matte); }
+  /* A chip has no hover to show its delete button on; Delete project… on the top line does it. */
+  .rail-delete { display: none; }
   .lamp:not(.live) { display: none; }
   .canvas { padding: 16px 16px 48px; }
   .fresh { left: 50%; }
