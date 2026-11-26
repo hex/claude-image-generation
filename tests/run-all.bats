@@ -126,6 +126,31 @@ fake_pane() {
     cat "$PANE/logs/xai.err"; return 1; }
 }
 
+@test "run-all retries when the pane answers the offer as it closes" {
+  stub_provider gemini
+  stub_flaky_provider xai
+  fake_pane
+  # A sleep first on PATH that answers the offer the way the watcher does during run-all's wait,
+  # and returns only once the offer's one second is over.
+  local real_sleep
+  real_sleep=$(command -v sleep)
+  mkdir -p "$WORK_DIR/bin"
+  cat > "$WORK_DIR/bin/sleep" <<STUB
+#!/bin/bash
+if [ "\$1" = 0.2 ] && [ -f "$PANE/retry-offer" ]; then
+  mv "$PANE/retry-offer" "$PANE/.retry"
+  exec "$real_sleep" 1.5
+fi
+exec "$real_sleep" "\$@"
+STUB
+  chmod +x "$WORK_DIR/bin/sleep"
+  PATH="$WORK_DIR/bin:$PATH" DISPLAY_PANE_RETRY_WAIT=1 run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" \
+    --output-base "$WORK_DIR/out" --providers gemini,xai
+  assert_status 0
+  [[ "$(cat "$WORK_DIR/xai.calls")" -eq 2 ]] || { echo "xai should have run twice"; return 1; }
+  [[ ! -e "$PANE/.retry" && ! -e "$PANE/retry-offer" ]] || { ls -A "$PANE"; return 1; }
+}
+
 @test "run-all treats a pane that closed during the offer as no retry" {
   stub_provider gemini
   stub_flaky_provider xai

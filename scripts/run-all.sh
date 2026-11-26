@@ -198,7 +198,13 @@ offer_retry() {
     fi
     sleep 0.2
   done
+  # The offer closes by removing it. An answer can rename it to .retry up to that moment, and
+  # none can after it, so .retry is looked for once the offer is gone.
   rm -f "$dir/retry-offer" 2>/dev/null
+  if [[ -f "$dir/.retry" ]]; then
+    rm -f "$dir/.retry"
+    return 0
+  fi
   return 1
 }
 
