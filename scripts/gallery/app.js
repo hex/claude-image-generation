@@ -334,25 +334,27 @@ function selectedSession() {
   }
 }
 
-function railRow(label, href, count, live, current, key) {
+function railRow(label, href, count, live, current, key, title) {
   const link = el('a', { class: 'session-row', href, 'data-key': key },
     el('span', { class: live ? 'lamp live' : 'lamp', 'aria-hidden': 'true' }),
     el('span', { class: 'name', text: label }),
     el('span', { class: 'count', text: String(count) }),
     live ? el('span', { class: 'sr', text: ', generating' }) : null);
   if (current) link.setAttribute('aria-current', 'page');
+  if (title) link.title = title;
   return el('li', null, link);
 }
 
-// One row per session, the one with the newest run first, after "All".
+// One row per session, the one with the newest run first, after "All". A session is a working
+// directory: two that share a last folder are two rows, told apart by the path in their title.
 function renderRail() {
   const sessions = new Map();
   for (const run of runs) {
     if (!run.session) continue;
-    const session = sessions.get(run.session) || { runs: 0, live: false };
+    const session = sessions.get(run.cwd) || { name: run.session, runs: 0, live: false };
     session.runs += 1;
     session.live = session.live || run.status === 'live';
-    sessions.set(run.session, session);
+    sessions.set(run.cwd, session);
   }
   const selected = selectedSession();
   const anyLive = runs.some(run => run.status === 'live');
@@ -361,8 +363,8 @@ function renderRail() {
   railKey = key;
   const focused = sessionList.contains(document.activeElement) && document.activeElement.dataset.key;
   const rows = [railRow('All', '#', runs.length, anyLive, selected === null, 'all')];
-  for (const [name, session] of sessions) {
-    rows.push(railRow(name, '#s=' + encodeURIComponent(name), session.runs, session.live, selected === name, 'session:' + name));
+  for (const [cwd, session] of sessions) {
+    rows.push(railRow(session.name, '#s=' + encodeURIComponent(cwd), session.runs, session.live, selected === cwd, 'session:' + cwd, cwd));
   }
   sessionList.replaceChildren(...rows);
   if (focused) {
@@ -375,7 +377,7 @@ function applyFilter() {
   const selected = selectedSession();
   let shown = 0;
   for (const entry of strips.values()) {
-    entry.node.hidden = selected !== null && entry.run.session !== selected;
+    entry.node.hidden = selected !== null && entry.run.cwd !== selected;
     if (!entry.node.hidden) shown += 1;
   }
   empty.textContent = runs.length ? 'No runs from ' + selected + '.' : NO_RUNS;
@@ -431,7 +433,7 @@ function render(snapshot) {
     } else {
       entry = newStrip(run);
       strips.set(run.id, entry);
-      if (!firstSnapshot && (selected === null || run.session === selected)) landed += 1;
+      if (!firstSnapshot && (selected === null || run.cwd === selected)) landed += 1;
     }
     const slot = previous ? previous.nextSibling : stripList.firstChild;
     if (slot !== entry.node) stripList.insertBefore(entry.node, slot);
