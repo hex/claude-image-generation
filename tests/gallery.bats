@@ -770,3 +770,25 @@ cpu_seconds() {
     echo "$answer"; return 1; }
   [[ -f "$out/held-gemini.png" && -d "$IMAGE_GALLERY_DIR/runs/$a" ]]
 }
+
+@test "deleting a project's runs in one request deletes each that is not live and reports the live one it kept" {
+  local out="${BATS_TEST_TMPDIR}/out" a1=20261125T100000Z-00000000a1 a2=20261125T100100Z-00000000a2 a3=20261125T100200Z-00000000a3 b1=20261125T100300Z-00000000b1
+  printf 'png' > "$out/a1-gemini.png"
+  printf 'png' > "$out/a3-gemini.png"
+  printf 'png' > "$out/b1-gemini.png"
+  write_run "$a1" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/a1-gemini.png\n" done
+  write_run "$a2" /work/alpha 'gemini\tquerying\t\tmodel-a\t\n'
+  write_run "$a3" /work/alpha "gemini\tcomplete\t1000\tmodel-a\t$out/a3-gemini.png\nopenai\tquerying\t\tmodel-b\t\n"
+  write_run "$b1" /work/beta "gemini\tcomplete\t1000\tmodel-a\t$out/b1-gemini.png\n" done
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/$a3/active/run-all.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs | length == 4'
+  local answer
+  answer=$(gallery_curl -X POST -H "$(origin)" -w ' %{http_code}' "/delete/$a1/$a2/$a3")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a1\", \"removed\": [\"$out/a1-gemini.png\"], \"missing\": []}, {\"id\": \"$a2\", \"removed\": [], \"missing\": []}], \"kept\": [{\"id\": \"$a3\", \"error\": \"run $a3 is still generating\"}]} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ "$(ls "$out" | tr '\n' ' ')" == "a3-gemini.png b1-gemini.png " ]] || { ls -la "$out"; return 1; }
+  [[ "$(snapshot | jq -r '[.runs[].id] | @tsv')" == "$b1"$'\t'"$a3" ]]
+}

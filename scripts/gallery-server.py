@@ -715,7 +715,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reveal(segments[1:])
         elif segments[0] == "retry" and len(segments) == 2:
             self.retry(segments[1])
-        elif segments[0] == "delete" and len(segments) == 2:
+        elif segments[0] == "delete" and len(segments) >= 2:
             self.delete(segments[1:])
         else:
             self.send_json(404, {"error": "no such action: %s" % route})
