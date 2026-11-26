@@ -743,9 +743,11 @@ class Gallery:
             log_path = self.resend_log()
             started = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(time.time() - 1))
             try:
+                # The server cannot know the umask of the run it resends, so the images are saved
+                # readable by this user only, as the gallery's own files are.
                 with open(str(log_path), "ab") as log:
                     child = subprocess.Popen(argv, cwd=cwd, env=self.resend_environment(cwd), stdin=subprocess.DEVNULL,
-                                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True, umask=0o022)
+                                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True, umask=0o077)
             except OSError as e:
                 return 500, {"error": "could not start run-all.sh: %s" % e.strerror}
             self.resends[base] = child

@@ -942,6 +942,8 @@ resend() {
   local saved
   saved=$(jq -r '.runs[0].providers[0].image.path' <<< "$SNAPSHOT")
   [[ "$saved" =~ ^"$PWD"/image-[0-9]{8}-[0-9]{6}-gemini\.png$ && -f "$saved" ]] || { echo "saved: $saved"; ls -la; return 1; }
+  # The server cannot know the umask the run it resends had, so the image is readable by this user only.
+  [[ "$(stat -c %a "$saved" 2>/dev/null || stat -f %Lp "$saved")" == 600 ]] || { ls -la "$saved"; return 1; }
   [[ "$(ls | wc -l | tr -d ' ')" == 3 && -f picture-gemini.png ]] || { ls -la; return 1; }
   # The first run is as it was, and the resent request carried the run's own extra arguments.
   [[ "$(jq -r '.runs[1] | [.id, .prompt, ([.providers[].name] | join(","))] | @tsv' <<< "$SNAPSHOT")" == \
