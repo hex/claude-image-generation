@@ -196,6 +196,7 @@ run_all_gemini() {
   # A POST that declares a body it never sends is answered at once, without reading it.
   [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H 'Content-Length: 100' "${url}/wrong${retry}")" == 403 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H "$(origin)" -H 'Content-Length: 100' "$retry")" == 413 ]]
+  [[ "$(printf 'body' | gallery_curl -o /dev/null -w '%{http_code}' --max-time 3 -X POST -H "$(origin)" -H 'Transfer-Encoding: chunked' --data-binary @- "$retry")" == 413 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' -X POST -H "$(origin)" "$retry")" == 404 ]]
   [[ "$(gallery_curl -o /dev/null -w '%{http_code}' /app.js)" == 200 ]]
 }

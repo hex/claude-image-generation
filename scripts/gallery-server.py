@@ -616,7 +616,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         route = self.route(post=True)
         if route is None:
             return
-        if self.headers.get("Content-Length", "0") != "0":
+        if self.headers.get("Content-Length", "0") != "0" or "Transfer-Encoding" in self.headers:
             self.send_json(413, {"error": "these actions take no request body"})
             return
         segments = route.strip("/").split("/")
