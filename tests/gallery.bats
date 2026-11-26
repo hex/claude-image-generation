@@ -491,6 +491,26 @@ serve_other_version() {
   [[ "$(ls "$IMAGE_GALLERY_DIR/runs" | wc -l | tr -d ' ')" == 1 ]]
 }
 
+@test "a file named server.sock that is not a socket stays where it is, and the run and the server say so" {
+  mkdir -m 700 "$IMAGE_GALLERY_DIR"
+  printf 'notes\n' > "$IMAGE_GALLERY_DIR/server.sock"
+  local root message i
+  root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
+  message="${root}/server.sock is not a socket; move it so the server can make its control socket there"
+  run start_gallery
+  assert_status 1
+  [[ "$output" == "image gallery: ${message}" ]] || { echo "output: $output"; return 1; }
+  # A server started on the folder directly refuses it too, and exits.
+  python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version 0.0.0-other
+  for i in $(seq 1 50); do
+    [[ -z "$(pgrep -f "gallery-server.py serve --root ${IMAGE_GALLERY_DIR}")" ]] && break
+    sleep 0.1
+  done
+  [[ -z "$(pgrep -f "gallery-server.py serve --root ${IMAGE_GALLERY_DIR}")" ]]
+  [[ "$(tail -n 1 "$IMAGE_GALLERY_DIR/server.log")" == "image gallery: ${message}" ]] || { cat "$IMAGE_GALLERY_DIR/server.log"; return 1; }
+  [[ "$(cat "$IMAGE_GALLERY_DIR/server.sock")" == notes ]]
+}
+
 @test "an IMAGE_DISPLAY that is not gallery, pane or none stops run-all before any provider runs" {
   answer_provider_with "$GEMINI_IMAGE"
   IMAGE_DISPLAY=bogus run_all_gemini

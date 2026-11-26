@@ -799,10 +799,24 @@ class ControlServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
 
 
+def refuse_other_file():
+    """Raises when something other than a socket has the control socket's name in the current
+    folder. In a folder the user chose it may be a file of theirs, so it is never connected to or
+    removed."""
+    try:
+        mode = os.lstat(CONTROL_SOCKET).st_mode
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(mode):
+        raise OSError("%s is not a socket; move it so the server can make its control socket there"
+                      % os.path.abspath(CONTROL_SOCKET))
+
+
 def bind_control(root):
     """Binds the control socket, readable and writable by this user only. The caller holds
     server.lock, so a socket already there is one a dead server left."""
     os.chdir(str(root))
+    refuse_other_file()
     try:
         os.unlink(CONTROL_SOCKET)
     except FileNotFoundError:
@@ -888,7 +902,10 @@ def serve(root, version):
     gallery.scan()
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     write_private(root / "last-port", str(port))
-    control = bind_control(root)
+    try:
+        control = bind_control(root)
+    except OSError as e:
+        sys.exit("image gallery: %s" % e)
     control.gallery = gallery
     threading.Thread(target=control.serve_forever, daemon=True).start()
     busy_at = time.time()
@@ -918,6 +935,7 @@ def control(root, command, timeout=2):
         sock.settimeout(timeout)
         try:
             os.chdir(str(root))
+            refuse_other_file()
             sock.connect(CONTROL_SOCKET)
         except (FileNotFoundError, ConnectionRefusedError):
             return None
