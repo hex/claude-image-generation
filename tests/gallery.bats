@@ -140,6 +140,8 @@ run_all_gemini() {
 }
 
 @test "a run's image reaches the page through /events, and /img serves its bytes as image/png" {
+  # A carriage return in the output path is kept as it is in the status log and read back whole.
+  OUT_BASE="${BATS_TEST_TMPDIR}/out/pic"$'\r'"ture"
   answer_provider_with "$GEMINI_IMAGE"
   run_all_gemini
   assert_status 0
@@ -148,8 +150,9 @@ run_all_gemini() {
   run=$(jq -c '.runs[0]' <<< "$SNAPSHOT")
   [[ "$(jq -r '[.prompt, .status, (.providers | length)] | @tsv' <<< "$run")" == $'a lighthouse at dusk\tdone\t1' ]] || {
     echo "run: $run"; return 1; }
-  [[ "$(jq -r '.providers[0] | [.name, .state, .model, .image.n, .image.path] | @tsv' <<< "$run")" == \
-    "gemini	complete	gemini-3-pro-image	0	${OUT_BASE}-gemini.png" ]] || { echo "run: $run"; return 1; }
+  [[ "$(jq -r '.providers[0] | [.name, .state, .model, .image.n] | @tsv' <<< "$run")" == \
+    "gemini	complete	gemini-3-pro-image	0" ]] || { echo "run: $run"; return 1; }
+  [[ "$(jq -r '.providers[0].image.path' <<< "$run")" == "${OUT_BASE}-gemini.png" ]] || { echo "run: $run"; return 1; }
   [[ "$(jq -r .cwd <<< "$run")" == "$PWD" ]] || { echo "run: $run"; return 1; }
   local id type
   id=$(jq -r .id <<< "$run")

@@ -219,6 +219,13 @@ def run_is_held(run_dir):
     return False
 
 
+def read_status_log(run_dir):
+    """A run's status log as display.sh wrote it. A newline alone ends a record; a carriage return
+    is part of a field, so line endings are not translated."""
+    with open(str(run_dir / "status"), encoding="utf-8", errors="replace", newline="") as f:
+        return f.read()
+
+
 def read_text(path, limit=None):
     with open(str(path), encoding="utf-8", errors="replace") as f:
         return f.read() if limit is None else f.read(limit)
@@ -251,7 +258,7 @@ def read_run(run_dir):
     providers = {name: new_provider(name) for name in meta["providers"]}
     problem = None
     try:
-        reduce_status(read_text(run_dir / "status"), providers)
+        reduce_status(read_status_log(run_dir), providers)
     except FileNotFoundError:
         pass
     except ValueError as e:
@@ -367,7 +374,7 @@ def image_path(runs_dir, run_id, provider, n):
     run_dir = runs_dir / run_id
     providers = {}
     try:
-        reduce_status(read_text(run_dir / "status"), providers)
+        reduce_status(read_status_log(run_dir), providers)
     except (FileNotFoundError, ValueError):
         return None
     p = providers.get(provider)
