@@ -44,6 +44,11 @@ const confirmDelete = document.getElementById('confirm-delete');
 // shows. A frame of any other provider takes the first free cell.
 const PROVIDERS = [['gemini', 'Gemini'], ['openai', 'OpenAI'], ['xai', 'xAI'], ['openrouter', 'OpenRouter']];
 const PROVIDER_NAMES = new Map(PROVIDERS);
+// The aspect ratios the editor offers: each one some provider's model draws. A run that recorded
+// another, as the generate tool allows, offers its own as well.
+const ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', '1:2', '2:1',
+  '9:19.5', '19.5:9', '9:20', '20:9', '5:2', '1:4', '4:1', '1:8', '8:1'];
+const SIZE_TIERS = ['1K', '2K', '4K'];
 const THEME_KEY = 'gallery-theme';
 // A run started within this long ago shows full size; an older one is a compact strip.
 const FULL_SIZE_MS = 24 * 60 * 60 * 1000;
@@ -520,8 +525,8 @@ function updateStrip(entry, run) {
 
 // ── Resending ────────────────────────────────────────────────────
 
-// Opens the editor that resends a run's prompt in place of the prompt: the prompt to edit, a chip per
-// provider with the run's own pressed, Cancel and Resend. It sits beside the run's head, not in it,
+// Opens the editor that resends a run's prompt in place of the prompt: the prompt to edit, the aspect
+// ratio and size tier the run recorded, a chip per provider with the run's own pressed, Cancel and Resend. It sits beside the run's head, not in it,
 // so a snapshot that redraws the head leaves what is typed, and the caret, alone.
 function openEditor(entry) {
   if (entry.editor) {
@@ -536,12 +541,18 @@ function openEditor(entry) {
   const cancel = el('button', { type: 'button', class: 'cancel', text: 'Cancel' });
   const send = el('button', { type: 'button', class: 'send' }, el('span', { text: 'Resend' }), el('kbd', { 'aria-hidden': 'true', text: RESEND_KEYS }));
   const error = el('p', { class: 'editor-error', 'aria-live': 'polite' });
+  const ratios = run.aspect_ratio && !ASPECT_RATIOS.includes(run.aspect_ratio) ? [run.aspect_ratio, ...ASPECT_RATIOS] : ASPECT_RATIOS;
+  const aspectRatio = shapeSelect('editor-ratio-' + run.id, ratios, run.aspect_ratio);
+  const size = shapeSelect('editor-size-' + run.id, SIZE_TIERS, run.size);
   const node = el('div', { class: 'editor' },
     prompt,
+    el('div', { class: 'editor-shape' },
+      el('label', { for: aspectRatio.id, text: 'Aspect ratio' }), aspectRatio,
+      el('label', { for: size.id, text: 'Size' }), size),
     el('div', { class: 'editor-bar' }, el('span', { class: 'chips', role: 'group', 'aria-label': 'Providers' }, ...chips), cancel, send),
     el('p', { class: 'editor-note', text: 'Starts a new run in ' + (run.session || run.cwd) + '. Claude won\u2019t see its results.' }),
     error);
-  const editor = { node, prompt, chips, cancel, send, error, busy: false };
+  const editor = { node, prompt, aspectRatio, size, chips, cancel, send, error, busy: false };
   for (const chip of chips) {
     chip.addEventListener('click', () => {
       chip.setAttribute('aria-pressed', String(chip.getAttribute('aria-pressed') !== 'true'));
@@ -565,6 +576,15 @@ function openEditor(entry) {
   showEditing(entry);
   prompt.focus();
   prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+}
+
+// A select of values, the first option the providers' own default, with chosen selected: null
+// selects the default.
+function shapeSelect(id, values, chosen) {
+  const select = el('select', { id, class: 'editor-select' }, el('option', { value: '', text: 'Provider default' }),
+    ...values.map(value => el('option', { value, text: value })));
+  select.value = chosen || '';
+  return select;
 }
 
 // Puts the open editor under the run's line in place of its prompt, or brings the prompt back.
@@ -592,7 +612,7 @@ function readyToSend(editor) {
   editor.cancel.disabled = editor.busy;
 }
 
-// Sends the edited prompt and the chosen providers. The server answers once the new run has started,
+// Sends the edited prompt, the chosen aspect ratio and size tier, and the chosen providers. The server answers once the new run has started,
 // which the next snapshot shows at the top; the editor closes then. When run-all.sh is still starting
 // as the server stops waiting, the editor closes too and a note under the run's line says the resend
 // started. Otherwise it stays open with the server's reason, so nothing is resent without the page
@@ -610,7 +630,7 @@ async function resend(entry) {
     const response = await fetch('resend/' + encodeURIComponent(entry.run.id), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: editor.prompt.value, providers }),
+      body: JSON.stringify({ prompt: editor.prompt.value, providers, aspect_ratio: editor.aspectRatio.value || null, size: editor.size.value || null }),
     });
     const answer = await response.json().catch(() => ({}));
     if (!response.ok) failure = answer.error || 'The server answered ' + response.status + '.';
