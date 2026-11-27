@@ -5,6 +5,11 @@ This file lists every notable change to claude-image-generation. The format foll
 versioning in `YYYY.M.PATCH` format. [GitHub releases](https://github.com/hex/claude-image-generation/releases)
 cover the versions up to 2026.9.1.
 
+## Unreleased
+
+### Fixed
+- `openrouter.sh` draws with OpenRouter's models that output only images, such as `openai/gpt-image-2` and `x-ai/grok-imagine-image-2.0`. OpenRouter's chat completions endpoint answered them with HTTP 404. Before its request the script now reads OpenRouter's public image model list, which needs no key and costs nothing, and sends such a model to `/api/v1/images`, with any input images as `input_references`. Every other model, the default included, keeps its chat completions request. When the script cannot read the list, it exits 1 before any paid request.
+
 ## 2026.11.2 - 2026-11-26
 
 ### Added

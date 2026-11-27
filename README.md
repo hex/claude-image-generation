@@ -5,7 +5,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 ## Features
 
 - **Text-to-image generation** with Google Gemini, OpenAI GPT Image 2, xAI Grok Image, or any image model on OpenRouter
-- **OpenRouter gateway** — reach any OpenRouter image model (Gemini, GPT Image, and more) through one key via the chat-completions API
+- **OpenRouter gateway** — reach any OpenRouter image model (Gemini, GPT Image, Grok Imagine and more) through one key: chat completions for models that also output text, OpenRouter's images endpoint for models that output only images
 - **Image editing** with text instructions (all providers)
 - **Multi-image input** — repeatable `--input-image` for multi-image edits (all providers) and Gemini reference-based generation
 - **Parallel generation** across all providers via `scripts/run-all.sh`, shown as one run: a section with one frame per provider on the browser gallery, or one shared streaming pane with council-style colored banners and a `waiting on` line naming the pending providers (animated until the first image renders, then written once under each block)
@@ -155,7 +155,7 @@ xAI has also retired `grok-imagine-image-quality`, the quality mode launched 202
 
 ### Available OpenRouter Models
 
-OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. A few:
+OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. The Gemini models also output text and go to chat completions; `openai/gpt-image-*`, `x-ai/grok-imagine-image-2.0` and the other models that output only images go to OpenRouter's images endpoint (see [openrouter.sh](#openroutersh)). A few:
 
 | Model | Characteristics |
 |-------|-----------------|
@@ -410,7 +410,7 @@ bash scripts/xai.sh \
 
 #### openrouter.sh
 
-OpenRouter is a gateway to many image models through a single key. It uses the chat-completions API, so `--model` accepts any OpenRouter model slug that supports image output.
+OpenRouter is a gateway to many image models through a single key, so `--model` accepts any OpenRouter model slug that supports image output. Before its request the script reads OpenRouter's public image model list (`GET /api/v1/models?output_modalities=image`, sent without the key). A model the list shows with `image` and no `text` among its output modalities goes to `POST /api/v1/images`. Any other model, the default and a slug missing from the list included, goes to `POST /api/v1/chat/completions`. When the script cannot read the list, it exits with code 1 before any paid request.
 
 ```bash
 # Generate (default model: google/gemini-nano-banana-2.1)
@@ -459,7 +459,7 @@ Each `--input-image` must be a PNG, JPEG, WebP or GIF file. The scripts copy eac
 | Gemini | 14 | `generate` (references for a fresh composition) and `edit` |
 | OpenAI | 16 | `edit` only (its generation endpoint takes no images) |
 | xAI | 5 on `grok-imagine-image-2.0` (older models take 3) | `edit` only |
-| OpenRouter | model-dependent | `generate` and `edit` (input images attached as chat image parts) |
+| OpenRouter | model-dependent | `generate` and `edit` (input images attached as chat image parts, or as `input_references` on the images endpoint) |
 
 ```bash
 # Gemini: compose a new image from reference images (generate mode)
@@ -542,7 +542,7 @@ Delete the verdict directory to try the default again before the verdict expires
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
 | Transparent BG | No | Yes (png or webp only; preview on gpt-image-2) | No | Model-dependent |
 | Aspect ratios | 10 on Pro / 14 on 3.1 Flash | Any `WxH` up to 3:1 on gpt-image-2 and the 2.5 models; 3 fixed sizes on older models | 16 options (incl. 21:9, 5:2, auto) | Prompt-driven |
-| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts (generate + edit) |
+| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts or images-endpoint `input_references` (generate + edit) |
 | Quality tiers | N/A | auto / low / medium / high, plus xhigh / max on the 2.5 and 2.6 models | low / medium / auto (2.0 only) | Model-dependent |
 | Thinking mode | Yes (`--thinking-level`) | No | No | Model-dependent |
 | Search grounding | Yes (Google Search) | No | No | Model-dependent |
@@ -562,7 +562,7 @@ Delete the verdict directory to try the default again before the verdict expires
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
-| OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
+| OpenRouter script | `scripts/openrouter.sh` | OpenRouter image call execution, through chat completions or the images endpoint |
 | Retry helper | `scripts/retry.sh` | `curl_with_retry` for transient API failures |
 | Model fallback | `scripts/model-fallback.sh` | Sends the request once more with the provider's fallback model when the default is unavailable to the key, and remembers that verdict per key |
 | Input image check | `scripts/input-images.sh` | Copies each `--input-image` into a private temp folder, reads the copy's type from its bytes and refuses anything that is not a PNG, JPEG, WebP or GIF file |

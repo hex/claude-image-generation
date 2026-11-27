@@ -19,6 +19,8 @@ Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [
 
 OpenRouter is a gateway: --model accepts any OpenRouter model slug that supports
 image output (e.g. google/gemini-3.1-flash-image, google/gemini-3-pro-image).
+A model that outputs only images (e.g. openai/gpt-image-2) is sent to OpenRouter's
+images endpoint, every other model to chat completions.
 
 Options:
   --mode              generate or edit (required)
