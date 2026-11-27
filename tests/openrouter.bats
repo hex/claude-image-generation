@@ -112,10 +112,31 @@ setup() {
   local mock_dir="${BATS_TMPDIR}/openrouter_mocks_$$"
   mkdir -p "$mock_dir"
   printf '%s\n200\n' '{"choices":[{"error":{"code":502,"message":"upstream boom"},"finish_reason":"error","message":{"content":""}}]}' > "$mock_dir/response.txt"
-  printf '#!/bin/bash\ncat >/dev/null\ncat "$(dirname "$0")/response.txt"\n' > "$mock_dir/curl"
+  printf '#!/bin/bash\n. "$OPENROUTER_MODEL_LIST_STUB"\ncat >/dev/null\ncat "$(dirname "$0")/response.txt"\n' > "$mock_dir/curl"
   chmod +x "$mock_dir/curl"
   PATH="$mock_dir:$PATH" run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
   rm -rf "$mock_dir" "$DISPLAY_PANE_DIR"
   assert_status 1
   assert_output_contains "OpenRouter provider error (502): upstream boom"
+}
+
+# answer_openrouter <body> <status> — the stub answers every request but the model list with these.
+answer_openrouter() {
+  printf '%s\n%s\n' "$1" "$2" > "$PROVIDER_API_STUB_DIR/answer"
+  export DISPLAY_PANE_DIR="${BATS_TEST_TMPDIR}/pane"
+  mkdir -p "$DISPLAY_PANE_DIR"
+}
+
+# openai/gpt-image-2 lists only image among its output modalities, and OpenRouter's chat endpoint
+# answers it with HTTP 404, so it has to go to the images endpoint.
+@test "openrouter: a model that outputs only images draws through the images endpoint" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  answer_openrouter '{"created":1748372400,"data":[{"b64_json":"ZmFrZQ==","media_type":"image/png"}]}' 200
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model openai/gpt-image-2
+  assert_status 0
+  [[ "$(cat "$PROVIDER_API_STUB_DIR/url")" == "https://openrouter.ai/api/v1/images" ]] || {
+    echo "Expected one request, to the images endpoint, got:"; cat "$PROVIDER_API_STUB_DIR/url"; return 1; }
+  [[ "$(jq -cS . "$PROVIDER_API_STUB_DIR/body")" == '{"model":"openai/gpt-image-2","prompt":"a cat","response_format":"b64_json"}' ]] || {
+    echo "Unexpected body:"; cat "$PROVIDER_API_STUB_DIR/body"; return 1; }
+  [[ "$(cat "$OUT")" == "fake" ]] || { echo "Expected the decoded image 'fake' in $OUT"; return 1; }
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Generates or edits images using OpenRouter as a model-flexible gateway.
-# ABOUTME: Uses the chat-completions endpoint with image output modalities.
+# ABOUTME: Uses chat completions, or the images endpoint for models that output only images.
 
 set -euo pipefail
 
@@ -88,44 +88,39 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
-# OpenRouter does image generation through chat completions: the user message
-# holds the prompt (and, when input images are given in either mode, one image_url
-# part per input image as a base64 data URL), and the model returns images in message.images[].
-build_request_body() {
-  local content
-
-  if [[ ${#INPUT_IMAGES[@]} -gt 0 ]]; then
-    content="[]"
-    local i data_url_file
-    for i in "${!INPUT_IMAGES[@]}"; do
-      # A normal image exceeds ARG_MAX, so the base64 payload is streamed into jq
-      # via --rawfile rather than passed as an argument (mirrors gemini.sh). The
-      # data: prefix is prepended into the same file so jq embeds a complete URL.
-      data_url_file=$(mktemp -p "$tmpdir")
-      printf 'data:%s;base64,' "${INPUT_MIMES[$i]}" > "$data_url_file"
-      base64 < "${INPUT_IMAGES[$i]}" | tr -d '\n' >> "$data_url_file"
-      content=$(echo "$content" | jq --rawfile url "$data_url_file" \
-        '. + [{"type": "image_url", "image_url": {"url": $url}}]')
-    done
-    content=$(echo "$content" | jq --arg prompt "$PROMPT" \
-      '[{"type": "text", "text": $prompt}] + .')
-  else
-    # Generate mode: a plain string content keeps the body small enough to pass
-    # inline, but we still build it with jq for correct escaping.
-    content=$(jq -n --arg prompt "$PROMPT" '$prompt')
-  fi
-
-  # content can hold a multi-megabyte base64 image, so it enters jq on stdin as
-  # the main input rather than as --argjson, which would exceed ARG_MAX. The model
-  # is added by send_request, so a fallback reuses the body.
-  echo "$content" | jq \
-    '{
-      "modalities": ["image", "text"],
-      "messages": [{"role": "user", "content": .}]
-    }'
+# build_image_parts — prints a JSON array holding one image_url part per input image, its url a
+# base64 data URL, or [] without input images. Chat completions takes these parts in the user
+# message and the images endpoint as input_references, in the same shape.
+build_image_parts() {
+  local parts="[]" i data_url_file
+  for i in "${!INPUT_IMAGES[@]}"; do
+    # A normal image exceeds ARG_MAX, so the base64 payload is streamed into jq
+    # via --rawfile rather than passed as an argument (mirrors gemini.sh). The
+    # data: prefix is prepended into the same file so jq embeds a complete URL.
+    data_url_file=$(mktemp -p "$tmpdir")
+    printf 'data:%s;base64,' "${INPUT_MIMES[$i]}" > "$data_url_file"
+    base64 < "${INPUT_IMAGES[$i]}" | tr -d '\n' >> "$data_url_file"
+    parts=$(echo "$parts" | jq --rawfile url "$data_url_file" \
+      '. + [{"type": "image_url", "image_url": {"url": $url}}]')
+  done
+  echo "$parts"
 }
 
-REQUEST_BODY=$(build_request_body)
+# Built once: each body names its model when it is sent, so a fallback reuses the parts.
+IMAGE_PARTS=$(build_image_parts)
+
+# Chat completions: the user message is the prompt alone, or a text part followed by the image
+# parts, and the model returns images in message.images[].
+readonly CHAT_BODY='{
+  "model": $model,
+  "modalities": ["image", "text"],
+  "messages": [{"role": "user", "content": (if length > 0 then [{"type": "text", "text": $prompt}] + . else $prompt end)}]
+}'
+
+# The images endpoint: the prompt, and the image parts as input_references to edit or guide. The
+# image comes back as base64 in data[].b64_json.
+readonly IMAGES_BODY='{"model": $model, "prompt": $prompt, "response_format": "b64_json"}
+  + (if length > 0 then {"input_references": .} else {} end)'
 
 use_remembered_fallback
 echo "Calling OpenRouter API (model: ${MODEL}, mode: ${MODE})..." >&2
@@ -135,13 +130,36 @@ CURL_HEADERS=(-H "Content-Type: application/json" -H "Authorization: Bearer ${OP
 [[ -n "$SITE_URL" ]] && CURL_HEADERS+=(-H "HTTP-Referer: ${SITE_URL}")
 [[ -n "$SITE_NAME" ]] && CURL_HEADERS+=(-H "X-Title: ${SITE_NAME}")
 
-# send_request <model> — posts the body with this model first in it and prints curl_with_retry's
-# body and status. The body embeds the base64 image in edit mode, so it is streamed to curl on
-# stdin (--data-binary @-) instead of passed as -d, which would exceed ARG_MAX.
+# OpenRouter serves a model that outputs images and no text only through its images endpoint; chat
+# completions answers it with HTTP 404. The public model list, read without the key, names them.
+MODEL_LIST=$(curl_with_retry -sS -w "\n%{http_code}" "https://openrouter.ai/api/v1/models?output_modalities=image")
+MODEL_LIST_CODE="${MODEL_LIST##*$'\n'}"
+if [[ "$MODEL_LIST_CODE" != "200" ]]; then
+  provider_die "Could not read OpenRouter's image model list to choose an endpoint for ${MODEL}: HTTP ${MODEL_LIST_CODE}"
+fi
+IMAGE_ONLY_MODELS=$(echo "${MODEL_LIST%$'\n'*}" | jq -r \
+  '.data[] | select(.architecture.output_modalities | arrays | index("text") | not) | .id' 2>/dev/null) \
+  || provider_die "Could not read OpenRouter's image model list to choose an endpoint for ${MODEL}: the answer is not a model list"
+
+# uses_images_endpoint <model> — true when OpenRouter lists the model as outputting images and no
+# text. Any other model, one missing from the list included, goes to chat completions.
+uses_images_endpoint() {
+  grep -qxF -- "$1" <<< "$IMAGE_ONLY_MODELS"
+}
+
+# send_request <model> — posts the body for this model to its endpoint and prints curl_with_retry's
+# body and status. The parts can hold a multi-megabyte base64 image, so they enter jq on stdin as
+# the main input rather than as --argjson, and the body reaches curl on stdin (--data-binary @-)
+# rather than as -d; either argument would exceed ARG_MAX.
 send_request() {
-  printf '%s' "$REQUEST_BODY" | jq --arg model "$1" '{"model": $model} + .' \
+  local endpoint="chat/completions" body="$CHAT_BODY"
+  if uses_images_endpoint "$1"; then
+    endpoint="images"
+    body="$IMAGES_BODY"
+  fi
+  printf '%s' "$IMAGE_PARTS" | jq --arg model "$1" --arg prompt "$PROMPT" "$body" \
     | curl_with_retry -s -w "\n%{http_code}" \
-      -X POST "https://openrouter.ai/api/v1/chat/completions" \
+      -X POST "https://openrouter.ai/api/v1/${endpoint}" \
       "${CURL_HEADERS[@]}" \
       --data-binary @-
 }
@@ -156,30 +174,37 @@ if [[ "$HTTP_CODE" != "200" ]]; then
   provider_die "OpenRouter API returned HTTP ${HTTP_CODE}: ${api_msg}"
 fi
 
-DATA_URL=$(echo "$BODY" | jq -r '.choices[0].message.images[0].image_url.url // empty')
-
-if [[ -z "$DATA_URL" ]]; then
-  # A mid-generation upstream failure arrives as HTTP 200 with the error on the
-  # choice, not at the top level, so it is named here rather than dumped as a body.
-  CHOICE_ERROR=$(echo "$BODY" | jq -r '
-    (.choices[0].error)? // empty
-    | select(type == "object")
-    | "(" + ((.code // "?") | tostring) + "): " + ((.message // "") | tostring)' 2>/dev/null || true)
-  if [[ -n "$CHOICE_ERROR" ]]; then
-    provider_die "OpenRouter provider error ${CHOICE_ERROR}"
+if uses_images_endpoint "$MODEL"; then
+  IMAGE_DATA=$(echo "$BODY" | jq -r '.data[0].b64_json // empty' 2>/dev/null || true)
+  if [[ -z "$IMAGE_DATA" ]]; then
+    provider_die "No image data in response: $(echo "$BODY" | jq -c '.' 2>/dev/null || echo "$BODY")"
   fi
-  TEXT_RESPONSE=$(echo "$BODY" | jq -r '.choices[0].message.content // empty' 2>/dev/null || true)
-  if [[ -n "$TEXT_RESPONSE" ]]; then
-    provider_die "No image data in response. Model said: ${TEXT_RESPONSE}"
+else
+  DATA_URL=$(echo "$BODY" | jq -r '.choices[0].message.images[0].image_url.url // empty')
+
+  if [[ -z "$DATA_URL" ]]; then
+    # A mid-generation upstream failure arrives as HTTP 200 with the error on the
+    # choice, not at the top level, so it is named here rather than dumped as a body.
+    CHOICE_ERROR=$(echo "$BODY" | jq -r '
+      (.choices[0].error)? // empty
+      | select(type == "object")
+      | "(" + ((.code // "?") | tostring) + "): " + ((.message // "") | tostring)' 2>/dev/null || true)
+    if [[ -n "$CHOICE_ERROR" ]]; then
+      provider_die "OpenRouter provider error ${CHOICE_ERROR}"
+    fi
+    TEXT_RESPONSE=$(echo "$BODY" | jq -r '.choices[0].message.content // empty' 2>/dev/null || true)
+    if [[ -n "$TEXT_RESPONSE" ]]; then
+      provider_die "No image data in response. Model said: ${TEXT_RESPONSE}"
+    fi
+    provider_die "No image data in response: $(echo "$BODY" | jq -c '.' 2>/dev/null || echo "$BODY")"
   fi
-  provider_die "No image data in response: $(echo "$BODY" | jq -c '.' 2>/dev/null || echo "$BODY")"
-fi
 
-# Strip the "data:<mime>;base64," prefix, leaving raw base64 to decode.
-IMAGE_DATA="${DATA_URL#data:*;base64,}"
+  # Strip the "data:<mime>;base64," prefix, leaving raw base64 to decode.
+  IMAGE_DATA="${DATA_URL#data:*;base64,}"
 
-if [[ "$IMAGE_DATA" == "$DATA_URL" ]]; then
-  provider_die "Unexpected image URL format (not a base64 data URL): ${DATA_URL:0:64}..."
+  if [[ "$IMAGE_DATA" == "$DATA_URL" ]]; then
+    provider_die "Unexpected image URL format (not a base64 data URL): ${DATA_URL:0:64}..."
+  fi
 fi
 
 save_image "$OUTPUT" <<< "$IMAGE_DATA"

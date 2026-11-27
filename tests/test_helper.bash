@@ -15,6 +15,9 @@ export DUMMY_OPENAI_KEY="test-openai-key-not-real"
 export DUMMY_XAI_KEY="test-xai-key-not-real"
 export DUMMY_OPENROUTER_KEY="test-openrouter-key-not-real"
 
+# A curl stub sources this first so openrouter.sh's image model list comes from a fixture.
+export OPENROUTER_MODEL_LIST_STUB="${PLUGIN_ROOT}/tests/answer_openrouter_model_list.bash"
+
 # Assert that output contains a substring
 # Usage: assert_output_contains "expected substring"
 assert_output_contains() {
@@ -114,10 +117,12 @@ cleanup_tmpdir() {
 
 # Puts a curl first on PATH that answers every request the way a provider answers the dummy
 # keys above: HTTP 401 with an auth error. A provider test that gets as far as the API call
-# would otherwise send a real HTTPS request. The stub appends each address it is sent to
-# to $PROVIDER_API_STUB_DIR/url and keeps a body given as @- or @<file> (curl_with_retry
+# would otherwise send a real HTTPS request. OpenRouter's image model list, which needs no key,
+# is answered from its fixture and not recorded. The stub appends every other address it is
+# sent to to $PROVIDER_API_STUB_DIR/url and keeps a body given as @- or @<file> (curl_with_retry
 # turns the first into the second) in $PROVIDER_API_STUB_DIR/body. A test that needs another
-# answer puts its own curl in front of PATH afterwards, and that one wins. Call from setup().
+# answer writes it, body then status on the last line, to $PROVIDER_API_STUB_DIR/answer, or puts
+# its own curl in front of PATH afterwards, and that one wins. Call from setup().
 # Usage: stub_provider_api
 stub_provider_api() {
   PROVIDER_API_STUB_DIR="${BATS_TMPDIR}/provider_api_stub_$$_${BATS_TEST_NUMBER:-0}"
@@ -125,6 +130,7 @@ stub_provider_api() {
   mkdir -p "$PROVIDER_API_STUB_DIR"
   cat > "$PROVIDER_API_STUB_DIR/curl" <<'STUB'
 #!/bin/bash
+. "$OPENROUTER_MODEL_LIST_STUB"
 d="$(dirname "$0")"
 for a in "$@"; do
   case "$a" in
@@ -133,7 +139,11 @@ for a in "$@"; do
     @*) cp "${a#@}" "$d/body" ;;
   esac
 done
-printf '%s\n401\n' '{"error":{"message":"Incorrect API key provided"}}'
+if [[ -f "$d/answer" ]]; then
+  cat "$d/answer"
+else
+  printf '%s\n401\n' '{"error":{"message":"Incorrect API key provided"}}'
+fi
 STUB
   chmod +x "$PROVIDER_API_STUB_DIR/curl"
   export PATH="$PROVIDER_API_STUB_DIR:$PATH"

@@ -40,6 +40,7 @@ stub_curl() {
   printf '%s\n' "${2:-}" > "$MOCK_DIR/during-request.sh"
   cat > "$MOCK_DIR/curl" <<'STUB'
 #!/bin/bash
+. "$OPENROUTER_MODEL_LIST_STUB"
 d="$(dirname "$0")"
 touch "${d}/called"
 bash "${d}/during-request.sh"
