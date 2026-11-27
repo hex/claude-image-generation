@@ -262,6 +262,14 @@ def read_status_log(run_dir):
         return f.read()
 
 
+def status_size(run_dir):
+    """How many bytes a run's status log holds: 0 before it exists. Records are only ever appended."""
+    try:
+        return os.stat(str(run_dir / "status")).st_size
+    except FileNotFoundError:
+        return 0
+
+
 def read_text(path, limit=None):
     with open(str(path), encoding="utf-8", errors="replace") as f:
         return f.read() if limit is None else f.read(limit)
@@ -314,6 +322,25 @@ def check_arguments(arguments):
     if (not isinstance(extras, dict) or sorted(extras) != sorted(RESEND_PROVIDERS)
             or not all(isinstance(value, str) for value in extras.values())):
         raise bad("extras", extras, "a string for each of %s" % ", ".join(RESEND_PROVIDERS))
+
+
+def retry_refusal(run_id, meta, providers, held, name):
+    """Why the failed frame of provider name cannot run again in its run, or None when it can: only once
+    the run has ended, with no frame still at work when it did, only in a run run-all.sh started and
+    recorded its arguments for, and only when the frame's last record is an error. providers is the
+    run's status log folded by reduce_status; held, whether a process holds the run."""
+    if held:
+        return "run %s is still generating" % run_id
+    if name not in RESEND_PROVIDERS:
+        return "%s is not a provider run-all.sh runs" % json.dumps(name)
+    if "arguments" not in meta:
+        return "run %s did not record the arguments it was started with, so its frames cannot be retried" % run_id
+    at_work = [p["name"] for p in providers.values() if p["state"] in IN_FLIGHT]
+    if at_work:
+        return "run %s stopped while its %s frame was at work, so its frames cannot be retried" % (run_id, at_work[0])
+    if providers[name]["state"] != "error":
+        return "run %s's %s frame did not fail, so there is nothing to retry" % (run_id, name)
+    return None
 
 
 def read_run(run_dir):
@@ -377,6 +404,7 @@ def read_run(run_dir):
         cards.append({
             "name": p["name"], "state": state, "model": p["model"], "ms": p["ms"],
             "attempt": p["attempt"], "round": p["round"], "error": error, "image": image,
+            "retryable": retry_refusal(run_dir.name, meta, providers, status == "live", p["name"]) is None,
         })
     return {
         "id": run_dir.name,
@@ -710,6 +738,10 @@ class Gallery:
         # too; an offer a killed run-all left behind does not keep its run.
         if run_is_held(run_dir):
             return 409, {"id": run_id, "error": "run %s is still generating" % run_id}
+        # A frame's retry claims the run's output base before its run-all.sh holds the run.
+        arguments = read_meta(run_dir).get("arguments")
+        if arguments is not None and self.saving_to(arguments["output_base"]):
+            return 409, {"id": run_id, "error": "run %s is starting a retry" % run_id}
         providers = {}
         try:
             reduce_status(read_status_log(run_dir), providers)
@@ -783,6 +815,44 @@ class Gallery:
             return e.code, {"error": str(e)}
         return self.await_run(child, log_path, lambda: self.resent_run(launch, started), {"pending": True, "launch": launch})
 
+    def retry_frame(self, run_id, name):
+        """Runs the failed frame of provider name again in its own run: run-all.sh with the run's own
+        prompt and arguments, saving to <output base>-<name>.png, the file the run first meant to
+        save, and adding its records to the run's status log, so the frame shows the retry as it
+        goes. retry_refusal says which frames may. Answers (HTTP status, body) as await_run does, the
+        run having started once its status log grows, or with why none was started."""
+        try:
+            # Held while the run is checked and run-all.sh claims its output base, so a delete either
+            # comes first, and there is no run to retry, or finds the claim and keeps the run.
+            with self.runs_lock:
+                run_dir, meta = self.run_meta(run_id)
+                if name not in meta["providers"]:
+                    raise Refusal(404, "run %s has no %s frame" % (run_id, name))
+                providers = {provider: new_provider(provider) for provider in meta["providers"]}
+                try:
+                    reduce_status(read_status_log(run_dir), providers)
+                except FileNotFoundError:
+                    pass
+                except ValueError as e:
+                    raise Refusal(409, "run %s's status log is unreadable (%s), so how its frames ended is unknown" % (run_id, e))
+                refusal = retry_refusal(run_id, meta, providers, run_is_held(run_dir), name)
+                if refusal is not None:
+                    raise Refusal(409, refusal)
+                check_places(run_id, meta)
+                arguments = meta["arguments"]
+                base = arguments["output_base"]
+                size = status_size(run_dir)
+                argv = run_all_argv(arguments, meta["prompt"], base, [name]) + ["--gallery-run", run_id]
+                child, log_path = self.launch_run_all(argv, meta["cwd"], base, [name], None)
+        except Refusal as e:
+            return e.code, {"error": str(e)}
+        return self.await_run(child, log_path, lambda: run_id if status_size(run_dir) > size else None, {"pending": True})
+
+    def saving_to(self, base):
+        """True while a run-all.sh the server started saves under base."""
+        with self.resend_lock:
+            return base in self.resends
+
     def launch_run_all(self, argv, cwd, base, providers, launch):
         """Starts run-all.sh with argv in cwd, saving each of providers to <base>-<provider>.png, and
         returns it with the file its output goes to. It runs as resend_environment makes it, in a
@@ -792,7 +862,7 @@ class Gallery:
         with self.resend_lock:
             outputs = ["%s-%s.png" % (base, name) for name in providers]
             if base in self.resends:
-                raise Refusal(409, "a resend saving to %s-<provider>.png is already starting; try again in a second" % base)
+                raise Refusal(409, "a run saving to %s-<provider>.png is already starting; try again in a second" % base)
             taken = [path for path in outputs if os.path.lexists(path)]
             if taken:
                 raise Refusal(409, "%s already exists, and nothing is overwritten" % taken[0])
@@ -833,13 +903,18 @@ class Gallery:
 
     def resend_environment(self, cwd, launch):
         """The server's environment, which holds the API keys of the run-all.sh that started it, as a
-        resent run-all.sh gets it: in cwd, showing its run in this gallery and nowhere else, and
-        recording launch in the run's meta.json so the server can find it."""
+        run-all.sh the page starts gets it: in cwd, showing its run in this gallery and nowhere else,
+        and, given a launch id, recording it in the new run's meta.json so the server can find it. A
+        frame's retry starts no new run, so it gets none, not even one the server inherited."""
         env = {name: value for name, value in os.environ.items() if name not in RESEND_DROPPED_ENV}
         # Bash keeps an inherited PWD that names its working folder, so the new run records the
         # folder spelled as the run it resends did, symlinks and all, and lands in the same project.
         env.update(PWD=cwd, IMAGE_DISPLAY="gallery", IMAGE_GALLERY_DIR=str(self.root),
-                   DISPLAY_IMAGE_TARGET="/dev/null", IMAGE_GALLERY_NO_OPEN="1", IMAGE_GALLERY_LAUNCH_ID=launch)
+                   DISPLAY_IMAGE_TARGET="/dev/null", IMAGE_GALLERY_NO_OPEN="1")
+        if launch is None:
+            env.pop("IMAGE_GALLERY_LAUNCH_ID", None)
+        else:
+            env["IMAGE_GALLERY_LAUNCH_ID"] = launch
         return env
 
     def resend_log(self):
@@ -1029,6 +1104,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reveal(segments[1:])
         elif segments[0] == "retry" and len(segments) == 2:
             self.retry(segments[1])
+        elif segments[0] == "retry" and len(segments) == 3:
+            self.send_json(*self.gallery.retry_frame(segments[1], segments[2]))
         else:
             self.send_json(404, {"error": "no such action: %s" % route})
 

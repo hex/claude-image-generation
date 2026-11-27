@@ -1184,3 +1184,42 @@ write_resendable_run() {
   saved=$(jq -r '.runs[0].providers[0].image.path' <<< "$SNAPSHOT")
   [[ "$saved" =~ ^"$out"/art/image-[0-9]{8}-[0-9]{6}-gemini\.png$ && -f "$saved" ]] || { echo "saved: $saved"; ls -laR "$out"; return 1; }
 }
+
+# retry_frame <run-id> <provider> — POSTs a failed frame's Retry the way its button does, printing the
+# answer and then its status.
+retry_frame() {
+  gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" "/retry/$1/$2"
+}
+
+@test "a failed frame offers Retry only once its run has ended with no frame at work and recorded its arguments, and the server refuses any other" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 \
+    c=20261125T100200Z-00000000c3 d=20261125T100300Z-00000000d4
+  printf 'png' > "$out/hero-openai.png"
+  # a ended with gemini failed and openai done; b the same, but recorded no arguments.
+  write_run "$a" "$out" "gemini\terror\t\tmodel-a\t\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\n" done
+  record_arguments "$a" "$out/hero"
+  write_run "$b" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  # c is still at work, held by a live process; d stopped with openai at work, its process gone.
+  write_run "$c" "$out" 'gemini\terror\t\tmodel-a\t\nopenai\tquerying\t\tmodel-b\t\n'
+  record_arguments "$c" "$out/held"
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/$c/active/run-all.$HOLDER_PID"
+  write_run "$d" "$out" 'gemini\terror\t\tmodel-a\t\nopenai\tquerying\t\tmodel-b\t\n'
+  record_arguments "$d" "$out/stopped"
+  start_gallery
+  wait_for_snapshot '(.runs | length == 4) and .runs[1].status == "live"'
+  [[ "$(jq -c '[.runs[] | [.status, [.providers[] | .name, .retryable]]]' <<< "$SNAPSHOT")" == \
+    '[["interrupted",["gemini",false,"openai",false]],["live",["gemini",false,"openai",false]],["done",["gemini",false]],["done",["gemini",true,"openai",false]]]' ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  [[ "$(retry_frame "$b" gemini)" == \
+    "{\"error\": \"run $b did not record the arguments it was started with, so its frames cannot be retried\"} 409" ]]
+  [[ "$(retry_frame "$c" gemini)" == "{\"error\": \"run $c is still generating\"} 409" ]]
+  [[ "$(retry_frame "$d" gemini)" == \
+    "{\"error\": \"run $d stopped while its openai frame was at work, so its frames cannot be retried\"} 409" ]]
+  [[ "$(retry_frame "$a" openai)" == "{\"error\": \"run $a's openai frame did not fail, so there is nothing to retry\"} 409" ]]
+  [[ "$(retry_frame "$a" xai)" == "{\"error\": \"run $a has no xai frame\"} 404" ]]
+  [[ "$(retry_frame 20261125T100400Z-00000000e5 gemini)" == '{"error": "no run 20261125T100400Z-00000000e5"} 404' ]]
+  [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && ! -e "$out/hero-gemini.png" ]]
+}
