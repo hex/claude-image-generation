@@ -1251,3 +1251,16 @@ retry_frame() {
   [[ "$(ls -l "${OUT_BASE}-gemini.png" | cut -c1-10)" == "-rw-------" ]]
   [[ "$(cat "$MOCK_DIR/calls")" == 3 ]]
 }
+
+@test "a failed frame's Retry is refused, starting nothing, while anything is at the path its image would take, a dangling symlink too" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  ln -s nowhere "$out/hero-gemini.png"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"error\": \"$out/hero-gemini.png already exists, and nothing is overwritten\"} 409" ]]
+  [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && "$(readlink "$out/hero-gemini.png")" == nowhere ]]
+  [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$(printf 'gemini\terror\t\tmodel-a\t')" && -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
+}
