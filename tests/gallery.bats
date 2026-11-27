@@ -1351,6 +1351,41 @@ retry_frame() {
   [[ "$(ls "$IMAGE_GALLERY_DIR/resend-logs" | wc -l | tr -d ' ')" == 1 ]]
 }
 
+@test "while a frame's Retry is starting with its run's token gone, the server's claim on the output base refuses a second click and a delete" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first active
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  active="$IMAGE_GALLERY_DIR/runs/$a/active"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds run-all.sh back until the test lets it go, or gives
+  # up once the test's folder is gone.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  for i in $(seq 1 50); do
+    [[ -n "$(ls "$active")" ]] && break
+    sleep 0.1
+  done
+  # Without the token that holds the run for the retry, as when ps cannot confirm its holder, only the
+  # server's claim on the run's output base keeps the run.
+  rm "$active"/run-all.*
+  [[ "$(retry_frame "$a" gemini)" == \
+    "{\"error\": \"a run saving to $out/hero-<provider>.png is already starting; try again in a second\"} 409" ]]
+  [[ "$(delete_runs "{\"runs\": {\"$a\": []}}")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is starting a retry\"}], \"error\": \"run $a is starting a retry\"} 409" ]]
+  touch "$MOCK_DIR/go"
+  wait "$first"
+  [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+}
+
 @test "a frame's Retry finishes its run though processes killed before they let go of it left their tokens" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 dead active
