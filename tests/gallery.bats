@@ -1441,6 +1441,29 @@ retry_frame() {
     echo "$answer"; return 1; }
 }
 
+@test "readying a whole status log for a frame's delete or Retry keeps a record a provider appends as the server reads it" {
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\terror\t\tmodel-a\t\nopenai\tquerying\t\tmodel-b\t\n'
+  # The record lands just after the server reads the log, which ends in a whole record.
+  run python3 -I "${PLUGIN_ROOT}/tests/gallery_race.py" "$GALLERY_PY" trim-as-a-record-lands "$dir" \
+    $'openai\tcomplete\t1000\tmodel-b\t/work/alpha/hero-openai.png\n'
+  assert_status 0
+  cmp "$dir/status" <(printf 'gemini\terror\t\tmodel-a\t\nopenai\tquerying\t\tmodel-b\t\nopenai\tcomplete\t1000\tmodel-b\t/work/alpha/hero-openai.png\n') || {
+    od -c "$dir/status"; return 1; }
+}
+
+@test "readying a status log that ends in a cut-off record drops only the bytes the server read, not a record appended since" {
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\terror\t\tmodel-a\t\nopenai\tcompl'
+  # The record lands just after the server reads the log. It runs on from the cut-off record, so the log
+  # no longer parses, but the record that names the image stays.
+  run python3 -I "${PLUGIN_ROOT}/tests/gallery_race.py" "$GALLERY_PY" trim-as-a-record-lands "$dir" \
+    $'xai\tcomplete\t1000\tmodel-c\t/work/alpha/hero-xai.png\n'
+  assert_status 0
+  cmp "$dir/status" <(printf 'gemini\terror\t\tmodel-a\t\nopenai\tcomplxai\tcomplete\t1000\tmodel-c\t/work/alpha/hero-xai.png\n') || {
+    od -c "$dir/status"; return 1; }
+}
+
 @test "a frame's Retry still starting holds its run when another server replaces the one that started it, so the provider is paid once" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first

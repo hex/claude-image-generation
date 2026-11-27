@@ -315,9 +315,16 @@ def drop_cut_off_record(run_dir):
     """Drops a record cut off part way at the end of a run's status log, as a writer that died in the
     middle of one leaves it. No reader counts it and, the run being held by no process, nothing will
     finish it, so a record appended after it would run on from it into one line that does not parse.
-    Call it before appending to a run no process holds, holding runs_lock."""
+    Call it before appending to a run no process holds, holding runs_lock. A provider that holds no
+    token can still append to the log meanwhile, so a log that ends in a whole record is left as it is."""
     with open(str(run_dir / "status"), "r+b") as status:
-        status.truncate(status.read().rfind(b"\n") + 1)
+        log = status.read()
+        if log.endswith(b"\n") or not log:
+            return
+        # Bytes appended since the read have run on from the cut-off record and belong to another writer,
+        # so they stay. A record can still land between this check and the truncate.
+        if os.fstat(status.fileno()).st_size == len(log):
+            status.truncate(log.rfind(b"\n") + 1)
 
 
 def read_status_log(run_dir):
