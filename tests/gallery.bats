@@ -1357,3 +1357,36 @@ delete_frame() {
   [[ "$(delete_frame "$a" gemini "[\"$out/hero-gemini.png\"]")" == \
     "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"provider\": \"gemini\", \"error\": \"run $a's gemini frame has no image to delete\"}], \"error\": \"run $a's gemini frame has no image to delete\"} 409" ]]
 }
+
+@test "deleting a frame keeps each file the run delete keeps, saying why, removes a symlink and not its target, and still deletes the frame" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 \
+    c=20261125T100200Z-00000000c3 answer
+  printf 'png' > "$out/generated.png"
+  printf 'png' > "$out/shared-openai.png"
+  printf 'png' > "$out/input-xai.png"
+  printf 'png' > "$out/target.png"
+  ln -s "$out/target.png" "$out/link-openrouter.png"
+  ln -s "$out" "${BATS_TEST_TMPDIR}/linked"
+  write_run "$a" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/generated.png\nopenai\tcomplete\t1000\tmodel-b\t$out/shared-openai.png\nxai\tcomplete\t1000\tmodel-c\t$out/input-xai.png\nopenrouter\tcomplete\t1000\tmodel-d\t$out/link-openrouter.png\n" done
+  # b names a's openai image through a symlinked folder; c uses a's xai image as an input image.
+  write_run "$b" "$out" "openai\tcomplete\t1000\tmodel-b\t${BATS_TEST_TMPDIR}/linked/shared-openai.png\n" done
+  write_run "$c" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$c" "$out/edit" edit "$out/input-xai.png"
+  start_gallery
+  wait_for_snapshot '.runs | length == 3'
+  answer=$(delete_frame "$a" gemini "[\"$out/generated.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"gemini\", \"removed\": [], \"missing\": [], \"kept_files\": [{\"path\": \"$out/generated.png\", \"reason\": \"its name does not end in -gemini and .png, .jpg, .jpeg, .webp or .gif\"}]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  answer=$(delete_frame "$a" openai "[\"$out/shared-openai.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"openai\", \"removed\": [], \"missing\": [], \"kept_files\": [{\"path\": \"$out/shared-openai.png\", \"reason\": \"run $b names it too\"}]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  answer=$(delete_frame "$a" xai "[\"$out/input-xai.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"xai\", \"removed\": [], \"missing\": [], \"kept_files\": [{\"path\": \"$out/input-xai.png\", \"reason\": \"run $c uses it as an input image\"}]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  answer=$(delete_frame "$a" openrouter "[\"$out/link-openrouter.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"openrouter\", \"removed\": [\"$out/link-openrouter.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ "$(ls "$out" | tr '\n' ' ')" == "generated.png input-xai.png shared-openai.png target.png " ]] || { ls -la "$out"; return 1; }
+  [[ "$(snapshot | jq -c --arg a "$a" '.runs[] | select(.id == $a) | [[.providers[].state], .files]')" == \
+    '[["deleted","deleted","deleted","deleted"],[]]' ]] || { snapshot; return 1; }
+}
