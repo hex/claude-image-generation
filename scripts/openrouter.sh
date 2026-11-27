@@ -10,6 +10,7 @@ source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
 source "${SCRIPT_DIR}/output-image.sh"
 source "${SCRIPT_DIR}/model-fallback.sh"
+source "${SCRIPT_DIR}/aspect-ratios.sh"
 
 readonly PROVIDER_NAME="openrouter"
 
@@ -29,6 +30,13 @@ Options:
   --output            Output file path (required)
   --input-image       Input image path (required for edit, repeatable; also sent in generate)
   --model             OpenRouter model slug (default: google/gemini-nano-banana-2.1)
+  --aspect-ratio      Aspect ratio, sent as image_config.aspect_ratio on chat completions and
+                      aspect_ratio on the images endpoint. For google/ and x-ai/ models one the
+                      model does not draw is refused before the request; any other model gets it
+                      unchecked
+  --size-tier         Size tier: 1K, 2K or 4K, sent as image_config.image_size on chat
+                      completions and resolution on the images endpoint; x-ai/ models draw 2K
+                      for 4K
   --site-url          Sent as HTTP-Referer for OpenRouter attribution (optional)
   --site-name         Sent as X-Title for OpenRouter attribution (optional)
 
@@ -46,6 +54,8 @@ PROMPT=""
 OUTPUT=""
 INPUT_IMAGES=()
 MODEL="${OPENROUTER_IMAGE_MODEL:-google/gemini-nano-banana-2.1}"
+ASPECT_RATIO=""
+SIZE_TIER=""
 FALLBACK_MODEL=$(model_fallback_for_default "$PROVIDER_NAME")
 SITE_URL="${OPENROUTER_SITE_URL:-}"
 SITE_NAME="${OPENROUTER_SITE_NAME:-}"
@@ -57,6 +67,8 @@ while [[ $# -gt 0 ]]; do
     --output) OUTPUT="$2"; shift 2 ;;
     --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --model) MODEL="$2"; FALLBACK_MODEL=""; shift 2 ;;
+    --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
+    --size-tier) SIZE_TIER="$2"; shift 2 ;;
     --site-url) SITE_URL="$2"; shift 2 ;;
     --site-name) SITE_NAME="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
@@ -72,6 +84,13 @@ case "$MODE" in
   generate|edit) ;;
   *) echo "Error: --mode must be 'generate' or 'edit'" >&2; exit 1 ;;
 esac
+
+if [[ -n "$SIZE_TIER" ]]; then
+  case "$SIZE_TIER" in
+    1K|2K|4K) ;;
+    *) echo "Error: --size-tier must be 1K, 2K or 4K, got '${SIZE_TIER}'" >&2; exit 1 ;;
+  esac
+fi
 
 if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   echo "Error: --input-image is required for edit mode" >&2
@@ -118,14 +137,34 @@ readonly CHAT_BODY='{
   "model": $model,
   "modalities": ["image", "text"],
   "messages": [{"role": "user", "content": (if length > 0 then [{"type": "text", "text": $prompt}] + . else $prompt end)}]
-}'
+} + (if $shape == {} then {} else {"image_config": ($shape | with_entries(.key |= if . == "size" then "image_size" else . end))} end)'
 
 # The images endpoint: the prompt, and the image parts as input_references to edit or guide. The
 # image comes back as base64 in data[].b64_json.
 readonly IMAGES_BODY='{"model": $model, "prompt": $prompt, "response_format": "b64_json"}
-  + (if length > 0 then {"input_references": .} else {} end)'
+  + (if length > 0 then {"input_references": .} else {} end)
+  + ($shape | with_entries(.key |= if . == "size" then "resolution" else . end))'
 
 use_remembered_fallback
+# The ratio is checked against the model the request goes to first, for the vendors whose own
+# scripts know their models; the default's fallback, google/gemini-3.1-flash-image, draws every
+# ratio the default does.
+case "$MODEL" in
+  google/*) MODEL_RATIOS=$(gemini_aspect_ratios "${MODEL#google/}") ;;
+  x-ai/*)
+    MODEL_RATIOS=$(xai_aspect_ratios "${MODEL#x-ai/}")
+    if [[ "$SIZE_TIER" == 4K ]]; then
+      SIZE_TIER=2K
+      echo "xAI draws at most 2K; drawing 2K for the 4K size tier" >&2
+    fi ;;
+  *) MODEL_RATIOS="" ;;
+esac
+if [[ -n "$ASPECT_RATIO" ]]; then
+  check_aspect_ratio "$MODEL" "$ASPECT_RATIO" "$MODEL_RATIOS"
+fi
+# The ratio and tier each body carries, under the names CHAT_BODY and IMAGES_BODY give them.
+SHAPE=$(jq -n --arg ratio "$ASPECT_RATIO" --arg size "$SIZE_TIER" \
+  '(if $ratio == "" then {} else {"aspect_ratio": $ratio} end) + (if $size == "" then {} else {"size": $size} end)')
 echo "Calling OpenRouter API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 
@@ -138,7 +177,7 @@ CURL_HEADERS=(-H "Content-Type: application/json" -H "Authorization: Bearer ${OP
 # they enter jq on stdin as the main input rather than as --argjson, and the body reaches curl on
 # stdin (--data-binary @-) rather than as -d; either argument would exceed ARG_MAX.
 send_to() {
-  printf '%s' "$IMAGE_PARTS" | jq --arg model "$3" --arg prompt "$PROMPT" "$2" \
+  printf '%s' "$IMAGE_PARTS" | jq --arg model "$3" --arg prompt "$PROMPT" --argjson shape "$SHAPE" "$2" \
     | curl_with_retry -s -w "\n%{http_code}" \
       -X POST "https://openrouter.ai/api/v1/$1" \
       "${CURL_HEADERS[@]}" \

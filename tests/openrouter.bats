@@ -286,3 +286,40 @@ NO_ENDPOINTS_404='{"error":{"message":"No endpoints found that support the reque
     echo "Unexpected body:"; cat "$STUB_DIR/body.1"; return 1; }
   [[ "$(cat "$OUT")" == "fake" ]] || { echo "Expected the decoded image 'fake' in $OUT"; return 1; }
 }
+
+CHAT_IMAGE_200='{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}'
+
+@test "openrouter: an aspect ratio and a size tier reach chat completions as image_config" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
+  stub_openrouter 200 "$CHAT_IMAGE_200"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 16:9 --size-tier 2K
+  assert_status 0
+  [[ "$(jq -cS .image_config "$STUB_DIR/body.1")" == '{"aspect_ratio":"16:9","image_size":"2K"}' ]] || {
+    echo "Unexpected body:"; cat "$STUB_DIR/body.1"; return 1; }
+}
+
+@test "openrouter: a request sent on to the images endpoint carries the ratio and tier as aspect_ratio and resolution, 2K for 4K on x-ai" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  stub_openrouter 404 "$NO_ENDPOINTS_404" 200 "$IMAGE_200"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model x-ai/grok-imagine-image-2.0 \
+    --aspect-ratio 16:9 --size-tier 4K
+  assert_status 0
+  assert_urls "$CHAT_URL" "$IMAGES_URL"
+  [[ "$(jq -cS . "$STUB_DIR/body.2")" == '{"aspect_ratio":"16:9","model":"x-ai/grok-imagine-image-2.0","prompt":"a cat","resolution":"2K","response_format":"b64_json"}' ]] || {
+    echo "Unexpected images body:"; cat "$STUB_DIR/body.2"; return 1; }
+  assert_output_contains "xAI draws at most 2K; drawing 2K for the 4K size tier"
+}
+
+@test "openrouter: a ratio a google/ model does not draw is refused before any request; another vendor's model gets it unchecked" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
+  stub_openrouter 200 "$CHAT_IMAGE_200"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 2:1
+  assert_status 1
+  [[ "$output" == "Error: google/gemini-nano-banana-2.1 does not take aspect ratio 2:1; it takes 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9, 1:4, 4:1, 1:8, 8:1" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$STUB_DIR/url" ]] || { echo "a request went to $(cat "$STUB_DIR/url")"; return 1; }
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 2:1 --model openai/gpt-image-2
+  assert_output_contains "openai/gpt-image-2 is not in this plugin's aspect ratio table; sending 2:1 unchecked"
+  [[ "$(jq -r .image_config.aspect_ratio "$STUB_DIR/body.1")" == 2:1 ]] || { cat "$STUB_DIR/body.1"; return 1; }
+}
