@@ -316,8 +316,8 @@ def drop_cut_off_record(run_dir):
     middle of one leaves it. No reader counts it and, its writer being gone, nothing will finish it, so
     a record appended after it would run on from it into one line that does not parse. Call it holding
     runs_lock before appending to a run no process works in: one no process holds, or one the server
-    holds for a retry's run-all.sh that has not started yet. A provider that holds no
-    token can still append to the log meanwhile, so a log that ends in a whole record is left as it is."""
+    holds for a retry's run-all.sh that has not started yet. A provider that holds no token can still
+    append to the log meanwhile, so a log that ends in a whole record is left as it is."""
     with open(str(run_dir / "status"), "r+b") as status:
         log = status.read()
         if log.endswith(b"\n") or not log:
