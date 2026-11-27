@@ -1375,7 +1375,9 @@ delete_frame() {
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer
   printf 'png' > "$out/hero-gemini.png"
   printf 'png' > "$out/hero-openai.png"
-  write_run "$a" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\n" done
+  # The log ends in a record cut off part way, as a writer killed in the middle of one leaves it, which
+  # no reader counts.
+  write_run "$a" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\nopenai\tcompl" done
   start_gallery
   wait_for_snapshot '.runs | length == 1'
   answer=$(delete_frame "$a" gemini "[\"$out/hero-gemini.png\"]")

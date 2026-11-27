@@ -847,8 +847,13 @@ class Gallery:
         if error is not None:
             return 500, {"id": run_id, "provider": provider, "error": "%s; the frame is kept" % error, **outcome}
         try:
-            with open(str(run_dir / "status"), "a", encoding="utf-8") as status:
-                status.write("%s\tdeleted\t\t\t\n" % provider)
+            # A writer that died part way through a record left it cut off at the end of the log, where
+            # no reader counts it and, the run being held by no process, nothing will finish it. It is
+            # dropped, or the record appended would run on from it into one line that does not parse.
+            with open(str(run_dir / "status"), "r+b") as status:
+                status.seek(status.read().rfind(b"\n") + 1)
+                status.truncate()
+                status.write(("%s\tdeleted\t\t\t\n" % provider).encode())
         except OSError as e:
             return 500, {"id": run_id, "provider": provider,
                          "error": "could not record the %s frame as deleted in %s: %s" % (provider, run_dir / "status", e.strerror),
