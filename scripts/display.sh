@@ -510,8 +510,32 @@ gallery_resume_run() {
   fi
   DISPLAY_PANE_DIR="$dir"
   __pane_acquire "$owner"
+  __gallery_drop_dead_tokens "$dir/active"
   # An offer a killed run-all left behind would show again while the run is live; nothing answers it.
   rm -f "$dir/.done" "$dir/retry-offer"
+}
+
+# Removes each token in <active> but this process's whose holder is gone: a process killed before it
+# released its hold left it behind, and __pane_release would never finish the run while it is there.
+# A holder is gone, as the gallery server judges it, once no process of this user has its pid or the
+# one that has it started at another time than the token says. Usage: __gallery_drop_dead_tokens <active>
+__gallery_drop_dead_tokens() {
+  local token pid started="" recorded=""
+  local -a started_words recorded_words
+  for token in "$1"/*; do
+    pid="${token##*.}"
+    [[ -f "$token" && "$pid" =~ ^[0-9]+$ && "$pid" != "$$" ]] || continue
+    started=""
+    if kill -0 "$pid" 2>/dev/null; then
+      started=$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$pid" 2>/dev/null) || started=""
+    fi
+    recorded=$(cat "$token" 2>/dev/null) || recorded=""
+    # Both as ps prints a start time, compared word by word, so runs of spaces do not count.
+    read -r -a started_words <<< "$started"
+    read -r -a recorded_words <<< "$recorded"
+    [[ ${#started_words[@]} -gt 0 && "${started_words[*]}" == "${recorded_words[*]:-}" ]] && continue
+    rm -f "$token"
+  done
 }
 
 # Makes sure a gallery server of this plugin's version or newer is running and that a page shows it:

@@ -1335,6 +1335,27 @@ retry_frame() {
   [[ "$(ls "$IMAGE_GALLERY_DIR/resend-logs" | wc -l | tr -d ' ')" == 1 ]]
 }
 
+@test "a frame's Retry finishes its run though processes killed before they let go of it left their tokens" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 dead active
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  active="$IMAGE_GALLERY_DIR/runs/$a/active"
+  # A run-all killed outright, whose pid no process has now, and a token whose pid a later process took.
+  sleep 0 &
+  dead=$!
+  wait "$dead"
+  printf 'Thu Nov 26 10:00:00 2026\n' > "$active/run-all.$dead"
+  sleep 60 &
+  HOLDER_PID=$!
+  printf 'Thu Jan  1 00:00:00 1970\n' > "$active/gemini.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"run\": \"$a\"} 200" ]]
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ -z "$(ls -A "$active")" ]] || { ls -la "$active"; return 1; }
+}
+
 @test "Delete run removes the image a frame's Retry saved, which the run's records name" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer
