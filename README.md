@@ -5,7 +5,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 ## Features
 
 - **Text-to-image generation** with Google Gemini, OpenAI GPT Image 2, xAI Grok Image, or any image model on OpenRouter
-- **OpenRouter gateway** — reach any OpenRouter image model (Gemini, GPT Image, and more) through one key via the chat-completions API
+- **OpenRouter gateway** — reach any OpenRouter image model (Gemini, GPT Image, Grok Imagine and more) through one key: chat completions, or OpenRouter's images endpoint for a model that chat completions turns away
 - **Image editing** with text instructions (all providers)
 - **Multi-image input** — repeatable `--input-image` for multi-image edits (all providers) and Gemini reference-based generation
 - **Parallel generation** across all providers via `scripts/run-all.sh`, shown as one run: a section with one frame per provider on the browser gallery, or one shared streaming pane with council-style colored banners and a `waiting on` line naming the pending providers (animated until the first image renders, then written once under each block)
@@ -159,7 +159,7 @@ xAI has also retired `grok-imagine-image-quality`, the quality mode launched 202
 
 ### Available OpenRouter Models
 
-OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. A few:
+OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. The Gemini models draw through chat completions. Chat completions answers `openai/gpt-image-2` and `x-ai/grok-imagine-image-2.0` with HTTP 404, and the script sends them on to OpenRouter's images endpoint (see [openrouter.sh](#openroutersh)). A few:
 
 | Model | Characteristics |
 |-------|-----------------|
@@ -211,7 +211,7 @@ What the script asks each provider:
 - **Gemini**: `GET /v1beta/models?pageSize=1000`. Gemini answers a bad key with HTTP 400, and other faults too, so a 400 counts as a rejected key only when `error.details[].reason` is `API_KEY_INVALID`.
 - **OpenAI**: `GET /v1/models`.
 - **xAI**: `GET /v1/image-generation-models`. The model may match an id or one of its aliases. xAI also answers a bad key with HTTP 400, which counts as rejected only when the error text names the API key.
-- **OpenRouter**: `GET /api/v1/key` proves the key, since the model list answers without one, then `GET /api/v1/models`. The model has to list `image` among its output modalities.
+- **OpenRouter**: `GET /api/v1/key` proves the key, since the model list answers without one, then `GET /api/v1/models?output_modalities=image`, the list that also holds the models that output only images. The model has to list `image` among its output modalities.
 
 The script reads each default model and its override variable from the provider script's own `MODEL="${VAR:-default}"` line, so the two can't disagree. When that line is missing, or jq is not installed, it stops with an error and exits 1; otherwise it exits 0, whatever the rows say.
 
@@ -414,7 +414,7 @@ bash scripts/xai.sh \
 
 #### openrouter.sh
 
-OpenRouter is a gateway to many image models through a single key. It uses the chat-completions API, so `--model` accepts any OpenRouter model slug that supports image output.
+OpenRouter is a gateway to many image models through a single key, so `--model` accepts any OpenRouter model slug that supports image output. The script sends each request to `POST /api/v1/chat/completions`. When that answers HTTP 404 with one of the two messages OpenRouter gives a model it serves only on its images endpoint, the script prints a line saying so and sends the same request once to `POST /api/v1/images`, with any input images as `input_references`. The two messages, seen on 2026-11-26, are `<model> is an image generation model and cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead.` (`openai/gpt-image-2`) and `No endpoints found that support the requested output modalities: image, text` (`x-ai/grok-imagine-image-2.0`). OpenRouter also sends the second one for a model with no image output, and the images request for that model then fails with its own error. When the default model gets either answer while its fallback is still pending, the script first falls back to `google/gemini-3.1-flash-image` on chat completions, as for any 404 (see [Model fallback](#model-fallback)).
 
 ```bash
 # Generate (default model: google/gemini-nano-banana-2.1)
@@ -463,7 +463,7 @@ Each `--input-image` must be a PNG, JPEG, WebP or GIF file. The scripts copy eac
 | Gemini | 14 | `generate` (references for a fresh composition) and `edit` |
 | OpenAI | 16 | `edit` only (its generation endpoint takes no images) |
 | xAI | 5 on `grok-imagine-image-2.0` (older models take 3) | `edit` only |
-| OpenRouter | model-dependent | `generate` and `edit` (input images attached as chat image parts) |
+| OpenRouter | model-dependent | `generate` and `edit` (input images attached as chat image parts, or as `input_references` on the images endpoint) |
 
 ```bash
 # Gemini: compose a new image from reference images (generate mode)
@@ -525,7 +525,7 @@ When a provider's default model is unavailable to your key (unknown, retired, or
 
 The script sends a model you name with `--model` or a `*_IMAGE_MODEL` variable as named and never falls back from it, so the error names the model to change.
 
-The fallback runs only when the answer blames the model. That means HTTP 404, HTTP 403 (except on OpenRouter, where 403 means its moderation flagged the prompt), or HTTP 400 with a message saying the model does not exist or is not a valid model ID. A bad key, a bad parameter or a refused prompt fails the same way on any model, so it ends the run. The script retries a 429 or 5xx on the same model (see [Retries](#retries)). A run sends at most two models; if the fallback fails too, the script reports the fallback's error.
+The fallback runs only when the answer blames the model. That means HTTP 404, HTTP 403 (except on OpenRouter, where 403 means its moderation flagged the prompt), or HTTP 400 with a message saying the model does not exist or is not a valid model ID. A bad key, a bad parameter or a refused prompt fails the same way on any model, so it ends the run. The script retries a 429 or 5xx on the same model (see [Retries](#retries)). A run sends at most two models; if the fallback fails too, the script reports the fallback's error. On OpenRouter, when the fallback gets one of the two HTTP 404 messages that send a request on to the images endpoint (see [openrouter.sh](#openroutersh)), the run sends a third request, to `/api/v1/images` with the fallback model, and saves the image that request returns or reports its error.
 
 The switch shows in stderr, for example `gpt-image-2.6-sunburst is unavailable to this key (openai, HTTP 400); drawing with fallback gpt-image-2.5-sunburst`. The line leaves out the API's own message, since xAI's names your account's team ID and stderr reaches pane logs and the tool result. In a streaming pane the provider's banner names the fallback model that drew the image.
 
@@ -546,7 +546,7 @@ Delete the verdict directory to try the default again before the verdict expires
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
 | Transparent BG | No | Yes (png or webp only; preview on gpt-image-2) | No | Model-dependent |
 | Aspect ratios | 10 on Pro / 14 on 3.1 Flash | Any `WxH` up to 3:1 on gpt-image-2 and the 2.5 models; 3 fixed sizes on older models | 16 options (incl. 21:9, 5:2, auto) | Prompt-driven |
-| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts (generate + edit) |
+| Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts or images-endpoint `input_references` (generate + edit) |
 | Quality tiers | N/A | auto / low / medium / high, plus xhigh / max on the 2.5 and 2.6 models | low / medium / auto (2.0 only) | Model-dependent |
 | Thinking mode | Yes (`--thinking-level`) | No | No | Model-dependent |
 | Search grounding | Yes (Google Search) | No | No | Model-dependent |
@@ -566,7 +566,7 @@ Delete the verdict directory to try the default again before the verdict expires
 | Gemini script | `scripts/gemini.sh` | Gemini API call execution |
 | OpenAI script | `scripts/openai.sh` | OpenAI API call execution |
 | xAI script | `scripts/xai.sh` | xAI API call execution |
-| OpenRouter script | `scripts/openrouter.sh` | OpenRouter chat-completions image call execution |
+| OpenRouter script | `scripts/openrouter.sh` | OpenRouter image call execution, through chat completions or the images endpoint |
 | Retry helper | `scripts/retry.sh` | `curl_with_retry` for transient API failures |
 | Model fallback | `scripts/model-fallback.sh` | Sends the request once more with the provider's fallback model when the default is unavailable to the key, and remembers that verdict per key |
 | Input image check | `scripts/input-images.sh` | Copies each `--input-image` into a private temp folder, reads the copy's type from its bytes and refuses anything that is not a PNG, JPEG, WebP or GIF file |

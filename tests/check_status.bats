@@ -12,7 +12,8 @@ GEMINI_URL="generativelanguage.googleapis.com/v1beta/models"
 OPENAI_URL="api.openai.com/v1/models"
 XAI_URL="api.x.ai/v1/image-generation-models"
 OPENROUTER_KEY_URL="openrouter.ai/api/v1/key"
-OPENROUTER_LIST_URL="openrouter.ai/api/v1/models"
+# Only the image output list holds the models that output images and no text, such as openai/gpt-image-2.
+OPENROUTER_LIST_URL="openrouter.ai/api/v1/models?output_modalities=image"
 
 setup() {
   disable_display

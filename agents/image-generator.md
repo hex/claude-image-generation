@@ -203,7 +203,7 @@ xAI (`xai.sh`):
 - `--model grok-imagine-image` — standard tier, 300 RPM
 
 OpenRouter (`openrouter.sh`):
-- `--model <slug>` — any OpenRouter model that supports image output (e.g. `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0`, `openai/gpt-image-2`). Default `google/gemini-nano-banana-2.1`.
+- `--model <slug>` — any OpenRouter model that supports image output (e.g. `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0`, `openai/gpt-image-2`). Default `google/gemini-nano-banana-2.1`. When chat completions turns a model away with HTTP 404 because OpenRouter serves it only on its images endpoint, such as `openai/gpt-image-2` or `x-ai/grok-imagine-image-2.0`, the script sends the request there itself.
 - `--site-url` / `--site-name` — optional OpenRouter attribution headers. Aspect ratio, resolution, and quality are prompt-driven and model-dependent — describe them in the prompt.
 
 Infer appropriate flags from user intent: "hero image" → 2K/4K, "social post" → 1:1 or 9:16, "draft" → `--quality low` or `gpt-image-2.6-flare`, "for printing" → 4K, "transparent logo" → OpenAI with `--background transparent`.
