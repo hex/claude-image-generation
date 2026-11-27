@@ -201,6 +201,16 @@ NO_ENDPOINTS_404='{"error":{"message":"No endpoints found that support the reque
   [[ ! -e "$OUT" ]] || { echo "A failed run left $OUT"; return 1; }
 }
 
+@test "openrouter: a chat answer other than 404 that points to the images endpoint is reported without a request there" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  stub_openrouter 400 '{"error":{"message":"openai/gpt-image-2 is an image generation model and cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead.","code":400}}'
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model openai/gpt-image-2
+  assert_status 1
+  assert_urls "$CHAT_URL"
+  assert_output_contains "OpenRouter API returned HTTP 400: openai/gpt-image-2 is an image generation model and cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead."
+  [[ ! -e "$OUT" ]] || { echo "A failed run left $OUT"; return 1; }
+}
+
 # The default model falls back on this answer as it does on main, rather than trying the images
 # endpoint: for a model that also outputs text it means no endpoint draws it for this key.
 @test "openrouter: the default model answered 404 with no endpoint for image and text output falls back on chat completions" {
