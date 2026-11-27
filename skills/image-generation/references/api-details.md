@@ -401,12 +401,13 @@ Image generation and editing supported via `/v1/batches`. Batch URLs expire afte
 
 ## OpenRouter (gateway)
 
-OpenRouter is not a first-party image API — it is a gateway that fronts many providers' models behind one key and one endpoint. Image generation is exposed through the **chat-completions** API, not a dedicated images endpoint.
+OpenRouter is not a first-party image API — it is a gateway that fronts many providers' models behind one key. It draws images through two endpoints: **chat completions**, for models that output images and text, and the **images** endpoint, for every image model. A model that outputs images and no text works only on the images endpoint: chat completions answered `openai/gpt-image-2` with HTTP 404, "openai/gpt-image-2 is an image generation model and cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead.", and `x-ai/grok-imagine-image-2.0` with HTTP 404, "No endpoints found that support the requested output modalities: image, text" (both 2026-11-26).
 
-### Endpoint
-- Generation and editing: `POST https://openrouter.ai/api/v1/chat/completions`
+### Endpoints
+- Generation and editing, every request first: `POST https://openrouter.ai/api/v1/chat/completions`
+- Generation and editing, after chat completions turns the model away: `POST https://openrouter.ai/api/v1/images`
 
-There is no separate edit endpoint; editing is generation with input images attached to the user message.
+Neither has a separate edit endpoint; editing is generation with input images attached. The plugin sends every request to chat completions. When that answers HTTP 404 with either message above, it sends the same request once to the images endpoint and prints a line saying so. The second message does not prove that a model outputs only images: OpenRouter also sends it for a model with no endpoint that outputs images and text (captured 2026-11-05, see Models below), and the images request for such a model fails with its own error. For the default model, the fallback to `google/gemini-3.1-flash-image` on chat completions runs before this step, as for any 404, so a default run never reaches the images endpoint unless the fallback model gets one of the two answers as well.
 
 ### Authentication
 - Header: `Authorization: Bearer $OPENROUTER_API_KEY`
@@ -437,7 +438,7 @@ When the request carries input images, in either mode, `content` is an array who
 ```
 
 ### Response Format
-The generated image is returned as a base64 data URL inside the assistant message's `images` array (not the OpenAI `data[].b64_json` shape):
+On chat completions, the generated image comes back as a base64 data URL inside the assistant message's `images` array (not the OpenAI `data[].b64_json` shape):
 ```json
 {
   "choices": [{
@@ -451,12 +452,36 @@ The generated image is returned as a base64 data URL inside the assistant messag
 ```
 The plugin reads `.choices[0].message.images[0].image_url.url`, strips the `data:<mime>;base64,` prefix, and decodes the remainder. If no image is present it falls back to reporting `.choices[0].message.content` (a refusal or text-only reply). Errors come back as `.error.message`, except a failure upstream mid-generation: that arrives as HTTP 200 with `choices[0].error` (`code`, `message`), which the plugin reports by its code and message.
 
+### Images Endpoint
+Documented in OpenRouter's [OpenAPI spec](https://openrouter.ai/openapi.json) (`createImages`, schema `ImageGenerationRequest`) and the [image generation guide](https://openrouter.ai/docs/guides/overview/multimodal/image-generation). The request needs `model` and `prompt`. The plugin sends `response_format: "b64_json"`, the documented default, so the image comes back inline; `"url"` would return a signed link that expires within 24 hours. With input images, in either mode, it adds them as `input_references`, the same `image_url` parts chat completions takes, each a base64 data URL (the spec also allows HTTP(S) URLs, up to 16, fewer on many models):
+```json
+{
+  "model": "openai/gpt-image-2",
+  "prompt": "change the sky to a starry night",
+  "response_format": "b64_json",
+  "input_references": [
+    {"type": "image_url", "image_url": {"url": "data:image/png;base64,<...>"}}
+  ]
+}
+```
+The spec also lists `aspect_ratio`, `resolution`, `size`, `quality`, `n` (1-10), `background`, `output_format`, `seed` and `markup`; the plugin sends none of them. `GET /api/v1/images/models` gives each model's `supported_parameters`, among them its `input_references` range: a range starting at 1 marks an edit-only model, and a model without the entry takes no input image.
+
+The response holds the images in `data[]`:
+```json
+{
+  "created": 1748372400,
+  "data": [{"b64_json": "<...>", "media_type": "image/png"}],
+  "usage": {"prompt_tokens": 0, "completion_tokens": 4175, "total_tokens": 4175, "cost": 0.04}
+}
+```
+The plugin decodes `.data[0].b64_json`, and reports the whole body when that field is absent. Errors take the same `{"error": {"code": <status>, "message": "..."}}` shape as chat completions, with the statuses 400, 401, 402, 403, 404, 413, 429, 500, 502, 524 and 529 in the spec; the plugin reports them as `OpenRouter API returned HTTP <status>: <message>`. The guide adds that a generation that does not finish returns 502 rather than a partial image.
+
 ### Models
-`--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-nano-banana-2.1`. Others include `google/gemini-3.1-flash-image`, `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0` and `openai/gpt-image-2`. See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
+`--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. Default: `google/gemini-nano-banana-2.1`. Others include `google/gemini-3.1-flash-image`, `google/gemini-3-pro-image` (drawn through chat completions), `x-ai/grok-imagine-image-2.0` and `openai/gpt-image-2` (answered HTTP 404 on chat completions, drawn through the images endpoint). See [openrouter.ai/models](https://openrouter.ai/models?fmt=cards&output_modalities=image).
 
 When the default is unavailable to the key, the plugin falls back to `google/gemini-3.1-flash-image`. An unknown slug answers HTTP 400 with `{"error": {"message": "<slug> is not a valid model ID", "code": 400}}`; a deprecated model, or one with no endpoint for the requested modalities, answers HTTP 404 (`"Claude 3 Haiku was deprecated on Sep 10, 2026. ..."`, `"No endpoints found that support the requested output modalities: image, text"`). All three captured 2026-11-05.
 
 ### Constraints
-- Aspect ratio, resolution, and quality are model-dependent and driven by the prompt — there are no dedicated flags for them
+- Aspect ratio, resolution, and quality are model-dependent and driven by the prompt — there are no dedicated flags for them, though the images endpoint takes `aspect_ratio`, `resolution` and `quality` fields
 - Per-image cost, rate limits, and max input images depend on the underlying model, not OpenRouter itself
 - Pricing/billing is per OpenRouter account and the selected model

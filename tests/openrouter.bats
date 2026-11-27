@@ -71,6 +71,7 @@ setup() {
 
 @test "openrouter: default model is google/gemini-nano-banana-2.1" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
   # The script prints "Calling OpenRouter API (model: ...)" before the curl call
   run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_output_contains "Calling OpenRouter API (model: google/gemini-nano-banana-2.1, mode: generate)"
@@ -118,4 +119,170 @@ setup() {
   rm -rf "$mock_dir" "$DISPLAY_PANE_DIR"
   assert_status 1
   assert_output_contains "OpenRouter provider error (502): upstream boom"
+}
+
+# stub_openrouter <status> <body> [<status> <body>]... — puts a curl first on PATH that answers its
+# Nth request with the Nth status and body, and an unexpected request with HTTP 418. Each request's
+# address is appended to $STUB_DIR/url and its body kept in $STUB_DIR/body.N.
+stub_openrouter() {
+  STUB_DIR="${BATS_TEST_TMPDIR}/openrouter_stub"
+  mkdir -p "$STUB_DIR"
+  local n=0
+  while [[ $# -gt 0 ]]; do
+    n=$((n + 1))
+    printf '%s\n%s\n' "$2" "$1" > "$STUB_DIR/answer.$n"
+    shift 2
+  done
+  cat > "$STUB_DIR/curl" <<'STUB'
+#!/bin/bash
+d="$(dirname "$0")"
+n=$(cat "$d/calls" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$d/calls"
+for a in "$@"; do
+  case "$a" in
+    https://*) printf '%s\n' "$a" >> "$d/url" ;;
+    @*) cp "${a#@}" "$d/body.$n" ;;
+  esac
+done
+cat "$d/answer.$n" 2>/dev/null || printf '%s\n418\n' '{"error":{"message":"stub: no answer for this request"}}'
+STUB
+  chmod +x "$STUB_DIR/curl"
+  export PATH="$STUB_DIR:$PATH"
+  export DISPLAY_PANE_DIR="${BATS_TEST_TMPDIR}/pane"
+  mkdir -p "$DISPLAY_PANE_DIR"
+}
+
+# assert_urls <url>... — the stub was sent exactly these requests, in this order.
+assert_urls() {
+  local expected
+  expected=$(printf '%s\n' "$@")
+  [[ "$(cat "$STUB_DIR/url" 2>/dev/null)" == "$expected" ]] || {
+    echo "Expected requests:"; echo "$expected"; echo "Got:"; cat "$STUB_DIR/url" 2>/dev/null; return 1; }
+}
+
+CHAT_URL="https://openrouter.ai/api/v1/chat/completions"
+IMAGES_URL="https://openrouter.ai/api/v1/images"
+IMAGE_200='{"created":1748372400,"data":[{"b64_json":"ZmFrZQ==","media_type":"image/png"}]}'
+# Chat completions' answer to openai/gpt-image-2, measured 2026-11-26.
+GPT_IMAGE_404='{"error":{"message":"openai/gpt-image-2 is an image generation model and cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead.","code":404}}'
+
+@test "openrouter: a chat 404 that points to the images endpoint sends the same request there" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  stub_openrouter 404 "$GPT_IMAGE_404" 200 "$IMAGE_200"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model openai/gpt-image-2
+  assert_status 0
+  assert_urls "$CHAT_URL" "$IMAGES_URL"
+  [[ "$(jq -cS . "$STUB_DIR/body.2")" == '{"model":"openai/gpt-image-2","prompt":"a cat","response_format":"b64_json"}' ]] || {
+    echo "Unexpected images body:"; cat "$STUB_DIR/body.2"; return 1; }
+  assert_output_contains "sending the request to OpenRouter's images endpoint"
+  [[ "$(cat "$OUT")" == "fake" ]] || { echo "Expected the decoded image 'fake' in $OUT"; return 1; }
+}
+
+# Chat completions' answer to x-ai/grok-imagine-image-2.0, measured 2026-11-26.
+NO_ENDPOINTS_404='{"error":{"message":"No endpoints found that support the requested output modalities: image, text","code":404}}'
+
+@test "openrouter: a chat 404 that finds no endpoint for image and text output sends the same request to the images endpoint" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  stub_openrouter 404 "$NO_ENDPOINTS_404" 200 "$IMAGE_200"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model x-ai/grok-imagine-image-2.0
+  assert_status 0
+  assert_urls "$CHAT_URL" "$IMAGES_URL"
+  [[ "$(jq -r .model "$STUB_DIR/body.2")" == "x-ai/grok-imagine-image-2.0" ]] || {
+    echo "Unexpected images body:"; cat "$STUB_DIR/body.2"; return 1; }
+  [[ "$(cat "$OUT")" == "fake" ]] || { echo "Expected the decoded image 'fake' in $OUT"; return 1; }
+}
+
+@test "openrouter: a chat 404 with any other message is reported without a request to the images endpoint" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  stub_openrouter 404 "$(cat "${PLUGIN_ROOT}/tests/fixtures/model-fallback/unavailable/openrouter-deprecated-404.json")"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model anthropic/claude-3-haiku
+  assert_status 1
+  assert_urls "$CHAT_URL"
+  assert_output_contains "OpenRouter API returned HTTP 404: Claude 3 Haiku was deprecated on Sep 10, 2026."
+  [[ ! -e "$OUT" ]] || { echo "A failed run left $OUT"; return 1; }
+}
+
+@test "openrouter: a chat answer other than 404 that points to the images endpoint is reported without a request there" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  stub_openrouter 400 '{"error":{"message":"openai/gpt-image-2 is an image generation model and cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead.","code":400}}'
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model openai/gpt-image-2
+  assert_status 1
+  assert_urls "$CHAT_URL"
+  assert_output_contains "OpenRouter API returned HTTP 400: openai/gpt-image-2 is an image generation model and cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead."
+  [[ ! -e "$OUT" ]] || { echo "A failed run left $OUT"; return 1; }
+}
+
+# The default model falls back on this answer as it does on main, rather than trying the images
+# endpoint: for a model that also outputs text it means no endpoint draws it for this key.
+@test "openrouter: the default model answered 404 with no endpoint for image and text output falls back on chat completions" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
+  stub_openrouter 404 "$NO_ENDPOINTS_404" 200 '{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}'
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
+  assert_status 0
+  assert_urls "$CHAT_URL" "$CHAT_URL"
+  [[ "$(jq -r .model "$STUB_DIR/body.2")" == "google/gemini-3.1-flash-image" ]] || {
+    echo "Expected the fallback model in the second request:"; cat "$STUB_DIR/body.2"; return 1; }
+  [[ "$(cat "$OUT")" == "fake" ]] || { echo "Expected the decoded image 'fake' in $OUT"; return 1; }
+}
+
+@test "openrouter: the fallback model answered 404 with no endpoint for image and text output goes on to the images endpoint" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
+  stub_openrouter 404 "$NO_ENDPOINTS_404" 404 "$NO_ENDPOINTS_404" 400 '{"error":{"code":400,"message":"Invalid request parameters"}}'
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
+  assert_status 1
+  assert_urls "$CHAT_URL" "$CHAT_URL" "$IMAGES_URL"
+  [[ "$(jq -r .model "$STUB_DIR/body.1" "$STUB_DIR/body.2" "$STUB_DIR/body.3")" == $'google/gemini-nano-banana-2.1\ngoogle/gemini-3.1-flash-image\ngoogle/gemini-3.1-flash-image' ]] || {
+    echo "Expected the default, then the fallback twice:"; jq -r .model "$STUB_DIR"/body.*; return 1; }
+  assert_output_contains "OpenRouter API returned HTTP 400: Invalid request parameters"
+  [[ ! -e "$OUT" ]] || { echo "A failed run left $OUT"; return 1; }
+}
+
+@test "openrouter: an images endpoint answer without b64_json fails naming the answer" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  stub_openrouter 404 "$GPT_IMAGE_404" 200 '{"created":1748372400,"data":[{"url":"https://example.com/image.png"}]}'
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model openai/gpt-image-2
+  assert_status 1
+  assert_output_contains 'No image data in response: {"created":1748372400,"data":[{"url":"https://example.com/image.png"}]}'
+  [[ ! -e "$OUT" ]] || { echo "A failed run left $OUT"; return 1; }
+}
+
+@test "openrouter: an error from the images endpoint is reported with its status and message" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  stub_openrouter 404 "$NO_ENDPOINTS_404" 400 '{"error":{"code":400,"message":"Invalid request parameters"}}'
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --model x-ai/grok-imagine-image-2.0
+  assert_status 1
+  assert_urls "$CHAT_URL" "$IMAGES_URL"
+  assert_output_contains "OpenRouter API returned HTTP 400: Invalid request parameters"
+  [[ ! -e "$OUT" ]] || { echo "A failed run left $OUT"; return 1; }
+}
+
+@test "openrouter: an edit sent on to the images endpoint carries the input image as a reference" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  local input="${BATS_TEST_TMPDIR}/photo.png"
+  { printf '\211PNG\r\n\032\n'; printf 'bytes of the photo'; } > "$input"
+  stub_openrouter 404 "$GPT_IMAGE_404" 200 "$IMAGE_200"
+  run "$OPENROUTER_SH" --mode edit --prompt "make it blue" --input-image "$input" --output "$OUT" --model openai/gpt-image-2
+  assert_status 0
+  assert_urls "$CHAT_URL" "$IMAGES_URL"
+  local body="$STUB_DIR/body.2"
+  [[ "$(jq -cS 'del(.input_references)' "$body")" == '{"model":"openai/gpt-image-2","prompt":"make it blue","response_format":"b64_json"}' ]] || {
+    echo "Unexpected body fields:"; jq -c 'del(.input_references)' "$body"; return 1; }
+  [[ "$(jq -c '[.input_references[] | {type, prefix: (.image_url.url | split(",")[0])}]' "$body")" == '[{"type":"image_url","prefix":"data:image/png;base64"}]' ]] || {
+    echo "Expected one image_url reference holding a PNG data URL, got:"; jq -c '.input_references' "$body"; return 1; }
+  jq -r '.input_references[0].image_url.url | split(",")[1]' "$body" | base64 --decode | cmp -s - "$input" || {
+    echo "The reference does not hold the input image's bytes"; return 1; }
+  [[ "$(cat "$OUT")" == "fake" ]] || { echo "Expected the decoded image 'fake' in $OUT"; return 1; }
+}
+
+@test "openrouter: the default model makes one chat completions request" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
+  stub_openrouter 200 '{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}'
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
+  assert_status 0
+  assert_urls "$CHAT_URL"
+  [[ "$(jq -cS . "$STUB_DIR/body.1")" == '{"messages":[{"content":"a cat","role":"user"}],"modalities":["image","text"],"model":"google/gemini-nano-banana-2.1"}' ]] || {
+    echo "Unexpected body:"; cat "$STUB_DIR/body.1"; return 1; }
+  [[ "$(cat "$OUT")" == "fake" ]] || { echo "Expected the decoded image 'fake' in $OUT"; return 1; }
 }
