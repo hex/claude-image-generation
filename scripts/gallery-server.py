@@ -313,9 +313,10 @@ def fold_status(run_dir, providers):
 
 def drop_cut_off_record(run_dir):
     """Drops a record cut off part way at the end of a run's status log, as a writer that died in the
-    middle of one leaves it. No reader counts it and, the run being held by no process, nothing will
-    finish it, so a record appended after it would run on from it into one line that does not parse.
-    Call it before appending to a run no process holds, holding runs_lock. A provider that holds no
+    middle of one leaves it. No reader counts it and, its writer being gone, nothing will finish it, so
+    a record appended after it would run on from it into one line that does not parse. Call it holding
+    runs_lock before appending to a run no process works in: one no process holds, or one the server
+    holds for a retry's run-all.sh that has not started yet. A provider that holds no
     token can still append to the log meanwhile, so a log that ends in a whole record is left as it is."""
     with open(str(run_dir / "status"), "r+b") as status:
         log = status.read()
@@ -336,9 +337,9 @@ def read_status_log(run_dir):
 
 def status_size(run_dir):
     """How many bytes a run's status log holds: 0 before it exists. Only drop_cut_off_record shortens
-    the log, under runs_lock in a run no process holds, a frame's retry doing so before it measures
-    the log it then watches grow; a delete removes it only from a run neither held nor starting a
-    retry."""
+    the log, under runs_lock: a frame's delete in a run no process holds, and a frame's retry once it
+    holds the run, before it measures the log it then watches grow. A delete removes it only from a run
+    neither held nor starting a retry."""
     try:
         return os.stat(str(run_dir / "status")).st_size
     except FileNotFoundError:
@@ -959,19 +960,19 @@ class Gallery:
                 gated = ["bash", "-c", 'read -r go && exec "$@" < /dev/null', "bash"] + argv
                 child, log_path = self.launch_run_all(gated, meta["cwd"], base, [name], None, stdin=subprocess.PIPE)
                 with child.stdin:
-                    # Only a retry that has its output base, and so starts, readies the log for its records:
-                    # a refused one leaves the log as it was.
+                    try:
+                        hold_run(run_dir, child.pid)
+                    except OSError as e:
+                        raise Refusal(500, "could not hold run %s for its retry (%s), so the retry stopped before it "
+                                           "called the provider" % (run_id, e))
+                    # Only a retry that holds its run, and so starts, readies the log for its records: a refused
+                    # one leaves the log as it was.
                     try:
                         drop_cut_off_record(run_dir)
                     except OSError as e:
                         raise Refusal(500, "could not ready run %s's status log %s for the retry: %s"
                                       % (run_id, run_dir / "status", e.strerror))
                     size = status_size(run_dir)
-                    try:
-                        hold_run(run_dir, child.pid)
-                    except OSError as e:
-                        raise Refusal(500, "could not hold run %s for its retry (%s), so the retry stopped before it "
-                                           "called the provider" % (run_id, e))
                     try:
                         os.write(child.stdin.fileno(), b"go\n")
                     except BrokenPipeError:

@@ -1500,9 +1500,11 @@ retry_frame() {
 
 @test "a frame's Retry the server cannot hold its run for, as when ps fails, stops before the provider is paid and says why" {
   answer_provider_with "$GEMINI_IMAGE"
-  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer i
-  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer i before
+  # The log ends in a record cut off part way, which a retry that starts drops and a refused one keeps.
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\ngemini\tcompl' done
   record_arguments "$a" "$out/hero"
+  before=$(od -c "$IMAGE_GALLERY_DIR/runs/$a/status")
   start_gallery
   wait_for_snapshot '.runs[0].providers[0].retryable'
   # The server finds ps on its PATH; this one fails, so the server cannot read when the run-all it
@@ -1515,7 +1517,7 @@ retry_frame() {
     echo "$answer"; return 1; }
   [[ ! -e "$MOCK_DIR/calls" && ! -e "$out/hero-gemini.png" && -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
   [[ -z "$(ls -A "$IMAGE_GALLERY_DIR/runs/$a/active")" ]] || { ls -la "$IMAGE_GALLERY_DIR/runs/$a/active"; return 1; }
-  [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$(printf 'gemini\terror\t\tmodel-a\t')" ]]
+  [[ "$(od -c "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$before" ]] || { od -c "$IMAGE_GALLERY_DIR/runs/$a/status"; return 1; }
   # Clicked again once the stopped run-all has exited, the retry runs and pays the provider once.
   wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].retryable'
   for i in $(seq 1 50); do
