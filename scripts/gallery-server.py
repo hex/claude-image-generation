@@ -99,7 +99,8 @@ def plugin_version():
 
 def version_order(version):
     """A calendar version, YYYY.M.PATCH, as the numbers its parts hold, for comparing versions: 2026.11.10
-    comes after 2026.11.2. Any other string comes before every calendar version and ties with any other such string."""
+    comes after 2026.11.2. Any other string comes before every calendar version and ties with any
+    other such string."""
     parts = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", version)
     return tuple(int(part) for part in parts.groups()) if parts else ()
 
@@ -257,13 +258,17 @@ def hold_run(run_dir, pid):
     """Writes the token that run-all.sh, running as pid, writes for itself once it continues the run
     (gallery_resume_run, as owner run-all), so the run is held from the moment the server starts it. Any
     server reads it, as a server that replaces this one must: that one never learns what this one
-    started. Writes nothing for a pid that has already ended."""
+    started. Writes nothing for a pid that has already ended, and names in server.log a token it could
+    not write; the server that started run-all.sh still keeps the run by its claim on the output base."""
     started = process_started(pid)
     if started is None:
         return
-    active = run_dir / "active"
-    active.mkdir(mode=0o700, exist_ok=True)
-    write_private(active / ("run-all.%d" % pid), started + "\n")
+    try:
+        active = run_dir / "active"
+        active.mkdir(mode=0o700, exist_ok=True)
+        write_private(active / ("run-all.%d" % pid), started + "\n")
+    except OSError as e:
+        print("image gallery: cannot hold run %s for the retry it started: %s" % (run_dir.name, e), file=sys.stderr, flush=True)
 
 
 def run_is_held(run_dir):
@@ -919,7 +924,8 @@ class Gallery:
                 if name not in meta["providers"]:
                     raise Refusal(404, "run %s has no %s frame" % (run_id, name))
                 providers = {provider: new_provider(provider) for provider in meta["providers"]}
-                refusal = retry_refusal(run_id, meta, providers, fold_status(run_dir, providers), run_is_held(run_dir), name)
+                unreadable = fold_status(run_dir, providers)
+                refusal = retry_refusal(run_id, meta, providers, unreadable, run_is_held(run_dir), name)
                 if refusal is not None:
                     raise Refusal(409, refusal)
                 check_places(run_id, meta)
