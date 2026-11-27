@@ -56,8 +56,11 @@ expected file marked `saved` or `missing`. It never overwrites: when any
 an unused `outputBase` (add `-2`, `-3`) rather than deleting the old files. Use the scripts instead when the request needs an
 option the tool does not take, such as `--quality`, `--background`, `--model`.
 
-A provider whose model does not draw the asked ratio fails before its request, with an error that
-names the ratios it draws; the others still run. xai draws `2k` for `4K` and says so. openai
+A provider whose model does not draw the ratio you ask for, or takes no size when you give one,
+fails before its request, with an error that names the ratios it draws; the others still run.
+openrouter checks only `google/` and `x-ai/` models, and sends any other model the ratio and size
+unchecked. xai keeps the input image's shape on a single-image edit, and draws `2k` for `4K`, and
+says so both times. openai
 draws the ratio and tier as one `WxH` (16:9 at 2K is `2736x1536`; ratios past 3:1 are not in
 its table).
 

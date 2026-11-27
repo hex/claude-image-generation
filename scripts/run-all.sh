@@ -30,8 +30,9 @@ Options:
   --input-image    input image path (required for edit mode, repeatable)
   --providers      comma-separated subset (default: gemini,openai,xai;
                    openrouter is available but opt-in, e.g. --providers gemini,openrouter)
-  --aspect-ratio   W:H such as 16:9, for every provider; one a provider's model does not
-                   draw fails that provider before its request
+  --aspect-ratio   W:H such as 16:9, for every provider; gemini, openai and xai, and openrouter
+                   for google/ and x-ai/ models, fail before their request when the model does
+                   not draw it, and openrouter sends it unchecked to any other model
   --size           size tier for every provider: 1K, 2K or 4K; xAI draws 2K for 4K
   --gemini-extra     extra args passed to gemini.sh     (single shell-split string)
   --openai-extra     extra args passed to openai.sh     (single shell-split string)
