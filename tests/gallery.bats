@@ -322,12 +322,13 @@ stub_browser() {
   unset IMAGE_GALLERY_NO_OPEN SSH_CONNECTION SSH_TTY
 }
 
-# serve_other_version — starts a server that reports another version, the way an older install's does.
+# serve_other_version [version] — starts a server that reports another version, 0.0.0-other unless
+# given, the way another install's does.
 serve_other_version() {
-  local i
-  python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version 0.0.0-other
+  local i version="${1:-0.0.0-other}"
+  python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version "$version"
   for i in $(seq 1 50); do
-    [[ "$(server_field version)" == 0.0.0-other ]] && return 0
+    [[ "$(server_field version)" == "$version" ]] && return 0
     sleep 0.1
   done
   echo "the server of another version never answered on its control socket"
@@ -345,6 +346,33 @@ serve_other_version() {
   start_gallery
   # The page reconnects to the server that replaced it on the same port, so no second tab opens.
   [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
+}
+
+@test "a run keeps a server of a newer version and replaces one of an older version, each part compared as a number" {
+  local version year month patch newer pid
+  version=$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")
+  IFS=. read -r year month patch <<< "$version"
+  # Newer by its patch number, though as text it sorts before this plugin's version.
+  newer="${year}.${month}.$((patch + 10))"
+  serve_other_version "$newer"
+  pid=$(server_field pid)
+  start_gallery
+  [[ "$(server_field pid)" == "$pid" && "$(server_field version)" == "$newer" ]] || {
+    echo "serving: $(server_field pid) $(server_field version), expected $pid $newer"; return 1; }
+  stop_gallery
+  # Older, though as text it sorts after this plugin's version.
+  serve_other_version 999.1.1
+  pid=$(server_field pid)
+  start_gallery
+  [[ "$(server_field pid)" != "$pid" && "$(server_field version)" == "$version" ]] || {
+    echo "serving: $(server_field pid) $(server_field version), expected a new pid and $version"; return 1; }
+}
+
+@test "the page's script and each snapshot carry the version of the server that serves them, so a page can tell it outlived its server" {
+  serve_other_version
+  [[ "$(gallery_curl /app.js | grep -c '^const PAGE_VERSION = "0.0.0-other";$')" == 1 ]] || {
+    gallery_curl /app.js | grep -n PAGE_VERSION; return 1; }
+  [[ "$(snapshot | jq -r .version)" == 0.0.0-other ]] || { snapshot; return 1; }
 }
 
 @test "runs started together each print the page's address when the browser never finishes opening" {
@@ -603,6 +631,22 @@ write_run() {
   wait_for_snapshot '.runs | length == 2'
   [[ "$(jq -r '[.runs[] | .status, .providers[0].state] | @tsv' <<< "$SNAPSHOT")" == \
     $'interrupted\tinterrupted\tinterrupted\tinterrupted' ]] || { echo "$SNAPSHOT"; return 1; }
+}
+
+@test "a private file the server fails to put in place leaves no temp file behind, which would keep run-all from finishing its run" {
+  # A directory at the file's path fails the rename that puts it in place, after the temp file exists.
+  local dir="${BATS_TEST_TMPDIR}/active"
+  mkdir -p "$dir/run-all.1"
+  run env NO_COLOR=1 python3 -I -B -c '
+import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("gallery_server", sys.argv[1])
+gallery = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gallery)
+gallery.write_private(Path(sys.argv[2]), "Thu Nov 26 10:00:00 2026\n")' "$GALLERY_PY" "$dir/run-all.1"
+  assert_status 1
+  [[ "${lines[${#lines[@]}-1]}" =~ ^IsADirectoryError:\ \[Errno\ 21\]\ Is\ a\ directory: ]] || { echo "$output"; return 1; }
+  [[ "$(ls -A "$dir")" == run-all.1 && -z "$(ls -A "$dir/run-all.1")" ]] || { ls -laR "$dir"; return 1; }
 }
 
 @test "a retry offer whose wait is too long to count still shows, with no countdown" {
@@ -1183,4 +1227,561 @@ write_resendable_run() {
   wait_for_snapshot "(.runs[0].id == \"$new\") and (.runs[0].status == \"done\")"
   saved=$(jq -r '.runs[0].providers[0].image.path' <<< "$SNAPSHOT")
   [[ "$saved" =~ ^"$out"/art/image-[0-9]{8}-[0-9]{6}-gemini\.png$ && -f "$saved" ]] || { echo "saved: $saved"; ls -laR "$out"; return 1; }
+}
+
+# retry_frame <run-id> <provider> — POSTs a failed frame's Retry the way its button does, printing the
+# answer and then its status.
+retry_frame() {
+  gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" "/retry/$1/$2"
+}
+
+@test "a failed frame offers Retry only once its run has ended with no frame at work and recorded its arguments, and the server refuses any other" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 \
+    c=20261125T100200Z-00000000c3 d=20261125T100300Z-00000000d4
+  printf 'png' > "$out/hero-openai.png"
+  # a ended with gemini failed and openai done; b the same, but recorded no arguments.
+  write_run "$a" "$out" "gemini\terror\t\tmodel-a\t\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\n" done
+  record_arguments "$a" "$out/hero"
+  write_run "$b" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  # c is still at work, held by a live process; d stopped with openai at work, its process gone.
+  write_run "$c" "$out" 'gemini\terror\t\tmodel-a\t\nopenai\tquerying\t\tmodel-b\t\n'
+  record_arguments "$c" "$out/held"
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/$c/active/run-all.$HOLDER_PID"
+  write_run "$d" "$out" 'gemini\terror\t\tmodel-a\t\nopenai\tquerying\t\tmodel-b\t\n'
+  record_arguments "$d" "$out/stopped"
+  start_gallery
+  wait_for_snapshot '(.runs | length == 4) and .runs[1].status == "live"'
+  [[ "$(jq -c '[.runs[] | [.status, [.providers[] | .name, .retryable]]]' <<< "$SNAPSHOT")" == \
+    '[["interrupted",["gemini",false,"openai",false]],["live",["gemini",false,"openai",false]],["done",["gemini",false]],["done",["gemini",true,"openai",false]]]' ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  [[ "$(retry_frame "$b" gemini)" == \
+    "{\"error\": \"run $b did not record the arguments it was started with, so its frames cannot be retried\"} 409" ]]
+  [[ "$(retry_frame "$c" gemini)" == "{\"error\": \"run $c is still generating\"} 409" ]]
+  [[ "$(retry_frame "$d" gemini)" == \
+    "{\"error\": \"run $d stopped while its openai frame was at work, so its frames cannot be retried\"} 409" ]]
+  [[ "$(retry_frame "$a" openai)" == "{\"error\": \"run $a's openai frame did not fail, so there is nothing to retry\"} 409" ]]
+  [[ "$(retry_frame "$a" xai)" == "{\"error\": \"run $a has no xai frame\"} 404" ]]
+  [[ "$(retry_frame 20261125T100400Z-00000000e5 gemini)" == '{"error": "no run 20261125T100400Z-00000000e5"} 404' ]]
+  # f failed and ended, but a record after its error does not parse, so how its frames ended is unknown.
+  local f=20261125T100500Z-00000000f6
+  write_run "$f" "$out" 'gemini\terror\t\tmodel-a\t\ngemini\tcomplete\t1000\n' done
+  record_arguments "$f" "$out/unreadable"
+  wait_for_snapshot ".runs[0].id == \"$f\""
+  [[ "$(jq -c '.runs[0] | [.problem, .providers[0].retryable]' <<< "$SNAPSHOT")" == \
+    '["unreadable status log: status line 2 has 3 fields, not 5",false]' ]] || { echo "$SNAPSHOT"; return 1; }
+  [[ "$(retry_frame "$f" gemini)" == \
+    "{\"error\": \"run $f's status log is unreadable (status line 2 has 3 fields, not 5), so how its frames ended is unknown\"} 409" ]]
+  [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && ! -e "$out/hero-gemini.png" && ! -e "$out/unreadable-gemini.png" ]]
+}
+
+@test "a failed frame's Retry runs its provider again in the same run, saving where the run meant to, and a second failure shows with no run-level offer" {
+  answer_provider_with "$GEMINI_REFUSAL" "$GEMINI_REFUSAL" "$GEMINI_IMAGE"
+  start_gallery
+  connect_page
+  DISPLAY_PANE_RETRY_WAIT=0 run_all_gemini
+  assert_status 1
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].retryable'
+  local id answer
+  id=$(jq -r '.runs[0].id' <<< "$SNAPSHOT")
+  [[ ! -e "${OUT_BASE}-gemini.png" ]]
+  answer=$(retry_frame "$id" gemini)
+  [[ "$answer" == "{\"run\": \"$id\"} 200" ]] || { echo "answer: $answer"; return 1; }
+  # It fails again. The page is connected, yet the run ends at once with the frame's new error and no
+  # offer: the frame's own Retry is the way back.
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].round == 1'
+  [[ "$(jq -r '[(.runs | length), .runs[0].retry, (.runs[0].providers[0] | .state, .retryable, .error)] | @tsv' <<< "$SNAPSHOT")" == \
+    $'1\t\terror\ttrue\tNo image data in response. Model said: no picture today' ]] || { echo "$SNAPSHOT"; return 1; }
+  answer=$(retry_frame "$id" gemini)
+  [[ "$answer" == "{\"run\": \"$id\"} 200" ]] || { echo "answer: $answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ "$(jq -r '[(.runs | length), .runs[0].id, (.runs[0].providers[0] | .round, .image.path, .retryable)] | @tsv' <<< "$SNAPSHOT")" == \
+    "1	$id	2	${OUT_BASE}-gemini.png	false" ]] || { echo "$SNAPSHOT"; return 1; }
+  # The image is the provider's, saved readable by this user only, as a resend saves its images.
+  [[ "$(base64 < "${OUT_BASE}-gemini.png" | tr -d '\n')" == "$PNG_B64" ]]
+  [[ "$(ls -l "${OUT_BASE}-gemini.png" | cut -c1-10)" == "-rw-------" ]]
+  [[ "$(cat "$MOCK_DIR/calls")" == 3 ]]
+}
+
+@test "a failed frame's Retry is refused, starting nothing, while anything is at the path its image would take, a dangling symlink too" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  ln -s nowhere "$out/hero-gemini.png"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"error\": \"$out/hero-gemini.png already exists, and nothing is overwritten\"} 409" ]]
+  [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && "$(readlink "$out/hero-gemini.png")" == nowhere ]]
+  [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$(printf 'gemini\terror\t\tmodel-a\t')" && -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
+}
+
+@test "a frame's Retry refused for a file at its image's path leaves its run's status log as it was, a cut-off last record too" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 before
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\ngemini\tcompl' done
+  record_arguments "$a" "$out/hero"
+  printf 'png' > "$out/hero-gemini.png"
+  before=$(od -c "$IMAGE_GALLERY_DIR/runs/$a/status")
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"error\": \"$out/hero-gemini.png already exists, and nothing is overwritten\"} 409" ]]
+  [[ "$(od -c "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$before" ]] || { od -c "$IMAGE_GALLERY_DIR/runs/$a/status"; return 1; }
+  [[ ! -e "$MOCK_DIR/calls" && "$(cat "$out/hero-gemini.png")" == png ]]
+}
+
+@test "while a frame's Retry is starting, a second click and a delete of its run are refused, so the provider is paid once" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds run-all.sh back until the test lets it go, or gives
+  # up once the test's folder is gone, so the second click lands before the first run-all holds the run.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  for i in $(seq 1 50); do
+    [[ -n "$(ls "$IMAGE_GALLERY_DIR/resend-logs" 2>/dev/null)" ]] && break
+    sleep 0.1
+  done
+  # The server holds the run for the run-all it started before that run-all holds it itself.
+  [[ "$(retry_frame "$a" gemini)" == "{\"error\": \"run $a is still generating\"} 409" ]]
+  # Nor can the run be deleted before its run-all holds it.
+  [[ "$(delete_runs "{\"runs\": {\"$a\": []}}")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is still generating\"}], \"error\": \"run $a is still generating\"} 409" ]]
+  touch "$MOCK_DIR/go"
+  wait "$first"
+  [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+  [[ "$(ls "$IMAGE_GALLERY_DIR/resend-logs" | wc -l | tr -d ' ')" == 1 ]]
+}
+
+@test "while a frame's Retry is starting with its run's token gone, the server's claim on the output base refuses a second click and a delete" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first active
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  active="$IMAGE_GALLERY_DIR/runs/$a/active"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds run-all.sh back until the test lets it go, or gives
+  # up once the test's folder is gone.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  for i in $(seq 1 50); do
+    [[ -n "$(ls "$active")" ]] && break
+    sleep 0.1
+  done
+  # Without the token that holds the run for the retry, as when ps cannot confirm its holder, only the
+  # server's claim on the run's output base keeps the run.
+  rm "$active"/run-all.*
+  [[ "$(retry_frame "$a" gemini)" == \
+    "{\"error\": \"a run saving to $out/hero-<provider>.png is already starting; try again in a second\"} 409" ]]
+  [[ "$(delete_runs "{\"runs\": {\"$a\": []}}")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is starting a retry\"}], \"error\": \"run $a is starting a retry\"} 409" ]]
+  touch "$MOCK_DIR/go"
+  wait "$first"
+  [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+}
+
+# write_finished_run <run-id> — writes a finished run by hand, quickly, for tests that need many runs.
+write_finished_run() {
+  local dir="$IMAGE_GALLERY_DIR/runs/$1"
+  mkdir -p "$dir/active"
+  printf '{"prompt": "a kettle", "cwd": "/work/alpha", "started_at": "2026-11-25T10:00:00Z", "providers": ["gemini"]}' > "$dir/meta.json"
+  printf 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' > "$dir/status"
+  touch "$dir/.done"
+}
+
+@test "a frame's Retry starting in the oldest run the gallery keeps, with its run's token gone, keeps the run once a newer run pushes it past 200" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first active
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  active="$IMAGE_GALLERY_DIR/runs/$a/active"
+  for i in $(seq 1 199); do
+    write_finished_run "$(printf '20261126T%06dZ-%010x' "$i" "$i")"
+  done
+  start_gallery
+  wait_for_snapshot '(.runs | length == 200) and .runs[199].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds run-all.sh back until the test lets it go, or gives
+  # up once the test's folder is gone.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  for i in $(seq 1 50); do
+    [[ -n "$(ls "$active")" ]] && break
+    sleep 0.1
+  done
+  # Without the token that holds the run for the retry, as when ps cannot confirm its holder, only the
+  # server's claim on the run's output base keeps the run.
+  rm "$active"/run-all.*
+  write_finished_run 20261126T000200Z-00000000c8
+  wait_for_snapshot '.runs | length == 201'
+  [[ -f "$IMAGE_GALLERY_DIR/runs/$a/meta.json" ]]
+  touch "$MOCK_DIR/go"
+  wait "$first"
+  [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
+  for i in $(seq 1 50); do
+    [[ -f "$out/hero-gemini.png" ]] && break
+    sleep 0.1
+  done
+  rm "$MOCK_DIR/bash"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+}
+
+@test "a frame's Retry finishes its run though processes killed before they let go of it left their tokens" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 dead active
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  active="$IMAGE_GALLERY_DIR/runs/$a/active"
+  # A run-all killed outright, whose pid no process has now, and a token whose pid a later process took.
+  sleep 0 &
+  dead=$!
+  wait "$dead"
+  printf 'Thu Nov 26 10:00:00 2026\n' > "$active/run-all.$dead"
+  sleep 60 &
+  HOLDER_PID=$!
+  printf 'Thu Jan  1 00:00:00 1970\n' > "$active/gemini.$HOLDER_PID"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"run\": \"$a\"} 200" ]]
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ -z "$(ls -A "$active")" ]] || { ls -la "$active"; return 1; }
+}
+
+@test "a frame's Retry drops a record cut off at the end of its run's status log before the retry adds its own, so every run still parses" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer
+  printf 'png' > "$out/hero-openai.png"
+  # The log ends in a record cut off part way, as a run-all killed in the middle of one leaves it, which
+  # no reader counts.
+  write_run "$a" "$out" "gemini\terror\t\tmodel-a\t\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\ngemini\tcompl" done
+  record_arguments "$a" "$out/hero"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"run\": \"$a\"} 200" ]]
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ "$(jq -c '.runs[0] | [.problem, .providers[0].image.path]' <<< "$SNAPSHOT")" == "[null,\"$out/hero-gemini.png\"]" ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  # A frame's delete reads every run in the gallery, so it deletes nothing while one does not parse.
+  answer=$(delete_frame "$a" openai "[\"$out/hero-openai.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"openai\", \"removed\": [\"$out/hero-openai.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+}
+
+@test "readying a whole status log for a frame's delete or Retry keeps a record a provider appends as the server reads it" {
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\terror\t\tmodel-a\t\nopenai\tquerying\t\tmodel-b\t\n'
+  # The record lands just after the server reads the log, which ends in a whole record.
+  run python3 -I "${PLUGIN_ROOT}/tests/gallery_race.py" "$GALLERY_PY" trim-as-a-record-lands "$dir" \
+    $'openai\tcomplete\t1000\tmodel-b\t/work/alpha/hero-openai.png\n'
+  assert_status 0
+  cmp "$dir/status" <(printf 'gemini\terror\t\tmodel-a\t\nopenai\tquerying\t\tmodel-b\t\nopenai\tcomplete\t1000\tmodel-b\t/work/alpha/hero-openai.png\n') || {
+    od -c "$dir/status"; return 1; }
+}
+
+@test "readying a status log that ends in a cut-off record drops only the bytes the server read, not a record appended since" {
+  local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
+  write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\terror\t\tmodel-a\t\nopenai\tcompl'
+  # The record lands just after the server reads the log. It runs on from the cut-off record, so the log
+  # no longer parses, but the record that names the image stays.
+  run python3 -I "${PLUGIN_ROOT}/tests/gallery_race.py" "$GALLERY_PY" trim-as-a-record-lands "$dir" \
+    $'xai\tcomplete\t1000\tmodel-c\t/work/alpha/hero-xai.png\n'
+  assert_status 0
+  cmp "$dir/status" <(printf 'gemini\terror\t\tmodel-a\t\nopenai\tcomplxai\tcomplete\t1000\tmodel-c\t/work/alpha/hero-xai.png\n') || {
+    od -c "$dir/status"; return 1; }
+}
+
+@test "a frame's Retry still starting holds its run when another server replaces the one that started it, so the provider is paid once" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  serve_other_version
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds run-all.sh back until the test lets it go, or gives
+  # up once the test's folder is gone, so the server is replaced before run-all holds the run itself.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  for i in $(seq 1 50); do
+    [[ -n "$(ls "$IMAGE_GALLERY_DIR/resend-logs" 2>/dev/null)" ]] && break
+    sleep 0.1
+  done
+  # A run of this plugin's version replaces the server that started the retry, and with it what that
+  # server remembered of it.
+  start_gallery
+  [[ "$(server_field version)" == "$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")" ]]
+  [[ "$(retry_frame "$a" gemini)" == "{\"error\": \"run $a is still generating\"} 409" ]]
+  [[ "$(delete_runs "{\"runs\": {\"$a\": []}}")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is still generating\"}], \"error\": \"run $a is still generating\"} 409" ]]
+  touch "$MOCK_DIR/go"
+  # The first click's server stopped before it could answer.
+  wait "$first" || true
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+}
+
+@test "a frame's Retry whose run-all cannot read its own start time keeps the server's hold, so a server that replaced the one that started it refuses a second click" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash real_ps i first answer
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  serve_other_version
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash and ps on its PATH. This bash marks run-all.sh, whose ps then fails while each
+  # server's still answers, and holds gemini.sh back until the test lets it go, or gives up once the
+  # test's folder is gone, so no record of the retry lands.
+  real_bash=$(command -v bash)
+  real_ps=$(command -v ps)
+  printf '#!/bin/sh\ncase "$1" in\n  */run-all.sh) export RUN_ALL_PS_FAILS=1 ;;\n  */gemini.sh)\n    while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n    [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  printf '#!/bin/sh\n[ -z "${RUN_ALL_PS_FAILS:-}" ] || exit 1\nexec %q "$@"\n' "$real_ps" > "$MOCK_DIR/ps"
+  chmod +x "$MOCK_DIR/bash" "$MOCK_DIR/ps"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  # run-all removes .done once it has taken its token for the run.
+  for i in $(seq 1 50); do
+    [[ -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]] || break
+    sleep 0.1
+  done
+  [[ ! -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
+  # A run of this plugin's version replaces the server that started the retry, and with it that server's
+  # claim on the run's output base.
+  start_gallery
+  [[ "$(server_field version)" == "$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")" ]]
+  answer=$(retry_frame "$a" gemini) || true
+  [[ "$answer" == "{\"error\": \"run $a is still generating\"} 409" ]] || {
+    echo "$answer"; head "$IMAGE_GALLERY_DIR/runs/$a/active"/*; return 1; }
+  touch "$MOCK_DIR/go"
+  # The first click's server stopped before it could answer.
+  wait "$first" || true
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash" "$MOCK_DIR/ps"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+}
+
+@test "a frame's Retry the server cannot hold its run for, as when ps fails, stops before the provider is paid and says why" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer i before
+  # The log ends in a record cut off part way, which a retry that starts drops and a refused one keeps.
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\ngemini\tcompl' done
+  record_arguments "$a" "$out/hero"
+  before=$(od -c "$IMAGE_GALLERY_DIR/runs/$a/status")
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds ps on its PATH; this one fails, so the server cannot read when the run-all it
+  # started began, which the token holding the run must say.
+  printf '#!/bin/sh\nexit 1\n' > "$MOCK_DIR/ps"
+  chmod +x "$MOCK_DIR/ps"
+  answer=$(retry_frame "$a" gemini)
+  rm "$MOCK_DIR/ps"
+  [[ "$answer" == "{\"error\": \"could not hold run $a for its retry (ps could not say when the retry's run-all.sh started), so the retry stopped before it called the provider\"} 500" ]] || {
+    echo "$answer"; return 1; }
+  [[ ! -e "$MOCK_DIR/calls" && ! -e "$out/hero-gemini.png" && -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
+  [[ -z "$(ls -A "$IMAGE_GALLERY_DIR/runs/$a/active")" ]] || { ls -la "$IMAGE_GALLERY_DIR/runs/$a/active"; return 1; }
+  [[ "$(od -c "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$before" ]] || { od -c "$IMAGE_GALLERY_DIR/runs/$a/status"; return 1; }
+  # Clicked again once the stopped run-all has exited, the retry runs and pays the provider once.
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].retryable'
+  for i in $(seq 1 50); do
+    answer=$(retry_frame "$a" gemini)
+    [[ "$answer" == *"is already starting; try again in a second"* ]] || break
+    sleep 0.1
+  done
+  [[ "$answer" == "{\"run\": \"$a\"} 200" ]] || { echo "$answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+}
+
+@test "a frame's Retry whose run-all exits before it continues the run is answered 502, and the frame offers Retry again" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  real_bash=$(command -v bash)
+  export PATH="$MOCK_DIR:$PATH"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one runs run-all.sh for a second, long enough for the server
+  # to read the run while it is held, and then exits as a run-all that fails before the run does.
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh) sleep 1; exit 1 ;; esac\nexec %q "$@"\n' "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  local answer
+  answer=$(retry_frame "$a" gemini)
+  [[ "$answer" == '{"error": "run-all.sh exited 1 before it started a run: it printed nothing"} 502' ]] || { echo "$answer"; return 1; }
+  rm "$MOCK_DIR/bash"
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].retryable'
+}
+
+@test "Delete run removes the image a frame's Retry saved, which the run's records name" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer
+  printf 'png' > "$out/hero-openai.png"
+  write_run "$a" "$out" "gemini\terror\t\tmodel-a\t\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\n" done
+  record_arguments "$a" "$out/hero"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"run\": \"$a\"} 200" ]]
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ "$(jq -c '[.runs[0].files[] | [.path, .kept]]' <<< "$SNAPSHOT")" == \
+    "[[\"$out/hero-gemini.png\",null],[\"$out/hero-openai.png\",null]]" ]] || { echo "$SNAPSHOT"; return 1; }
+  answer=$(delete_runs "$(listing "$a")")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/hero-gemini.png\", \"$out/hero-openai.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ -z "$(ls "$out")" && ! -e "$IMAGE_GALLERY_DIR/runs/$a" ]]
+}
+
+@test "run-all --gallery-run stops before any provider runs when the run is not in the gallery or the display is not the gallery" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local id=20261125T100000Z-00000000a1
+  run bash "${SCRIPTS}/run-all.sh" --mode generate --prompt "a kettle" --output-base "$OUT_BASE" --providers gemini --gallery-run "$id"
+  assert_status 1
+  [[ "$output" == "image gallery: there is no run $id in $IMAGE_GALLERY_DIR/runs to continue" ]] || { echo "$output"; return 1; }
+  IMAGE_DISPLAY=none run bash "${SCRIPTS}/run-all.sh" --mode generate --prompt "a kettle" --output-base "$OUT_BASE" --providers gemini --gallery-run "$id"
+  assert_status 1
+  [[ "$output" == "Error: --gallery-run needs the gallery display, and this run's is none" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$MOCK_DIR/calls" && ! -e "${OUT_BASE}-gemini.png" ]]
+}
+
+# delete_frame <run-id> <provider> <paths> — POSTs a frame's delete the way the page's dialog does,
+# with the paths the dialog listed as a JSON array, printing the answer and then its status.
+delete_frame() {
+  gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" -H 'Content-Type: application/json' --data-binary "{\"paths\": $3}" "/delete/$1/$2"
+}
+
+@test "deleting a frame of a finished run deletes its image file and records the frame as deleted, which a restarted server still shows" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer
+  printf 'png' > "$out/hero-gemini.png"
+  printf 'png' > "$out/hero-openai.png"
+  # The log ends in a record cut off part way, as a writer killed in the middle of one leaves it, which
+  # no reader counts.
+  write_run "$a" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\nopenai\tcompl" done
+  start_gallery
+  wait_for_snapshot '.runs | length == 1'
+  answer=$(delete_frame "$a" gemini "[\"$out/hero-gemini.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"gemini\", \"removed\": [\"$out/hero-gemini.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ "$(ls "$out")" == hero-openai.png ]]
+  # The page hears of it at once: the frame is deleted, not failed, and the run names only the other image.
+  [[ "$(snapshot | jq -c '.runs[0] | [.status, [.providers[] | [.name, .state, .image.path]], [.files[].path]]')" == \
+    "[\"done\",[[\"gemini\",\"deleted\",null],[\"openai\",\"complete\",\"$out/hero-openai.png\"]],[\"$out/hero-openai.png\"]]" ]] || {
+    snapshot; return 1; }
+  # The run's own records say so, so a server started afresh shows the same.
+  [[ "$(tail -n 1 "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$(printf 'gemini\tdeleted\t\t\t')" ]]
+  stop_gallery
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].state == "deleted" and (.runs[0].files | length == 1)'
+  [[ "$(delete_frame "$a" gemini "[\"$out/hero-gemini.png\"]")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"provider\": \"gemini\", \"error\": \"run $a's gemini frame has no image to delete\"}], \"error\": \"run $a's gemini frame has no image to delete\"} 409" ]]
+}
+
+@test "deleting a frame keeps each file the run delete keeps, saying why, removes a symlink and not its target, and still deletes the frame" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 \
+    c=20261125T100200Z-00000000c3 answer
+  printf 'png' > "$out/generated.png"
+  printf 'png' > "$out/shared-openai.png"
+  printf 'png' > "$out/input-xai.png"
+  printf 'png' > "$out/target.png"
+  ln -s "$out/target.png" "$out/link-openrouter.png"
+  ln -s "$out" "${BATS_TEST_TMPDIR}/linked"
+  write_run "$a" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/generated.png\nopenai\tcomplete\t1000\tmodel-b\t$out/shared-openai.png\nxai\tcomplete\t1000\tmodel-c\t$out/input-xai.png\nopenrouter\tcomplete\t1000\tmodel-d\t$out/link-openrouter.png\n" done
+  # b names a's openai image through a symlinked folder; c uses a's xai image as an input image.
+  write_run "$b" "$out" "openai\tcomplete\t1000\tmodel-b\t${BATS_TEST_TMPDIR}/linked/shared-openai.png\n" done
+  write_run "$c" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$c" "$out/edit" edit "$out/input-xai.png"
+  start_gallery
+  wait_for_snapshot '.runs | length == 3'
+  answer=$(delete_frame "$a" gemini "[\"$out/generated.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"gemini\", \"removed\": [], \"missing\": [], \"kept_files\": [{\"path\": \"$out/generated.png\", \"reason\": \"its name does not end in -gemini and .png, .jpg, .jpeg, .webp or .gif\"}]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  answer=$(delete_frame "$a" openai "[\"$out/shared-openai.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"openai\", \"removed\": [], \"missing\": [], \"kept_files\": [{\"path\": \"$out/shared-openai.png\", \"reason\": \"run $b names it too\"}]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  answer=$(delete_frame "$a" xai "[\"$out/input-xai.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"xai\", \"removed\": [], \"missing\": [], \"kept_files\": [{\"path\": \"$out/input-xai.png\", \"reason\": \"run $c uses it as an input image\"}]}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  answer=$(delete_frame "$a" openrouter "[\"$out/link-openrouter.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"openrouter\", \"removed\": [\"$out/link-openrouter.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ "$(ls "$out" | tr '\n' ' ')" == "generated.png input-xai.png shared-openai.png target.png " ]] || { ls -la "$out"; return 1; }
+  [[ "$(snapshot | jq -c --arg a "$a" '.runs[] | select(.id == $a) | [[.providers[].state], .files]')" == \
+    '[["deleted","deleted","deleted","deleted"],[]]' ]] || { snapshot; return 1; }
+}
+
+@test "a frame's delete deletes nothing while its run is live or any run in the gallery does not parse, and names a frame the run lacks" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 \
+    c=20261125T100200Z-00000000c3 answer
+  printf 'png' > "$out/held-gemini.png"
+  printf 'png' > "$out/fine-gemini.png"
+  write_run "$a" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/held-gemini.png\nopenai\tquerying\t\tmodel-b\t\n"
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/$a/active/run-all.$HOLDER_PID"
+  write_run "$b" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/fine-gemini.png\n" done
+  start_gallery
+  wait_for_snapshot '(.runs | length == 2) and .runs[1].status == "live"'
+  [[ "$(delete_frame "$a" gemini "[\"$out/held-gemini.png\"]")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"provider\": \"gemini\", \"error\": \"run $a is still generating\"}], \"error\": \"run $a is still generating\"} 409" ]]
+  [[ "$(delete_frame "$b" xai '[]')" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$b\", \"provider\": \"xai\", \"error\": \"run $b has no xai frame\"}], \"error\": \"run $b has no xai frame\"} 404" ]]
+  # c's status log has a line of four fields, so which images c names is unknown.
+  write_run "$c" "$out" 'gemini\tcomplete\t1000\tmodel-a\n' done
+  answer=$(delete_frame "$b" gemini "[\"$out/fine-gemini.png\"]")
+  [[ "$answer" == "{\"error\": \"run $c's status log is unreadable (status line 1 has 4 fields, not 5), so which images it names is unknown; nothing was deleted\"} 409" ]] || {
+    echo "$answer"; return 1; }
+  [[ -f "$out/held-gemini.png" && -f "$out/fine-gemini.png" ]]
+  [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$b/status")" == "$(printf 'gemini\tcomplete\t1000\tmodel-a\t%s' "$out/fine-gemini.png")" ]]
+}
+
+@test "a frame's Retry turns its run live before the provider starts, with no stale offer, so the page shows it working and Delete keeps it" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash first
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  # The offer a run-all killed while it waited would leave behind.
+  printf '45\ngemini\n' > "$IMAGE_GALLERY_DIR/runs/$a/retry-offer"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds gemini.sh back until the test lets it go, or gives
+  # up once the test's folder is gone, and runs run-all.sh at once.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */gemini.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  wait_for_snapshot '.runs[0].status == "live"'
+  [[ "$(jq -c '.runs[0] | [.retry, .providers[0].state, .providers[0].retryable]' <<< "$SNAPSHOT")" == '[null,"error",false]' ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  [[ "$(delete_runs "{\"runs\": {\"$a\": []}}")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is still generating\"}], \"error\": \"run $a is still generating\"} 409" ]]
+  touch "$MOCK_DIR/go"
+  wait "$first"
+  [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash"
 }

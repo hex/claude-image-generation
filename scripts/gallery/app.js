@@ -5,6 +5,10 @@
 // the DOM, never as HTML. Strips are kept by run id and frames by provider name, so a
 // snapshot rebuilds only the parts that changed and an image already shown never reloads.
 
+// The version of the server that served this script, which that server writes in here.
+const PAGE_VERSION = '';
+// The server version this tab last reloaded to catch up with, kept across the reload.
+const RELOAD_KEY = 'gallery-reloaded-for';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 // Phosphor regular icons, the path data read out of @phosphor-icons/core 2.1.1 (assets/regular).
 const ICONS = {
@@ -180,7 +184,9 @@ function imageUrl(run, card) {
   return 'img/' + [run.id, card.name, String(card.image.n)].map(encodeURIComponent).join('/');
 }
 
-async function post(url, button, note) {
+// unanswered is the note when no answer comes back: a request cut off with the server it reached may
+// still have done its work.
+async function post(url, button, note, unanswered = 'Could not reach the gallery server.') {
   button.disabled = true;
   button.setAttribute('aria-busy', 'true');
   note.textContent = '';
@@ -189,7 +195,7 @@ async function post(url, button, note) {
     const answer = await response.json().catch(() => ({}));
     if (!response.ok) note.textContent = answer.error || 'The server answered ' + response.status + '.';
   } catch (error) {
-    note.textContent = 'Could not reach the gallery server.';
+    note.textContent = unanswered;
   } finally {
     button.disabled = false;
     button.removeAttribute('aria-busy');
@@ -257,7 +263,10 @@ function imagePlate(run, card, frame) {
   image.src = url;
   const view = el('button', { type: 'button', class: 'view', 'data-key': 'view' }, image);
   view.addEventListener('click', () => openLoupe(run.id, card.name));
-  return [view, el('div', { class: 'actions slab' }, revealButton(() => url, frame.note), fullSizeLink(url))];
+  // The delete button hides while the run is working (app.css), so a run ending redraws no frame.
+  const trash = el('button', { type: 'button', class: 'act frame-delete', 'aria-label': 'Delete the ' + providerName(card.name) + ' image', 'data-key': 'delete-frame' }, icon('trash'));
+  trash.addEventListener('click', () => askToDeleteFrame(strips.get(run.id).run, card.name));
+  return [view, el('div', { class: 'actions slab' }, revealButton(() => url, frame.note), fullSizeLink(url), trash)];
 }
 
 // A JSON string's contents as text; as written, when they do not parse.
@@ -290,10 +299,11 @@ function readError(text) {
   };
 }
 
-// A failed frame: the status and code, the message, and "Full error" to open the whole file in
-// place. The button shows when the file holds more than the message, or when the message runs
-// past the square. A frame drawn while its run is filtered out has no size yet, so that check runs
-// whenever it gets one.
+// A failed frame: the status and code, the message, and at its foot Retry, when the server offers
+// it, and "Full error" to open the whole file in place. Retry runs the provider again in this run,
+// and the frame then shows it at work like any other. "Full error" shows when the file holds more
+// than the message, or when the message runs past the square. A frame drawn while its run is
+// filtered out has no size yet, so that check runs whenever it gets one.
 function errorPlate(run, card, frame) {
   const error = readError(card.error || '');
   frame.plate.title = error.summary || error.code;
@@ -301,23 +311,33 @@ function errorPlate(run, card, frame) {
     ? el('p', { class: 'message', text: error.summary })
     : el('p', { class: 'message quiet', text: 'The provider saved no error text.' });
   const parts = [el('p', { class: 'code', text: error.code }), message];
-  if (!error.full) return parts;
-  const more = el('button', { type: 'button', class: 'more', 'aria-expanded': 'false', 'data-key': 'more', text: 'Full error' });
-  more.addEventListener('click', () => {
-    const open = frame.node.classList.toggle('expanded');
-    more.setAttribute('aria-expanded', String(open));
-    more.textContent = open ? 'Show less' : 'Full error';
-  });
-  parts.push(el('pre', { class: 'full-error', text: error.full }), more);
-  if (error.full === error.summary) {
-    more.hidden = true;
-    const sized = new ResizeObserver(() => {
-      if (message.scrollHeight <= message.clientHeight + 1) return;
-      sized.disconnect();
-      more.hidden = false;
-    });
-    sized.observe(message);
+  const foot = el('div', { class: 'error-foot' });
+  if (card.retryable) {
+    const retry = el('button', { type: 'button', class: 'retry', 'data-key': 'retry-frame', 'aria-label': 'Retry ' + providerName(card.name) }, el('span', { text: 'Retry' }));
+    retry.addEventListener('click', () => post('retry/' + [run.id, card.name].map(encodeURIComponent).join('/'), retry, frame.note,
+      'The gallery server did not answer. The retry may have started; if it did, this frame shows it.'));
+    foot.append(retry);
   }
+  if (error.full) {
+    const more = el('button', { type: 'button', class: 'more', 'aria-expanded': 'false', 'data-key': 'more', text: 'Full error' });
+    more.addEventListener('click', () => {
+      const open = frame.node.classList.toggle('expanded');
+      more.setAttribute('aria-expanded', String(open));
+      more.textContent = open ? 'Show less' : 'Full error';
+    });
+    parts.push(el('pre', { class: 'full-error', text: error.full }));
+    foot.append(more);
+    if (error.full === error.summary) {
+      more.hidden = true;
+      const sized = new ResizeObserver(() => {
+        if (message.scrollHeight <= message.clientHeight + 1) return;
+        sized.disconnect();
+        more.hidden = false;
+      });
+      sized.observe(message);
+    }
+  }
+  if (foot.childElementCount) parts.push(foot);
   return parts;
 }
 
@@ -335,6 +355,7 @@ const FRAME_STATES = {
   complete: { plate: imagePlate, secs: (run, card) => el('span', { class: 'secs', text: seconds(card.ms) }) },
   error: { plate: errorPlate, secs: () => el('span', { class: 'secs', text: 'Failed' }) },
   interrupted: { plate: () => [el('span', { class: 'stopped-label', text: 'Stopped' })], secs: () => el('span', { class: 'secs' }) },
+  deleted: { plate: () => [el('span', { class: 'deleted-label', text: 'Deleted' })], secs: () => el('span', { class: 'secs' }) },
 };
 
 function frameState(run, card) {
@@ -735,13 +756,37 @@ function askToDelete(chosen, project, generating) {
   const named = chosen.some(run => run.files.length);
   const selected = selectedSession();
   const empties = selected !== null && runs.filter(run => run.cwd === selected).every(run => ids.includes(run.id));
-  deleting = { ids, listed, empties, busy: false };
-  confirmTitle.textContent = project ? 'Delete ' + project.name + ' from the gallery?' : 'Delete this run?';
+  deleting = { frame: null, listed, empties, busy: false };
   const removes = project ? 'Removes its ' + counted(chosen.length, 'run') + ' from the gallery' : 'Removes it from the gallery';
   const files = going.length ? ' and deletes ' + counted(going.length, 'image') + ' from disk.' : named ? '. It deletes no images.' : '. ' + (project ? 'They have' : 'It has') + ' no saved images.';
-  const keeps = staying.size ? ' ' + counted(staying.size, 'file') + ' ' + (staying.size === 1 ? 'stays' : 'stay') + ' on disk.' : '';
   const stays = generating ? ' ' + counted(generating, 'run') + ' still generating ' + (generating === 1 ? 'stays' : 'stay') + '.' : '';
-  confirmBody.textContent = removes + files + keeps + stays + ' This can\u2019t be undone.';
+  showConfirm(project ? 'Delete ' + project.name + ' from the gallery?' : 'Delete this run?', removes + files, stays, going, staying, named);
+}
+
+// Asks before deleting one frame of a run that is not live, the way askToDelete asks for a run:
+// the frame's image files that go and those that stay with why, one another run names too among
+// them. A file the run's other frames name goes with this one, as the server deletes it.
+function askToDeleteFrame(run, name) {
+  const own = run.files.filter(file => file.provider === name);
+  const outside = new Set(runs.filter(other => other.id !== run.id).flatMap(other => other.files.map(file => file.entry)));
+  const going = [];
+  const staying = new Map();
+  for (const file of own) {
+    if (file.kept) staying.set(file.path, file.kept);
+    else if (outside.has(file.entry)) staying.set(file.path, 'another run uses it');
+    else going.push(file.path);
+  }
+  deleting = { frame: { run: run.id, provider: name }, listed: { [run.id]: going }, empties: false, busy: false };
+  const removes = 'Removes it from this run' + (going.length ? ' and deletes ' + counted(going.length, 'image') + ' from disk.' : own.length ? '. It deletes no images.' : '. It has no saved image.');
+  showConfirm('Delete the ' + providerName(name) + ' image?', removes, '', going, staying, own.length > 0);
+}
+
+// Opens the delete dialog: what goes, then each file that stays and the note on what else stays,
+// the file paths listed under it. Cancel has the focus.
+function showConfirm(title, removes, stays, going, staying, named) {
+  confirmTitle.textContent = title;
+  const keeps = staying.size ? ' ' + counted(staying.size, 'file') + ' ' + (staying.size === 1 ? 'stays' : 'stay') + ' on disk.' : '';
+  confirmBody.textContent = removes + keeps + stays + ' This can\u2019t be undone.';
   confirmFiles.replaceChildren(
     ...going.map(path => el('li', { text: path })),
     ...[...staying].map(([path, why]) => el('li', { text: path + ': kept, ' + why })),
@@ -762,20 +807,23 @@ function askToDeleteProject(cwd) {
   askToDelete(own.filter(run => run.status !== 'live'), { name: own[0].session, cwd }, generating);
 }
 
-// Sends the runs the dialog listed, by id, each with the files the dialog said go with it, so the
-// server deletes no run and no file the dialog did not list. When every run and file went the
-// dialog closes; otherwise it says what the server deleted and why each run or file it kept stayed.
+// Sends the runs the dialog listed, by id, each with the files the dialog said go with it, or the
+// frame it asked about with its files, so the server deletes no run, frame or file the dialog did
+// not list. When everything went the dialog closes; otherwise it says what the server deleted and
+// why each run, frame or file it kept stayed.
 async function deleteListed() {
   const asked = deleting;
   asked.busy = true;
   confirmDelete.disabled = true;
   confirmCancel.disabled = true;
+  const frame = asked.frame;
+  const unit = frame ? 'frame' : 'run';
   let answer = null;
   try {
-    const response = await fetch('delete', {
+    const response = await fetch(frame ? 'delete/' + [frame.run, frame.provider].map(encodeURIComponent).join('/') : 'delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runs: asked.listed }),
+      body: JSON.stringify(frame ? { paths: asked.listed[frame.run] } : { runs: asked.listed }),
     });
     answer = await response.json();
   } catch (error) {
@@ -804,8 +852,8 @@ async function deleteListed() {
   }
   const images = outcomes.reduce((sum, run) => sum + (run.removed ? run.removed.length : 0), 0);
   confirmTitle.textContent = answer.deleted.length || images ? 'Not everything was deleted' : 'Nothing was deleted';
-  const done = answer.deleted.length || images ? 'Deleted ' + counted(answer.deleted.length, 'run') + ' and ' + counted(images, 'image') + '. ' : '';
-  const kept = [answer.kept.length && counted(answer.kept.length, 'run'), stayed.length && counted(stayed.length, 'image')];
+  const done = answer.deleted.length || images ? 'Deleted ' + counted(answer.deleted.length, unit) + ' and ' + counted(images, 'image') + '. ' : '';
+  const kept = [answer.kept.length && counted(answer.kept.length, unit), stayed.length && counted(stayed.length, 'image')];
   confirmBody.textContent = done + 'Kept ' + kept.filter(Boolean).join(' and ') + ':';
   confirmFiles.replaceChildren(
     ...answer.kept.map(run => el('li', { text: run.error })),
@@ -1030,10 +1078,50 @@ setInterval(() => {
   sizeStrips();
 }, 1000);
 
+// A server of another version, which an open tab reconnects to after a plugin update, can send
+// snapshots this script does not understand, so the tab reloads to get that server's script. It
+// reloads once per version: a tab that comes back still out of step says so instead of reloading
+// again. A server that names no version predates this check, and its snapshots are older than this
+// script, which reads them. True when the snapshot must not be drawn.
+function outlivedServer(snapshot) {
+  if (snapshot.version === undefined) return false;
+  if (snapshot.version === PAGE_VERSION) {
+    forgetReload();
+    return false;
+  }
+  if (reloadOnce(snapshot.version)) location.reload();
+  else connection.textContent = 'The gallery server is now version ' + snapshot.version + ': reload the page';
+  return true;
+}
+
+// True, and recorded, when this tab has not yet reloaded for version. A browser that blocks site
+// data throws on any use of sessionStorage; such a tab never reloads on its own.
+function reloadOnce(version) {
+  try {
+    if (sessionStorage.getItem(RELOAD_KEY) === version) return false;
+    sessionStorage.setItem(RELOAD_KEY, version);
+    return true;
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+    return false;
+  }
+}
+
+function forgetReload() {
+  try {
+    sessionStorage.removeItem(RELOAD_KEY);
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+  }
+}
+
 function connect() {
   const source = new EventSource('events');
   source.onopen = () => { connection.textContent = 'Live'; };
-  source.onmessage = event => render(JSON.parse(event.data));
+  source.onmessage = event => {
+    const snapshot = JSON.parse(event.data);
+    if (!outlivedServer(snapshot)) render(snapshot);
+  };
   source.onerror = () => {
     if (source.readyState === EventSource.CLOSED) {
       connection.textContent = 'Turned away: open the address the image tool printed';

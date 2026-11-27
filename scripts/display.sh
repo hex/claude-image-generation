@@ -496,8 +496,50 @@ gallery_begin_run() {
   DISPLAY_PANE_DIR="$root/runs/$run_id"
 }
 
-# Makes sure the gallery server is running at this plugin's version and that a page shows it:
-# reuses the running server, replaces one of another version, starts one when there is none,
+# Points DISPLAY_PANE_DIR at the gallery run <run-id>, which has ended, so providers can run in it
+# again: holds a token for <owner>, then removes .done, so the run reads as live from that moment,
+# never as interrupted, and __pane_release finishes it again. A run without its meta.json is not
+# one: the token is not written into a folder a delete is removing. Fails with one line on stderr,
+# leaving DISPLAY_PANE_DIR unset. Usage: gallery_resume_run <owner> <run-id>
+gallery_resume_run() {
+  local owner="$1" run_id="$2" dir
+  dir="$(gallery_root)/runs/$run_id"
+  if [[ ! "$run_id" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{10}$ || ! -f "$dir/meta.json" ]]; then
+    echo "image gallery: there is no run $run_id in $(gallery_root)/runs to continue" >&2
+    return 1
+  fi
+  DISPLAY_PANE_DIR="$dir"
+  __pane_acquire "$owner"
+  __gallery_drop_dead_tokens "$dir/active"
+  # An offer a killed run-all left behind would show again while the run is live; nothing answers it.
+  rm -f "$dir/.done" "$dir/retry-offer"
+}
+
+# Removes each token in <active> but this process's whose holder is gone: a process killed before it
+# released its hold left it behind, and __pane_release would never finish the run while it is there.
+# A holder is gone, as the gallery server judges it, once no process of this user has its pid or the
+# one that has it started at another time than the token says. Usage: __gallery_drop_dead_tokens <active>
+__gallery_drop_dead_tokens() {
+  local token pid started="" recorded=""
+  local -a started_words recorded_words
+  for token in "$1"/*; do
+    pid="${token##*.}"
+    [[ -f "$token" && "$pid" =~ ^[0-9]+$ && "$pid" != "$$" ]] || continue
+    started=""
+    if kill -0 "$pid" 2>/dev/null; then
+      started=$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$pid" 2>/dev/null) || started=""
+    fi
+    recorded=$(cat "$token" 2>/dev/null) || recorded=""
+    # Both as ps prints a start time, compared word by word, so runs of spaces do not count.
+    read -r -a started_words <<< "$started"
+    read -r -a recorded_words <<< "$recorded"
+    [[ ${#started_words[@]} -gt 0 && "${started_words[*]}" == "${recorded_words[*]:-}" ]] && continue
+    rm -f "$token"
+  done
+}
+
+# Makes sure a gallery server of this plugin's version or newer is running and that a page shows it:
+# reuses a running server of this version or newer, replaces an older one, starts one when there is none,
 # then opens the page in the browser when no page is connected (IMAGE_GALLERY_NO_OPEN=1 skips
 # that), printing its address instead when the browser cannot be opened. A failure costs one
 # line on stderr and never stops the image run. Usage: gallery_ensure
@@ -639,6 +681,9 @@ __pane_acquire() {
   # gallery never reads one half written.
   local started=""
   started=$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$ 2>/dev/null) || started=""
+  # A token the gallery server already wrote for this process, holding the run for a frame's retry,
+  # says what ps could not, so it stays rather than give way to one no reader can confirm.
+  [[ -z "$started" && -s "$DISPLAY_PANE_DIR/active/${1}.$$" ]] && return 0
   printf '%s\n' "$started" > "$DISPLAY_PANE_DIR/active/.${1}.$$"
   mv -f "$DISPLAY_PANE_DIR/active/.${1}.$$" "$DISPLAY_PANE_DIR/active/${1}.$$"
 }
