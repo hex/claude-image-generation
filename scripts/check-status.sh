@@ -49,11 +49,12 @@ provider_spec() {
       LISTED='if any(.models[]; .id == $model or any(.aliases[]?; . == $model)) then "yes" else "no" end'
       ;;
     openrouter)
-      # The model list answers without a key, so the key is proven against /key first.
+      # The model list answers without a key, so the key is proven against /key first. The
+      # unfiltered list leaves out models that output only images, such as openai/gpt-image-2.
       KEY_VARS="OPENROUTER_API_KEY"
       AUTH="Authorization: Bearer "
       KEY_URL="https://openrouter.ai/api/v1/key"
-      LIST_URL="https://openrouter.ai/api/v1/models"
+      LIST_URL="https://openrouter.ai/api/v1/models?output_modalities=image"
       REJECTED='false'
       LISTED='if any(.data[]; .id == $model and any(.architecture.output_modalities[]?; . == "image"))
               then "yes" else "no" end'
