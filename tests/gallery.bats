@@ -1327,3 +1327,33 @@ retry_frame() {
   [[ "$output" == "Error: --gallery-run needs the gallery display, and this run's is none" ]] || { echo "$output"; return 1; }
   [[ ! -e "$MOCK_DIR/calls" && ! -e "${OUT_BASE}-gemini.png" ]]
 }
+
+# delete_frame <run-id> <provider> <paths> — POSTs a frame's delete the way the page's dialog does,
+# with the paths the dialog listed as a JSON array, printing the answer and then its status.
+delete_frame() {
+  gallery_curl -w ' %{http_code}' -X POST -H "$(origin)" -H 'Content-Type: application/json' --data-binary "{\"paths\": $3}" "/delete/$1/$2"
+}
+
+@test "deleting a frame of a finished run deletes its image file and records the frame as deleted, which a restarted server still shows" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer
+  printf 'png' > "$out/hero-gemini.png"
+  printf 'png' > "$out/hero-openai.png"
+  write_run "$a" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/hero-gemini.png\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\n" done
+  start_gallery
+  wait_for_snapshot '.runs | length == 1'
+  answer=$(delete_frame "$a" gemini "[\"$out/hero-gemini.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"gemini\", \"removed\": [\"$out/hero-gemini.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ "$(ls "$out")" == hero-openai.png ]]
+  # The page hears of it at once: the frame is deleted, not failed, and the run names only the other image.
+  [[ "$(snapshot | jq -c '.runs[0] | [.status, [.providers[] | [.name, .state, .image.path]], [.files[].path]]')" == \
+    "[\"done\",[[\"gemini\",\"deleted\",null],[\"openai\",\"complete\",\"$out/hero-openai.png\"]],[\"$out/hero-openai.png\"]]" ]] || {
+    snapshot; return 1; }
+  # The run's own records say so, so a server started afresh shows the same.
+  [[ "$(tail -n 1 "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$(printf 'gemini\tdeleted\t\t\t')" ]]
+  stop_gallery
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].state == "deleted" and (.runs[0].files | length == 1)'
+  [[ "$(delete_frame "$a" gemini "[\"$out/hero-gemini.png\"]")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"provider\": \"gemini\", \"error\": \"run $a's gemini frame has no image to delete\"}], \"error\": \"run $a's gemini frame has no image to delete\"} 409" ]]
+}

@@ -150,6 +150,12 @@ def on_error(p, ms, path):
     p["state"] = "error"
 
 
+def on_deleted(p, ms, path):
+    # The gallery deleted the frame: the run names its images no more.
+    p["state"] = "deleted"
+    p["images"] = []
+
+
 # What each status record does to its provider. The record's model, when it names one, always
 # becomes the provider's model.
 TRANSITIONS = {
@@ -157,6 +163,7 @@ TRANSITIONS = {
     "retrying": on_retrying,
     "complete": on_complete,
     "error": on_error,
+    "deleted": on_deleted,
 }
 
 
@@ -724,36 +731,40 @@ class Gallery:
                 namers.setdefault(file_entry(path), {}).setdefault(name, reason)
         return namers
 
-    def delete(self, run_id, listed, namers):
-        """Deletes a run: each file its complete records name as an image that the page listed for it
-        in listed, keep_reason lets go and no other run in namers (image_namers) names or uses as an
-        input image, by any path, then its directory. Every other file a record names stays, and so
-        does every listed path no record names: the page's list only narrows what goes. Answers (HTTP status, outcome): 200
-        with the paths removed, those already gone and those kept with why, or the error that kept
-        the run in place. A deleted run leaves namers. Call it holding runs_lock."""
+    def deletable(self, run_id):
+        """The directory and folded status log (reduce_status) of a run whose images may be deleted
+        now: one in the gallery that no process holds, no frame's retry is starting in, and whose
+        status log parses. Raises Refusal saying why not."""
         run_dir = self.runs_dir / run_id
         if not RUN_ID.match(run_id) or not run_dir.is_dir():
-            return 404, {"id": run_id, "error": "no run %s" % run_id}
+            raise Refusal(404, "no run %s" % run_id)
         # A run's retry offer is open only while run-all holds the run, so this keeps an open offer
         # too; an offer a killed run-all left behind does not keep its run.
         if run_is_held(run_dir):
-            return 409, {"id": run_id, "error": "run %s is still generating" % run_id}
+            raise Refusal(409, "run %s is still generating" % run_id)
         # A frame's retry claims the run's output base before its run-all.sh holds the run.
         arguments = read_meta(run_dir).get("arguments")
         if arguments is not None and self.saving_to(arguments["output_base"]):
-            return 409, {"id": run_id, "error": "run %s is starting a retry" % run_id}
+            raise Refusal(409, "run %s is starting a retry" % run_id)
         providers = {}
         try:
             reduce_status(read_status_log(run_dir), providers)
         except FileNotFoundError:
             pass
         except ValueError as e:
-            return 409, {"id": run_id, "error": "run %s's status log is unreadable (%s), so which images it saved is "
-                                                "unknown; nothing was deleted" % (run_id, e)}
+            raise Refusal(409, "run %s's status log is unreadable (%s), so which images it saved is unknown; "
+                               "nothing was deleted" % (run_id, e))
+        return run_dir, providers
+
+    def remove_images(self, run_id, images, listed, namers):
+        """Deletes each of images, (provider, path) pairs run run_id's complete records name, that the
+        page listed in listed, keep_reason lets go and no other run in namers (image_namers) names or
+        uses as an input image, by any path. Every other one stays, and so does every listed path that
+        images does not name: the page's list only narrows what goes. Returns the paths removed, those
+        already gone and those kept with why, and the error that stopped it part way, or None."""
         removed = []
         missing = []
         kept = []
-        images = unique_images(recorded_images(providers))
         for provider, path in images:
             reason = keep_reason(provider, path)
             others = [why for name, why in namers.get(file_entry(path), {}).items() if name != run_id]
@@ -770,19 +781,58 @@ class Gallery:
             except (FileNotFoundError, NotADirectoryError):
                 missing.append(path)
             except OSError as e:
-                return 500, {"id": run_id, "error": "could not delete %s: %s; the run is kept" % (path, e.strerror),
-                             "removed": removed, "missing": missing, "kept_files": kept}
+                return {"removed": removed, "missing": missing, "kept_files": kept}, "could not delete %s: %s" % (path, e.strerror)
         named = {path for provider, path in images}
         for path in dict.fromkeys(listed):
             if path not in named:
                 kept.append({"path": path, "reason": "run %s's records do not name it" % run_id})
+        return {"removed": removed, "missing": missing, "kept_files": kept}, None
+
+    def delete(self, run_id, listed, namers):
+        """Deletes a run: the image files of its complete records that remove_images lets go, then its
+        directory. Answers (HTTP status, outcome): 200 with the paths removed, those already gone and
+        those kept with why, or the error that kept the run in place. A deleted run leaves namers.
+        Call it holding runs_lock."""
+        try:
+            run_dir, providers = self.deletable(run_id)
+        except Refusal as e:
+            return e.code, {"id": run_id, "error": str(e)}
+        outcome, error = self.remove_images(run_id, unique_images(recorded_images(providers)), listed, namers)
+        if error is not None:
+            return 500, {"id": run_id, "error": "%s; the run is kept" % error, **outcome}
         shutil.rmtree(str(run_dir), ignore_errors=True)
         if os.path.lexists(str(run_dir)):
-            return 500, {"id": run_id, "error": "could not remove the run's folder %s" % run_dir,
-                         "removed": removed, "missing": missing, "kept_files": kept}
+            return 500, {"id": run_id, "error": "could not remove the run's folder %s" % run_dir, **outcome}
         for users in namers.values():
             users.pop(run_id, None)
-        return 200, {"id": run_id, "removed": removed, "missing": missing, "kept_files": kept}
+        return 200, {"id": run_id, **outcome}
+
+    def delete_frame(self, run_id, provider, listed, namers):
+        """Deletes one frame of a run: the image files its provider's complete records name that
+        remove_images lets go, then appends a deleted record for it to the run's status log. The run
+        names those files no more, and the frame shows as deleted, after a restart too. Answers
+        (HTTP status, outcome) as delete does, the outcome naming the provider as well. Call it
+        holding runs_lock."""
+        try:
+            run_dir, providers = self.deletable(run_id)
+            frame = providers.get(provider)
+            if frame is None:
+                raise Refusal(404, "run %s has no %s frame" % (run_id, provider))
+            if not frame["images"]:
+                raise Refusal(409, "run %s's %s frame has no image to delete" % (run_id, provider))
+        except Refusal as e:
+            return e.code, {"id": run_id, "provider": provider, "error": str(e)}
+        outcome, error = self.remove_images(run_id, unique_images([(provider, path) for path in frame["images"]]), listed, namers)
+        if error is not None:
+            return 500, {"id": run_id, "provider": provider, "error": "%s; the frame is kept" % error, **outcome}
+        try:
+            with open(str(run_dir / "status"), "a", encoding="utf-8") as status:
+                status.write("%s\tdeleted\t\t\t\n" % provider)
+        except OSError as e:
+            return 500, {"id": run_id, "provider": provider,
+                         "error": "could not record the %s frame as deleted in %s: %s" % (provider, run_dir / "status", e.strerror),
+                         **outcome}
+        return 200, {"id": run_id, "provider": provider, **outcome}
 
     def run_meta(self, run_id):
         """The directory and meta.json of a run in the gallery, or Refusal saying why there is none."""
@@ -1097,6 +1147,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if segments == ["delete"]:
             self.delete()
             return
+        if segments[0] == "delete" and len(segments) == 3:
+            self.delete_frame(segments[1], segments[2])
+            return
         if self.headers.get("Content-Length", "0") != "0" or "Transfer-Encoding" in self.headers:
             self.send_json(413, {"error": "these actions take no request body"})
             return
@@ -1263,9 +1316,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def delete(self):
         """Deletes each run the page's JSON body names that may go, with the files the page listed for
-        it, and publishes the change. Answers which runs were deleted, with their files, and which
-        were kept and why: 200 when any run was deleted, else the status of what kept them, 404 when
-        no run named exists."""
+        it, and publishes the change, answering as answer_deletes does."""
         try:
             runs = parse_delete(self.read_body(DELETE_BODY_LIMIT, "delete"))
         except ValueError as e:
@@ -1274,6 +1325,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except BodyRefused as e:
             self.send_json(e.code, {"error": str(e)})
             return
+        self.answer_deletes([lambda namers, run_id=run_id, listed=listed: self.gallery.delete(run_id, listed, namers)
+                             for run_id, listed in runs.items()])
+
+    def delete_frame(self, run_id, provider):
+        """Deletes one frame of a run with the files the page's JSON body lists for it, and publishes
+        the change, answering as answer_deletes does."""
+        try:
+            listed = parse_delete_frame(self.read_body(DELETE_BODY_LIMIT, "delete"))
+        except ValueError as e:
+            self.send_json(400, {"error": str(e)})
+            return
+        except BodyRefused as e:
+            self.send_json(e.code, {"error": str(e)})
+            return
+        self.answer_deletes([lambda namers: self.gallery.delete_frame(run_id, provider, listed, namers)])
+
+    def answer_deletes(self, deletes):
+        """Runs each of deletes, a function of image_namers' map answering (HTTP status, outcome), holding
+        runs_lock, and publishes the change. Answers which were deleted, with their files, and which
+        were kept and why: 200 when any was deleted, else the status of what kept them, 404 when none
+        named exists. Nothing is deleted when a run in the gallery cannot be read."""
         outcomes = []
         with self.gallery.runs_lock:
             try:
@@ -1285,8 +1357,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json(500, {"error": "could not read %s: %s, so which runs share an image is unknown; "
                                               "nothing was deleted" % (e.filename, e.strerror)})
                 return
-            for run_id, listed in runs.items():
-                outcomes.append(self.gallery.delete(run_id, listed, namers))
+            for delete in deletes:
+                outcomes.append(delete(namers))
         self.gallery.scan()
         deleted = [outcome for code, outcome in outcomes if code == 200]
         kept = [outcome for code, outcome in outcomes if code != 200]
@@ -1321,6 +1393,19 @@ def parse_delete(body):
         if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
             raise ValueError("run %s's paths are %s, not a list of paths" % (json.dumps(run_id)[:80], json.dumps(paths)[:80]))
     return runs
+
+
+def parse_delete_frame(body):
+    """The paths of the files a frame's delete lists as going with it, or ValueError saying what is
+    wrong with them."""
+    try:
+        request = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as e:
+        raise ValueError("the body is not JSON: %s" % e)
+    paths = request.get("paths") if isinstance(request, dict) and sorted(request) == ["paths"] else None
+    if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+        raise ValueError("the body must be an object with paths, the files the page listed for the frame")
+    return paths
 
 
 def parse_resend(body):
