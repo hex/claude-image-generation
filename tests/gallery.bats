@@ -1390,6 +1390,25 @@ retry_frame() {
   [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
 }
 
+@test "a frame's Retry whose run-all exits before it continues the run is answered 502, and the frame offers Retry again" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  real_bash=$(command -v bash)
+  export PATH="$MOCK_DIR:$PATH"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one runs run-all.sh for a second, long enough for the server
+  # to read the run while it is held, and then exits as a run-all that fails before the run does.
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh) sleep 1; exit 1 ;; esac\nexec %q "$@"\n' "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  local answer
+  answer=$(retry_frame "$a" gemini)
+  [[ "$answer" == '{"error": "run-all.sh exited 1 before it started a run: it printed nothing"} 502' ]] || { echo "$answer"; return 1; }
+  rm "$MOCK_DIR/bash"
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].retryable'
+}
+
 @test "Delete run removes the image a frame's Retry saved, which the run's records name" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer

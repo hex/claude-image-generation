@@ -398,12 +398,12 @@ def retry_refusal(run_id, meta, providers, unreadable, held, name):
     return None
 
 
-def read_run(run_dir):
-    """The page's view of one run. Raises RunRejected or OSError when the directory is not one."""
+def read_run(run_dir, held):
+    """The page's view of one run, held saying whether a process holds it. Raises RunRejected or OSError
+    when the directory is not one."""
     meta = read_meta(run_dir)
     providers = {name: new_provider(name) for name in meta["providers"]}
     unreadable = fold_status(run_dir, providers)
-    held = run_is_held(run_dir)
 
     if (run_dir / ".done").exists():
         status = "done"
@@ -727,23 +727,25 @@ class Gallery:
 
     def run(self, run_dir):
         """The page's view of a run, or None for a rejected one. A run is read again only once one
-        of its files changed, or, while it is live, once no process holds it any more."""
+        of its files changed, or, when a process held it as it was read, once none does any more: a
+        retry's run-all.sh that the server held a finished run for can exit before it continues it."""
         files = run_files_state(run_dir)
         known = self.read_runs.get(run_dir.name)
         if known is not None and known[0] == files:
-            run = known[1]
-            if run is None or run["status"] != "live" or run_is_held(run_dir):
+            run, held = known[1], known[2]
+            if run is None or not held or run_is_held(run_dir):
                 return run
-        self.read_runs[run_dir.name] = (files, None)
+        self.read_runs[run_dir.name] = (files, None, False)
+        held = run_is_held(run_dir)
         try:
-            run = read_run(run_dir)
+            run = read_run(run_dir, held)
         except RunRejected as e:
             self.reject(run_dir, str(e))
             return None
         except OSError as e:
             self.reject(run_dir, "%s: %s" % (os.path.basename(e.filename or run_dir.name), e.strerror))
             return None
-        self.read_runs[run_dir.name] = (files, run)
+        self.read_runs[run_dir.name] = (files, run, held)
         return run
 
     def image_namers(self):
