@@ -225,9 +225,10 @@ On Claude Code builds with function hooks, the plugin also registers a tool, `mc
 | `providers` | no | Any of `gemini`, `openai`, `xai`, `openrouter`; omitted, the `Default providers` setting |
 | `outputBase` | no | Path without extension, anywhere on disk; each provider saves `<outputBase>-<provider>.png`. Omitted, `<Output directory>/image-<timestamp>` |
 | `inputImages` | no | Images to edit; any entry switches to edit mode |
-| `aspectRatio` | no | Whole-number `W:H` such as `16:9`; passed to gemini and xai only |
+| `aspectRatio` | no | `W:H` such as `16:9` or `19.5:9`, for every provider (see [Aspect Ratio and Size](#aspect-ratio-and-size)) |
+| `size` | no | `1K`, `2K` or `4K`, for every provider (see [Aspect Ratio and Size](#aspect-ratio-and-size)) |
 
-The tool runs `scripts/run-all.sh`, so the gallery (or the streaming pane) and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check before anything runs: a blank prompt, a prompt over 100,000 bytes or with a null character (U+0000), a field of the wrong type, an unknown provider or one named twice, an `outputBase` that is blank, ends in `/`, or ends in `.png`, `.jpg`, `.jpeg` or `.webp` (any case), a control character in `outputBase` or an `inputImages` path, or an aspect ratio that is not whole-number `W:H` with both sides above zero (so xAI's `auto`, `19.5:9` and `9:19.5` need the scripts).
+The tool runs `scripts/run-all.sh`, so the gallery (or the streaming pane) and the retry offer work as they do for the slash command. It answers with a `saved` or `missing` line per expected file, the exit code, and whatever the providers printed. When no provider saved a file it refuses the call, with the same text. It also refuses a call that fails a field check before anything runs: a blank prompt, a prompt over 100,000 bytes or with a null character (U+0000), a field of the wrong type, an unknown provider or one named twice, an `outputBase` that is blank, ends in `/`, or ends in `.png`, `.jpg`, `.jpeg` or `.webp` (any case), a control character in `outputBase` or an `inputImages` path, an aspect ratio that is not `W:H` with whole or decimal sides above zero (so xAI's `auto` needs the scripts), or a `size` other than `1K`, `2K` or `4K`.
 
 The tool never overwrites a file. When any `<outputBase>-<provider>.png` it would save already exists, as a file or as a symlink (a dangling one too), it refuses the call before any provider runs and names each such path. Choose another `outputBase`, or move the old files away first. The scripts keep the same rule on their own (see Direct Script Usage).
 
@@ -243,7 +244,44 @@ Three rows in `/config` set its defaults:
 | Image display | `gallery`, `pane`, `none` (see [Image Display](#image-display)) | `gallery` |
 | Output directory | any path, relative to the session's working directory | `.` |
 
-The slash command, the agent and the skill use the tool whenever the session offers it, and skip the provider and path questions. They fall back to running the scripts through Bash on builds without it, or when a request needs an option the tool does not take (image size, quality, transparent background, a specific model, or another per-provider flag).
+The slash command, the agent and the skill use the tool whenever the session offers it, and skip the provider and path questions. They fall back to running the scripts through Bash on builds without it, or when a request needs an option the tool does not take (quality, transparent background, a specific model, or another per-provider flag).
+
+### Aspect Ratio and Size
+
+The generate tool's `aspectRatio` and `size`, and `run-all.sh`'s `--aspect-ratio` and `--size`, ask every provider for the same shape. `run-all.sh` hands each provider script `--aspect-ratio <W:H>` and `--size-tier <1K|2K|4K>`, ahead of that provider's `--<provider>-extra` arguments, and records both values in the gallery run's `meta.json` (as `arguments.aspect_ratio` and `arguments.size`, only when given). It refuses a `--size` other than `1K`, `2K` or `4K`, and an `--aspect-ratio` that is not `W:H`, before any provider runs.
+
+| Provider | Aspect ratio becomes | Size tier becomes |
+|----------|----------------------|-------------------|
+| gemini | `imageConfig.aspectRatio` | `imageConfig.imageSize` (`1K`, `2K`, `4K`) |
+| openai | one `size` in `WxH` from the table below | the same `size` |
+| xai | `aspect_ratio` | `resolution` `1k` or `2k`; `4K` draws at `2k`, and the script prints `xAI draws at most 2k; drawing 2k for the 4K size tier` |
+| openrouter | `image_config.aspect_ratio` on chat completions, `aspect_ratio` on the images endpoint | `image_config.image_size` on chat completions, `resolution` on the images endpoint; `x-ai/` models draw `2K` for `4K` and say so |
+
+Each provider script checks the ratio against the model it sends the request to, after a remembered fallback, and exits 1 before it calls the API when the model does not draw it. The error names the ratios that model draws, for example `Error: gemini-3-pro-image does not take aspect ratio 4:1; it takes 1:1, 2:3, ...`. The other providers still run. gemini checks its own models, xai the `grok-imagine-image` models, openai the ratios in the table below, and openrouter its `google/` and `x-ai/` models with the gemini and xai lists. A model none of these lists knows gets the ratio unchecked, and the script prints a line that says so.
+
+A provider's own flag in its `--<provider>-extra` arguments wins over the shared values for that provider: `--image-size` for gemini, `--resolution` for xai, `--size` for openai. With neither value given, every provider sends what it sent before: gemini `1:1` at the API's default size, openai `1024x1024`, xai and openrouter no ratio or size.
+
+OpenAI takes no ratio parameter, so `openai.sh` asks for the size this table gives. Each size is the ratio at about `1024x1024` pixels (1K), about `2048x2048` (2K), or the largest OpenAI allows (4K), with both edges multiples of 16, no edge over 3840 and at most 8,294,400 pixels. A ratio with no tier uses 1K, and a tier with no ratio uses `1:1`. `openai.sh` refuses ratios past 3:1, such as `4:1`. `gpt-image-1.5`, `gpt-image-1-mini` and the other models that draw only three sizes refuse a ratio or tier; pass `--size` to them instead.
+
+| Ratio | 1K | 2K | 4K |
+|-------|----|----|----|
+| `1:1` | `1024x1024` | `2048x2048` | `2880x2880` |
+| `2:3` | `832x1248` | `1680x2528` | `2336x3504` |
+| `3:2` | `1248x832` | `2528x1680` | `3504x2336` |
+| `3:4` | `880x1168` | `1776x2368` | `2480x3312` |
+| `4:3` | `1168x880` | `2368x1776` | `3312x2480` |
+| `4:5` | `912x1136` | `1824x2288` | `2576x3216` |
+| `5:4` | `1136x912` | `2288x1824` | `3216x2576` |
+| `9:16` | `768x1360` | `1536x2736` | `2160x3840` |
+| `16:9` | `1360x768` | `2736x1536` | `3840x2160` |
+| `21:9` | `1568x672` | `3136x1344` | `3840x1648` |
+| `2:1` | `1440x720` | `2912x1456` | `3840x1920` |
+| `1:2` | `720x1440` | `1456x2912` | `1920x3840` |
+| `19.5:9` | `1488x688` | `3024x1392` | `3840x1776` |
+| `9:19.5` | `688x1488` | `1392x3024` | `1776x3840` |
+| `20:9` | `1536x688` | `3056x1376` | `3840x1728` |
+| `9:20` | `688x1536` | `1376x3056` | `1728x3840` |
+| `5:2` | `1600x640` | `3248x1296` | `3840x1536` |
 
 ### Direct Script Usage
 
@@ -305,8 +343,9 @@ bash scripts/gemini.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path, repeatable (max 14) | -- | Edit mode; optional in generate mode as references |
-| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9` on Pro (default); add `1:4`, `4:1`, `1:8`, `8:1` on `gemini-3.1-flash-image` | `1:1` | No |
+| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9` on Pro (default); add `1:4`, `4:1`, `1:8`, `8:1` on the Nano Banana 2 models (`gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, `gemini-nano-banana-2.1`). The script refuses any other before the request | `1:1` | No |
 | `--image-size` | `512`, `1K`, `2K`, `4K` (UPPERCASE); `512` requires `gemini-3.1-flash-image` | (API default `1K`) | No |
+| `--size-tier` | `1K`, `2K`, `4K`; sent as `--image-size`; an `--image-size` given beside it wins | (none) | No |
 | `--thinking-level` | `minimal`, `High` | unset (API default `minimal`) | No |
 | `--image-only` | (flag, no value) | off | No |
 | `--search-grounding` | (flag, no value) | off | No |
@@ -346,7 +385,9 @@ bash scripts/openai.sh \
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path, repeatable (max 16; `dall-e-2` allows 1) | -- | Edit mode only |
-| `--size` | `auto` or `WxH`. On `gpt-image-2` and the `gpt-image-2.5` models, any size with both edges multiples of 16, longest edge up to 3840, ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`). OpenAI states no size rules for `gpt-image-2.6-sunburst`, which drew `1536x864` in a 2026-11-05 test. Older models take `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` | No |
+| `--size` | `auto` or `WxH`. On `gpt-image-2` and the `gpt-image-2.5` models, any size with both edges multiples of 16, longest edge up to 3840, ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`). OpenAI's guide gives the 2.6 models (Sunburst and Flare) the same rules, and calls sizes above `2560x1440` experimental on the 2.5 models. Older models take `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` | No |
+| `--aspect-ratio` | a ratio from the table in [Aspect Ratio and Size](#aspect-ratio-and-size), drawn as its `WxH`; `--size` wins | (none) | No |
+| `--size-tier` | `1K`, `2K`, `4K`, drawn as the table's `WxH`; `--size` wins | (none) | No |
 | `--quality` | `auto`, `low`, `medium`, `high`; also `xhigh` and `max` on the `gpt-image-2.5` and `2.6` models | `high` | No |
 | `--background` | `auto`, `transparent`, `opaque`; `transparent` needs `--output-format` `png` or `webp` | `auto` | No |
 | `--output-format` | `png`, `jpeg`, `webp` | `png` | No |
@@ -403,6 +444,7 @@ bash scripts/xai.sh \
 | `--input-image` | file path, repeatable (max 5 on `grok-imagine-image-2.0`; older models take 3) | -- | Edit mode only |
 | `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` | (none) | No |
 | `--resolution` | `1k`, `2k` (LOWERCASE) | (API default) | No |
+| `--size-tier` | `1K`, `2K`, `4K`; sent as `--resolution`, `4K` as `2k` with a line that says so; `--resolution` wins | (none) | No |
 | `--quality` | `low`, `medium`, `auto` (`grok-imagine-image-2.0` only) | unset (API `auto`: low for generation, medium for edits; billed as served) | No |
 | `--model` | xAI model name | `grok-imagine-image-2.0` | No |
 
@@ -443,6 +485,8 @@ bash scripts/openrouter.sh \
 | `--output` | file path | -- | Yes |
 | `--input-image` | file path, repeatable | -- | Edit mode; in generate mode also sent as references |
 | `--model` | any OpenRouter image model slug | `google/gemini-nano-banana-2.1` | No |
+| `--aspect-ratio` | `W:H`; checked for `google/` and `x-ai/` models, unchecked for others | (none) | No |
+| `--size-tier` | `1K`, `2K`, `4K`; `2K` for `4K` on `x-ai/` models | (none) | No |
 | `--site-url` | URL | (none) | No (sent as `HTTP-Referer` for OpenRouter attribution) |
 | `--site-name` | text | (none) | No (sent as `X-Title` for OpenRouter attribution) |
 
@@ -538,10 +582,10 @@ Delete the verdict directory to try the default again before the verdict expires
 | Feature | Gemini | OpenAI | xAI | OpenRouter |
 |---------|--------|--------|-----|------------|
 | Default model | gemini-3-pro-image | gpt-image-2.6-sunburst | grok-imagine-image-2.0 | google/gemini-nano-banana-2.1 |
-| Max resolution | 4K (via `--image-size`) | 3840 px long edge on gpt-image-2 and the 2.5 models (via `--size`); `1536x1024` on older models | 2K (via `--resolution`) | Model-dependent |
+| Max resolution | 4K (via `--image-size`) | 3840 px long edge on gpt-image-2 and the 2.5 and 2.6 models (via `--size`); `1536x1024` on older models | 2K (via `--resolution`) | Model-dependent |
 | Text rendering | Very good (under 25 chars) | Excellent | Good | Model-dependent |
 | Transparent BG | No | Yes (png or webp only; preview on gpt-image-2) | No | Model-dependent |
-| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | Any `WxH` up to 3:1 on gpt-image-2 and the 2.5 models; 3 fixed sizes on older models | 16 options (incl. 21:9, 5:2, auto) | Prompt-driven |
+| Aspect ratios | 10 on Pro / 14 on 3.1 Flash | Any `WxH` up to 3:1 on gpt-image-2 and the 2.5 and 2.6 models; 3 fixed sizes on older models | 16 options (incl. 21:9, 5:2, auto) | Model-dependent (`--aspect-ratio`) |
 | Image editing | Multi-turn, up to 14 refs (generate + edit) | Up to 16 input images | `/v1/images/edits`, up to 5 images | Chat image parts or images-endpoint `input_references` (generate + edit) |
 | Quality tiers | N/A | auto / low / medium / high, plus xhigh / max on the 2.5 and 2.6 models | low / medium / auto (2.0 only) | Model-dependent |
 | Thinking mode | Yes (`--thinking-level`) | No | No | Model-dependent |

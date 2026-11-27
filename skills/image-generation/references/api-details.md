@@ -53,7 +53,7 @@ The Gemini API uses a unified `generateContent` endpoint. Images are passed as `
 | `thinkingConfig.thinkingLevel` | `minimal` (default) or `High` | Capital H. Higher levels improve complex compositions, increase latency. |
 | `thinkingConfig.includeThoughts` | boolean | Controls whether thought images/text appear in response |
 
-**14 aspect ratios** (3.1 Flash): `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9`, `1:4`, `4:1`, `1:8`, `8:1`. The 4 extreme ratios are 3.1 Flash only; the Pro image model supports only 10 ratios.
+**14 aspect ratios** (3.1 Flash): `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `4:5`, `5:4`, `21:9`, `1:4`, `4:1`, `1:8`, `8:1`. The 4 extreme ratios are on the Nano Banana 2 models only (3.1 Flash, 3.1 Flash Lite and 2.1; OpenRouter's `/api/v1/images/models` lists all 14 for each, read 2026-11-27); the Pro image model supports only 10 ratios. `gemini.sh` refuses a ratio its model does not draw before the request.
 
 ### Google Search Grounding (Gemini 3 image models; Image Search on 3.1 Flash only)
 Top-level `tools` field (REST uses `google_search`, SDKs use `googleSearch`):
@@ -202,7 +202,7 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 
 | Parameter | Values | Notes |
 |-----------|--------|-------|
-| `size` | `auto` or `WxH` | Plugin default `1024x1024`. gpt-image-2 and the two gpt-image-2.5 models take any size with both edges multiples of 16, max edge 3840, long-to-short ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`); OpenAI calls sizes above `2560x1440` experimental on the 2.5 models. OpenAI's guide states no size rules for the 2.6 models; `gpt-image-2.6-sunburst` drew a `1536x864` image on 2026-11-05. Older models take `1024x1024`, `1536x1024`, `1024x1536` |
+| `size` | `auto` or `WxH` | Plugin default `1024x1024`. gpt-image-2 and the two gpt-image-2.5 models take any size with both edges multiples of 16, max edge 3840, long-to-short ratio at most 3:1 and 655,360 to 8,294,400 total pixels (such as `2048x1152`, `3840x2160`); OpenAI calls sizes above `2560x1440` experimental on the 2.5 models. OpenAI's guide (read 2026-11-27) gives Sunburst and Flare in GPT-Image-2.6 and 2.5 the same rules: edges multiples of 16, ratio between 1:3 and 3:1, no edge over 3840, 655,360 to 8,294,400 pixels. `openai.sh` turns `--aspect-ratio` and `--size-tier` into one of these sizes from a table in `scripts/aspect-ratios.sh` (16:9 at 2K is `2736x1536`), and refuses both on models that take only the three fixed sizes. Older models take `1024x1024`, `1536x1024`, `1024x1536` |
 | `quality` | `auto`, `low`, `medium`, `high`, `xhigh`, `max` | Plugin default `high`. `xhigh` and `max` exist only on the gpt-image-2.5 and 2.6 models; older models stop at `high` |
 | `background` | `auto`, `transparent`, `opaque` | `transparent` supported on gpt-image-1.5, on the two gpt-image-2.5 models and, in preview, on gpt-image-2 (`png` or `webp` output only; `jpeg` is not supported with it). OpenAI's guide does not state it for the 2.6 models; `gpt-image-2.6-sunburst` returned a PNG with transparent pixels on 2026-11-05 |
 | `output_format` | `png`, `jpeg`, `webp` | `jpeg` is faster than `png` |
@@ -345,7 +345,7 @@ The plugin always sends the `images` array form — even for a single input imag
 | Parameter | Values | Notes |
 |-----------|--------|-------|
 | `aspect_ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` | `auto` lets model pick; `21:9` and `5:2` added 2026-08-28 |
-| `resolution` | `1k`, `2k` | **LOWERCASE required** — opposite of Gemini! Same price at both resolutions. |
+| `resolution` | `1k`, `2k` | **LOWERCASE required** — opposite of Gemini! Same price at both resolutions. `xai.sh` sends `2k` for a `4K` `--size-tier`, and prints a line that says so. |
 | `quality` | `low`, `medium`, `auto` | `grok-imagine-image-2.0` only. Omitted means `auto`: `low` for generation, `medium` for edits |
 | `n` | 1-10 | Images per request |
 | `response_format` | `url`, `b64_json` | Default: `url` |
@@ -464,7 +464,7 @@ Documented in OpenRouter's [OpenAPI spec](https://openrouter.ai/openapi.json) (`
   ]
 }
 ```
-The spec also lists `aspect_ratio`, `resolution`, `size`, `quality`, `n` (1-10), `background`, `output_format`, `seed` and `markup`; the plugin sends none of them. `GET /api/v1/images/models` gives each model's `supported_parameters`, among them its `input_references` range: a range starting at 1 marks an edit-only model, and a model without the entry takes no input image.
+The spec also lists `aspect_ratio`, `resolution` (`512`, `768`, `1K`, `1.5K`, `2K`, `4K`, `8K`), `size`, `quality`, `n` (1-10), `background`, `output_format`, `seed` and `markup`. The plugin sends `aspect_ratio` and `resolution` from `--aspect-ratio` and `--size-tier`, and none of the others. The guide says providers clamp a ratio to the subset they support, so `openrouter.sh` checks the ratio itself for `google/` and `x-ai/` models before the request. `x-ai/grok-imagine-image-2.0` lists `resolution` `1K` and `2K` only, so the script sends `2K` for `4K` and prints a line that says so. `openai/` models list no `resolution` at all; the script sends the tier to them unchanged. `GET /api/v1/images/models` gives each model's `supported_parameters`, among them its `input_references` range: a range starting at 1 marks an edit-only model, and a model without the entry takes no input image.
 
 The response holds the images in `data[]`:
 ```json
@@ -482,6 +482,6 @@ The plugin decodes `.data[0].b64_json`, and reports the whole body when that fie
 When the default is unavailable to the key, the plugin falls back to `google/gemini-3.1-flash-image`. An unknown slug answers HTTP 400 with `{"error": {"message": "<slug> is not a valid model ID", "code": 400}}`; a deprecated model, or one with no endpoint for the requested modalities, answers HTTP 404 (`"Claude 3 Haiku was deprecated on Sep 10, 2026. ..."`, `"No endpoints found that support the requested output modalities: image, text"`). All three captured 2026-11-05.
 
 ### Constraints
-- Aspect ratio, resolution, and quality are model-dependent and driven by the prompt — there are no dedicated flags for them, though the images endpoint takes `aspect_ratio`, `resolution` and `quality` fields
+- Aspect ratio and size: `--aspect-ratio` and `--size-tier` reach chat completions as `image_config: {"aspect_ratio": "16:9", "image_size": "2K"}` and the images endpoint as `aspect_ratio` and `resolution`. OpenRouter's spec types chat's `image_config` as provider-specific keys with `aspect_ratio` as its example; `image_size` is not in the spec, and comes from community reports for the Gemini models. Quality stays model-dependent and prompt-driven
 - Per-image cost, rate limits, and max input images depend on the underlying model, not OpenRouter itself
 - Pricing/billing is per OpenRouter account and the selected model

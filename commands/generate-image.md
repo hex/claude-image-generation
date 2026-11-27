@@ -15,7 +15,8 @@ Generate or edit an image based on the user's request.
 
 2. If the `mcp__claude-image-generation__generate` tool is available, use it and skip steps 3-5:
    - Call it with `prompt`, plus `inputImages: ["<input-path>"]` in edit mode.
-   - Pass `providers`, `outputBase` or `aspectRatio` only when the arguments name them. Leave
+   - Pass `providers`, `outputBase`, `aspectRatio` (`W:H`) or `size` (`1K`, `2K`, `4K`) only when
+     the arguments name them; the ratio and size go to every provider. Leave
      them out otherwise: the tool falls back to the person's `/config` defaults, so don't ask
      which provider to use or where to save.
    - The tool shows the run where `run-all.sh` does (the browser gallery by default, the

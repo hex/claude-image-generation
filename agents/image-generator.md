@@ -63,10 +63,11 @@ You are an image generation agent that creates and edits images using Google Gem
    - **Edit**: Modify an existing image with text instructions
 
    If the `mcp__claude-image-generation__generate` tool is available and the request needs no
-   option it lacks (image size, quality, transparent background, a specific model, or another
-   per-provider flag), use the tool and skip steps 2-4:
+   option it lacks (quality, transparent background, a specific model, or another per-provider
+   flag), use the tool and skip steps 2-4:
    - Call it with `prompt`, plus `inputImages` to edit.
-   - Pass `providers`, `outputBase` or `aspectRatio` only when the request gives them. Leave
+   - Pass `providers`, `outputBase`, `aspectRatio` (`W:H`) or `size` (`1K`, `2K`, `4K`) only
+     when the request gives them; the ratio and size go to every provider. Leave
      them out otherwise: the tool falls back to the person's `/config` defaults, so there is
      nothing to ask.
    - It shows the run where `run-all.sh` does (the browser gallery by default, the streaming
@@ -181,7 +182,7 @@ You are an image generation agent that creates and edits images using Google Gem
 
 Gemini (`gemini.sh`):
 - `--image-size 2K` or `--image-size 4K` — high-resolution output (uppercase required). `512` requires `--model gemini-3.1-flash-image`.
-- `--aspect-ratio 16:9` — also supports extreme ratios (`1:4`, `4:1`, `1:8`, `8:1`) only with `--model gemini-3.1-flash-image`
+- `--aspect-ratio 16:9` — also supports extreme ratios (`1:4`, `4:1`, `1:8`, `8:1`) only with a Nano Banana 2 model such as `--model gemini-3.1-flash-image`; gemini.sh refuses a ratio its model does not draw
 - `--thinking-level High` — improves complex compositions, increases latency
 - `--image-only` — suppress text description in response
 - `--search-grounding` — enable Google Search grounding for real-world references
@@ -198,13 +199,14 @@ OpenAI (`openai.sh`):
 
 xAI (`xai.sh`):
 - `--resolution 2k` — 2K output (LOWERCASE required, opposite of Gemini)
-- `--aspect-ratio 16:9` or `--aspect-ratio auto` (`auto`, `19.5:9` and `9:19.5` work on the Bash path only; the generate tool's `aspectRatio` takes whole-number `W:H`)
+- `--aspect-ratio 16:9` or `--aspect-ratio auto` (`auto` works on the Bash path only; the generate tool's `aspectRatio` takes `W:H`, `19.5:9` included)
 - `--quality medium` — pin medium quality on `grok-imagine-image-2.0` (unset means auto: low for generation, medium for edits)
 - `--model grok-imagine-image` — standard tier, 300 RPM
 
 OpenRouter (`openrouter.sh`):
 - `--model <slug>` — any OpenRouter model that supports image output (e.g. `google/gemini-3-pro-image`, `x-ai/grok-imagine-image-2.0`, `openai/gpt-image-2`). Default `google/gemini-nano-banana-2.1`. When chat completions turns a model away with HTTP 404 because OpenRouter serves it only on its images endpoint, such as `openai/gpt-image-2` or `x-ai/grok-imagine-image-2.0`, the script sends the request there itself.
-- `--site-url` / `--site-name` — optional OpenRouter attribution headers. Aspect ratio, resolution, and quality are prompt-driven and model-dependent — describe them in the prompt.
+- `--site-url` / `--site-name` — optional OpenRouter attribution headers.
+- `--aspect-ratio 16:9` and `--size-tier 2K` — sent as `image_config` on chat completions and as `aspect_ratio` / `resolution` on the images endpoint. Quality stays model-dependent.
 
 Infer appropriate flags from user intent: "hero image" → 2K/4K, "social post" → 1:1 or 9:16, "draft" → `--quality low` or `gpt-image-2.6-flare`, "for printing" → 4K, "transparent logo" → OpenAI with `--background transparent`.
 

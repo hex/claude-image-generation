@@ -7,6 +7,14 @@ cover the versions up to 2026.9.1.
 
 ## Unreleased
 
+### Added
+- One aspect ratio and size for every provider: the generate tool takes `aspectRatio` (`W:H`, `19.5:9` included) and `size` (`1K`, `2K` or `4K`), and `run-all.sh` takes `--aspect-ratio` and `--size`. Gemini gets `aspectRatio` and `imageSize`, xAI `aspect_ratio` and `resolution` (`2k` for `4K`, with a line that says so), OpenAI one `WxH` from a table (16:9 at 2K is `2736x1536`), and OpenRouter `image_config` on chat completions or `aspect_ratio` and `resolution` on the images endpoint. A provider whose model does not draw the ratio fails before its request, naming the ratios it draws. A provider's own flag in its extra arguments wins. With neither given, every provider sends what it sent before. A gallery run records both in its `meta.json` arguments.
+- Each provider script takes `--size-tier`, and `openai.sh` and `openrouter.sh` take `--aspect-ratio`.
+
+### Changed
+- The generate tool's `aspectRatio` reaches `run-all.sh` as `--aspect-ratio` for every provider, instead of as `--gemini-extra` and `--xai-extra` arguments, and accepts decimal sides such as `19.5:9`.
+- `gemini.sh` and `xai.sh` refuse an `--aspect-ratio` their model does not draw before the request, instead of leaving the API to reject it.
+
 ### Fixed
 - `openrouter.sh` draws with OpenRouter's models that output only images, such as `openai/gpt-image-2` and `x-ai/grok-imagine-image-2.0`, which chat completions answers with HTTP 404. Every request still goes to chat completions first. When that answer is HTTP 404 with either of the two messages OpenRouter gives such a model, the script sends the same request once to `/api/v1/images`, with any input images as `input_references`. The default model's fallback to `google/gemini-3.1-flash-image` runs before that step, so a run with the default model that drew before sends the same requests.
 - `/claude-image-generation:status` reads OpenRouter's image output list (`/api/v1/models?output_modalities=image`). The unfiltered list leaves out the models that output only images, so the status row called `openai/gpt-image-2` unlisted.

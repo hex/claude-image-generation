@@ -38,7 +38,7 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 - **Strengths**: One key reaches many providers' image models; useful for access, fallback, and comparison without separate accounts
 - **API shape**: Every request goes to chat completions (`/api/v1/chat/completions`) with `modalities: ["image","text"]`, and the image comes back as a base64 data URL in `message.images[]`. When chat completions answers HTTP 404 because OpenRouter serves the model only on its images endpoint (`openai/gpt-image-2`, `x-ai/grok-imagine-image-2.0`), the script sends the same request once to `/api/v1/images`, and the image comes back as base64 in `data[].b64_json`
 - **Editing**: Input images are `image_url` parts holding base64 data URLs: content parts of the user message on chat completions, `input_references` on the images endpoint
-- **Controls**: Aspect ratio, resolution, and quality are prompt-driven and model-dependent — describe them in the prompt rather than via flags
+- **Controls**: `--aspect-ratio` and `--size-tier` go to chat completions as `image_config` and to the images endpoint as `aspect_ratio` and `resolution`; quality is model-dependent
 - **Env var**: `OPENROUTER_API_KEY` (optional `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` for attribution)
 
 ## Usage
@@ -48,13 +48,18 @@ Generate and edit images using Google Gemini, OpenAI GPT Image 2, xAI Grok Image
 When `mcp__claude-image-generation__generate` is available (Claude Code builds with function
 hooks), prefer it over the scripts below. It takes `prompt`, and optionally `providers`,
 `outputBase` (a path without extension), `inputImages` (switches to edit mode) and
-`aspectRatio` (whole-number `W:H`, gemini and xai only). Leave `providers` and `outputBase` out unless the request
+`aspectRatio` (`W:H`) and `size` (`1K`, `2K` or `4K`), each for every provider. Leave `providers` and `outputBase` out unless the request
 gives them: the tool uses the person's `/config` defaults. It runs `run-all.sh`, so the gallery
 or pane and the retry offer behave as described under Parallel Generation, and it answers with each
 expected file marked `saved` or `missing`. It never overwrites: when any
 `<outputBase>-<provider>.png` already exists it refuses the call and names each path, so pick
 an unused `outputBase` (add `-2`, `-3`) rather than deleting the old files. Use the scripts instead when the request needs an
-option the tool does not take, such as `--image-size`, `--quality`, `--background`, `--model`.
+option the tool does not take, such as `--quality`, `--background`, `--model`.
+
+A provider whose model does not draw the asked ratio fails before its request, with an error that
+names the ratios it draws; the others still run. xai draws `2k` for `4K` and says so. openai
+draws the ratio and tier as one `WxH` (16:9 at 2K is `2736x1536`; ratios past 3:1 are not in
+its table).
 
 ### Text-to-Image Generation
 
@@ -147,6 +152,7 @@ before calling its API while the others run, so choose a base whose files do not
 Optional flags:
 - `--input-image <path>` — required for `--mode edit`; repeatable, every image is forwarded to each provider. Forwarding happens in edit mode only — for Gemini's generate-mode reference images, call gemini.sh directly. Each path must be a PNG, JPEG, WebP or GIF file; the type is read from its bytes, and anything else is refused before any API call
 - `--providers gemini,openai` — comma-separated subset; add `openrouter` to include it (e.g. `--providers gemini,openai,xai,openrouter`)
+- `--aspect-ratio 16:9` and `--size 2K` (`1K`, `2K`, `4K`) — one shape for every provider; a provider's own flag in its extra args (`--image-size`, `--resolution`, `--size`) wins
 - `--gemini-extra "--image-size 4K --aspect-ratio 16:9"` — pass-through args to gemini.sh
 - `--openai-extra "--quality high"` — pass-through args to openai.sh
 - `--xai-extra "--resolution 2k"` — pass-through args to xai.sh
