@@ -71,6 +71,7 @@ setup() {
 
 @test "openrouter: default model is google/gemini-nano-banana-2.1" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
   # The script prints "Calling OpenRouter API (model: ...)" before the curl call
   run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_output_contains "Calling OpenRouter API (model: google/gemini-nano-banana-2.1, mode: generate)"
@@ -253,6 +254,7 @@ NO_ENDPOINTS_404='{"error":{"message":"No endpoints found that support the reque
 
 @test "openrouter: the default model makes one chat completions request" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
   stub_openrouter 200 '{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZmFrZQ=="}}]}}]}'
   run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
   assert_status 0
