@@ -331,7 +331,9 @@ def read_status_log(run_dir):
 
 
 def status_size(run_dir):
-    """How many bytes a run's status log holds: 0 before it exists. Records are only ever appended."""
+    """How many bytes a run's status log holds: 0 before it exists. The log only grows while a process
+    holds the run or a retry the server started is starting in it: drop_cut_off_record shortens it,
+    and a delete removes it, only in a run that is neither."""
     try:
         return os.stat(str(run_dir / "status")).st_size
     except FileNotFoundError:
