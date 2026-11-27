@@ -1372,6 +1372,26 @@ retry_frame() {
   [[ -z "$(ls -A "$active")" ]] || { ls -la "$active"; return 1; }
 }
 
+@test "a frame's Retry drops a record cut off at the end of its run's status log before the retry adds its own, so every run still parses" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer
+  printf 'png' > "$out/hero-openai.png"
+  # The log ends in a record cut off part way, as a run-all killed in the middle of one leaves it, which
+  # no reader counts.
+  write_run "$a" "$out" "gemini\terror\t\tmodel-a\t\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\ngemini\tcompl" done
+  record_arguments "$a" "$out/hero"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"run\": \"$a\"} 200" ]]
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ "$(jq -c '.runs[0] | [.problem, .providers[0].image.path]' <<< "$SNAPSHOT")" == "[null,\"$out/hero-gemini.png\"]" ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  # A frame's delete reads every run in the gallery, so it deletes nothing while one does not parse.
+  answer=$(delete_frame "$a" openai "[\"$out/hero-openai.png\"]")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"provider\": \"openai\", \"removed\": [\"$out/hero-openai.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+}
+
 @test "a frame's Retry still starting holds its run when another server replaces the one that started it, so the provider is paid once" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first

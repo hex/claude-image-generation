@@ -314,6 +314,15 @@ def fold_status(run_dir, providers):
     return None
 
 
+def drop_cut_off_record(run_dir):
+    """Drops a record cut off part way at the end of a run's status log, as a writer that died in the
+    middle of one leaves it. No reader counts it and, the run being held by no process, nothing will
+    finish it, so a record appended after it would run on from it into one line that does not parse.
+    Call it before appending to a run no process holds, holding runs_lock."""
+    with open(str(run_dir / "status"), "r+b") as status:
+        status.truncate(status.read().rfind(b"\n") + 1)
+
+
 def read_status_log(run_dir):
     """A run's status log as display.sh wrote it. A newline alone ends a record; a carriage return
     is part of a field, so line endings are not translated."""
@@ -874,12 +883,8 @@ class Gallery:
         if error is not None:
             return 500, {"id": run_id, "provider": provider, "error": "%s; the frame is kept" % error, **outcome}
         try:
-            # A writer that died part way through a record left it cut off at the end of the log, where
-            # no reader counts it and, the run being held by no process, nothing will finish it. It is
-            # dropped, or the record appended would run on from it into one line that does not parse.
-            with open(str(run_dir / "status"), "r+b") as status:
-                status.seek(status.read().rfind(b"\n") + 1)
-                status.truncate()
+            drop_cut_off_record(run_dir)
+            with open(str(run_dir / "status"), "ab") as status:
                 status.write(("%s\tdeleted\t\t\t\n" % provider).encode())
         except OSError as e:
             return 500, {"id": run_id, "provider": provider,
@@ -937,6 +942,11 @@ class Gallery:
                 if refusal is not None:
                     raise Refusal(409, refusal)
                 check_places(run_id, meta)
+                try:
+                    drop_cut_off_record(run_dir)
+                except OSError as e:
+                    raise Refusal(500, "could not ready run %s's status log %s for the retry: %s"
+                                  % (run_id, run_dir / "status", e.strerror))
                 arguments = meta["arguments"]
                 base = arguments["output_base"]
                 size = status_size(run_dir)
