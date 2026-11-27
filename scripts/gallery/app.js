@@ -257,7 +257,13 @@ function imagePlate(run, card, frame) {
   image.src = url;
   const view = el('button', { type: 'button', class: 'view', 'data-key': 'view' }, image);
   view.addEventListener('click', () => openLoupe(run.id, card.name));
-  return [view, el('div', { class: 'actions slab' }, revealButton(() => url, frame.note), fullSizeLink(url))];
+  const actions = el('div', { class: 'actions slab' }, revealButton(() => url, frame.note), fullSizeLink(url));
+  if (run.status !== 'live') {
+    const trash = el('button', { type: 'button', class: 'act', 'aria-label': 'Delete the ' + providerName(card.name) + ' image', 'data-key': 'delete-frame' }, icon('trash'));
+    trash.addEventListener('click', () => askToDeleteFrame(strips.get(run.id).run, card.name));
+    actions.append(trash);
+  }
+  return [view, actions];
 }
 
 // A JSON string's contents as text; as written, when they do not parse.
@@ -345,6 +351,7 @@ const FRAME_STATES = {
   complete: { plate: imagePlate, secs: (run, card) => el('span', { class: 'secs', text: seconds(card.ms) }) },
   error: { plate: errorPlate, secs: () => el('span', { class: 'secs', text: 'Failed' }) },
   interrupted: { plate: () => [el('span', { class: 'stopped-label', text: 'Stopped' })], secs: () => el('span', { class: 'secs' }) },
+  deleted: { plate: () => [el('span', { class: 'deleted-label', text: 'Deleted' })], secs: () => el('span', { class: 'secs' }) },
 };
 
 function frameState(run, card) {
@@ -487,7 +494,8 @@ function updateStrip(entry, run) {
   let previous = null;
   for (const card of inColumns(run.providers)) {
     seen.add(card.name);
-    const key = JSON.stringify(card);
+    // Whether the run is live decides a frame's delete button, so it is part of what the frame shows.
+    const key = JSON.stringify([card, run.status === 'live']);
     let frame = entry.frames.get(card.name);
     if (!frame || frame.key !== key) {
       const node = frameNode(run, card, entry);
@@ -745,13 +753,37 @@ function askToDelete(chosen, project, generating) {
   const named = chosen.some(run => run.files.length);
   const selected = selectedSession();
   const empties = selected !== null && runs.filter(run => run.cwd === selected).every(run => ids.includes(run.id));
-  deleting = { ids, listed, empties, busy: false };
-  confirmTitle.textContent = project ? 'Delete ' + project.name + ' from the gallery?' : 'Delete this run?';
+  deleting = { frame: null, listed, empties, busy: false };
   const removes = project ? 'Removes its ' + counted(chosen.length, 'run') + ' from the gallery' : 'Removes it from the gallery';
   const files = going.length ? ' and deletes ' + counted(going.length, 'image') + ' from disk.' : named ? '. It deletes no images.' : '. ' + (project ? 'They have' : 'It has') + ' no saved images.';
-  const keeps = staying.size ? ' ' + counted(staying.size, 'file') + ' ' + (staying.size === 1 ? 'stays' : 'stay') + ' on disk.' : '';
   const stays = generating ? ' ' + counted(generating, 'run') + ' still generating ' + (generating === 1 ? 'stays' : 'stay') + '.' : '';
-  confirmBody.textContent = removes + files + keeps + stays + ' This can\u2019t be undone.';
+  showConfirm(project ? 'Delete ' + project.name + ' from the gallery?' : 'Delete this run?', removes + files, stays, going, staying, named);
+}
+
+// Asks before deleting one frame of a run that is not live, the way askToDelete asks for a run:
+// the frame's image files that go and those that stay with why, one another run names too among
+// them. A file the run's other frames name goes with this one, as the server deletes it.
+function askToDeleteFrame(run, name) {
+  const own = run.files.filter(file => file.provider === name);
+  const outside = new Set(runs.filter(other => other.id !== run.id).flatMap(other => other.files.map(file => file.entry)));
+  const going = [];
+  const staying = new Map();
+  for (const file of own) {
+    if (file.kept) staying.set(file.path, file.kept);
+    else if (outside.has(file.entry)) staying.set(file.path, 'another run uses it');
+    else going.push(file.path);
+  }
+  deleting = { frame: { run: run.id, provider: name }, listed: { [run.id]: going }, empties: false, busy: false };
+  const removes = 'Removes it from this run' + (going.length ? ' and deletes ' + counted(going.length, 'image') + ' from disk.' : own.length ? '. It deletes no images.' : '. It has no saved image.');
+  showConfirm('Delete the ' + providerName(name) + ' image?', removes, '', going, staying, own.length > 0);
+}
+
+// Opens the delete dialog: what goes, then each file that stays and the note on what else stays,
+// the file paths listed under it. Cancel has the focus.
+function showConfirm(title, removes, stays, going, staying, named) {
+  confirmTitle.textContent = title;
+  const keeps = staying.size ? ' ' + counted(staying.size, 'file') + ' ' + (staying.size === 1 ? 'stays' : 'stay') + ' on disk.' : '';
+  confirmBody.textContent = removes + keeps + stays + ' This can\u2019t be undone.';
   confirmFiles.replaceChildren(
     ...going.map(path => el('li', { text: path })),
     ...[...staying].map(([path, why]) => el('li', { text: path + ': kept, ' + why })),
@@ -772,20 +804,23 @@ function askToDeleteProject(cwd) {
   askToDelete(own.filter(run => run.status !== 'live'), { name: own[0].session, cwd }, generating);
 }
 
-// Sends the runs the dialog listed, by id, each with the files the dialog said go with it, so the
-// server deletes no run and no file the dialog did not list. When every run and file went the
-// dialog closes; otherwise it says what the server deleted and why each run or file it kept stayed.
+// Sends the runs the dialog listed, by id, each with the files the dialog said go with it, or the
+// frame it asked about with its files, so the server deletes no run, frame or file the dialog did
+// not list. When everything went the dialog closes; otherwise it says what the server deleted and
+// why each run, frame or file it kept stayed.
 async function deleteListed() {
   const asked = deleting;
   asked.busy = true;
   confirmDelete.disabled = true;
   confirmCancel.disabled = true;
+  const frame = asked.frame;
+  const unit = frame ? 'frame' : 'run';
   let answer = null;
   try {
-    const response = await fetch('delete', {
+    const response = await fetch(frame ? 'delete/' + [frame.run, frame.provider].map(encodeURIComponent).join('/') : 'delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runs: asked.listed }),
+      body: JSON.stringify(frame ? { paths: asked.listed[frame.run] } : { runs: asked.listed }),
     });
     answer = await response.json();
   } catch (error) {
@@ -814,8 +849,8 @@ async function deleteListed() {
   }
   const images = outcomes.reduce((sum, run) => sum + (run.removed ? run.removed.length : 0), 0);
   confirmTitle.textContent = answer.deleted.length || images ? 'Not everything was deleted' : 'Nothing was deleted';
-  const done = answer.deleted.length || images ? 'Deleted ' + counted(answer.deleted.length, 'run') + ' and ' + counted(images, 'image') + '. ' : '';
-  const kept = [answer.kept.length && counted(answer.kept.length, 'run'), stayed.length && counted(stayed.length, 'image')];
+  const done = answer.deleted.length || images ? 'Deleted ' + counted(answer.deleted.length, unit) + ' and ' + counted(images, 'image') + '. ' : '';
+  const kept = [answer.kept.length && counted(answer.kept.length, unit), stayed.length && counted(stayed.length, 'image')];
   confirmBody.textContent = done + 'Kept ' + kept.filter(Boolean).join(' and ') + ':';
   confirmFiles.replaceChildren(
     ...answer.kept.map(run => el('li', { text: run.error })),

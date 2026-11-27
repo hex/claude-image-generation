@@ -463,6 +463,9 @@ body {
 .stopped-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-3); }
 .stopped-label::before { content: ""; width: 8px; height: 8px; border-radius: 1px; background: currentColor; }
 
+/* A frame whose image was deleted from the gallery: the empty plate, saying so. */
+.deleted-label { font-size: 13px; font-weight: 600; color: var(--ink-3); }
+
 /* A failed frame: the status and any error code in red, the message as text, the whole file on
    demand. */
 .frame[data-state="error"] .plate {
