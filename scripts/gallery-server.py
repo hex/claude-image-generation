@@ -113,12 +113,18 @@ def stamp_version(script, version):
 
 
 def write_private(path, text):
-    """Writes text to path through a temp file and a rename, readable by this user only."""
+    """Writes text to path through a temp file and a rename, readable by this user only. A write that
+    fails removes its temp file: a dot file left in a run's active/ would keep run-all from finishing
+    the run."""
     tmp = path.with_name(".%s.%s" % (path.name, secrets.token_hex(4)))
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(str(tmp), str(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(str(tmp), str(path))
+    except BaseException:
+        os.unlink(str(tmp))
+        raise
 
 
 # ── Runs ──────────────────────────────────────────────────────────────

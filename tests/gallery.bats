@@ -633,6 +633,22 @@ write_run() {
     $'interrupted\tinterrupted\tinterrupted\tinterrupted' ]] || { echo "$SNAPSHOT"; return 1; }
 }
 
+@test "a private file the server fails to put in place leaves no temp file behind, so no run is held by one" {
+  # A directory at the file's path fails the rename that puts it in place, after the temp file exists.
+  local dir="${BATS_TEST_TMPDIR}/active"
+  mkdir -p "$dir/run-all.1"
+  run env NO_COLOR=1 python3 -I -B -c '
+import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("gallery_server", sys.argv[1])
+gallery = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gallery)
+gallery.write_private(Path(sys.argv[2]), "Thu Nov 26 10:00:00 2026\n")' "$GALLERY_PY" "$dir/run-all.1"
+  assert_status 1
+  [[ "${lines[${#lines[@]}-1]}" =~ ^IsADirectoryError:\ \[Errno\ 21\]\ Is\ a\ directory: ]] || { echo "$output"; return 1; }
+  [[ "$(ls -A "$dir")" == run-all.1 && -z "$(ls -A "$dir/run-all.1")" ]] || { ls -laR "$dir"; return 1; }
+}
+
 @test "a retry offer whose wait is too long to count still shows, with no countdown" {
   write_run 20261125T100000Z-00000000a1 /work/alpha 'gemini\terror\t\tmodel-a\t\n'
   local dir="$IMAGE_GALLERY_DIR/runs/20261125T100000Z-00000000a1"
