@@ -1264,3 +1264,33 @@ retry_frame() {
   [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && "$(readlink "$out/hero-gemini.png")" == nowhere ]]
   [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$(printf 'gemini\terror\t\tmodel-a\t')" && -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
 }
+
+@test "a second Retry of a frame while its first is starting is refused, so the provider is paid once" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds run-all.sh back until the test lets it go, or gives
+  # up once the test's folder is gone, so the second click lands before the first run-all holds the run.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  for i in $(seq 1 50); do
+    [[ -n "$(ls "$IMAGE_GALLERY_DIR/resend-logs" 2>/dev/null)" ]] && break
+    sleep 0.1
+  done
+  [[ "$(retry_frame "$a" gemini)" == \
+    "{\"error\": \"a run saving to $out/hero-<provider>.png is already starting; try again in a second\"} 409" ]]
+  touch "$MOCK_DIR/go"
+  wait "$first"
+  [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+  [[ "$(ls "$IMAGE_GALLERY_DIR/resend-logs" | wc -l | tr -d ' ')" == 1 ]]
+}
