@@ -259,7 +259,7 @@ The generate tool's `aspectRatio` and `size`, and `run-all.sh`'s `--aspect-ratio
 | gemini | `imageConfig.aspectRatio` | `imageConfig.imageSize` (`1K`, `2K`, `4K`); `gemini-2.5-flash-image` takes none, so the script refuses a tier for it before the request |
 | openai | one `size` in `WxH` from the table below | the same `size` |
 | xai | `aspect_ratio`; a single-image edit keeps the input image's shape, and the script prints a line that says so | `resolution` `1k` or `2k`; `4K` draws at `2k`, and the script prints `xAI draws at most 2k; drawing 2k for the 4K size tier` |
-| openrouter | `image_config.aspect_ratio` on chat completions, `aspect_ratio` on the images endpoint | `image_config.image_size` on chat completions, `resolution` on the images endpoint; `x-ai/` models draw `2K` for `4K` and say so |
+| openrouter | `image_config.aspect_ratio` on chat completions, `aspect_ratio` on the images endpoint | `image_config.image_size` on chat completions, `resolution` on the images endpoint; `x-ai/` models draw `2K` for `4K` and say so; `google/gemini-2.5-flash-image` takes none, so the script refuses a tier for it before the request |
 
 Each provider script checks the ratio against the model it sends the request to, after a remembered fallback, and exits 1 before it calls the API when the model does not draw it. The error names the ratios that model draws, for example `Error: gemini-3-pro-image does not take aspect ratio 4:1; it takes 1:1, 2:3, ...`. When the default model answers that the key cannot reach it, the script checks its fallback the same way before sending the request again, and ends the provider unpaid when the fallback does not draw the ratio. The other providers still run. gemini checks its own models, xai each `grok-imagine-image` model (`21:9` and `5:2` only on `grok-imagine-image-2.0`, so its fallback `grok-imagine-image` refuses them), openai the ratios in the table below, and openrouter its `google/` and `x-ai/` models with the gemini and xai lists. A model none of these lists knows gets the ratio unchecked, and the script prints a line that says so.
 
@@ -445,8 +445,8 @@ bash scripts/xai.sh \
 | `--mode` | `generate`, `edit` | -- | Yes |
 | `--prompt` | text | -- | Yes |
 | `--output` | file path | -- | Yes |
-| `--input-image` | file path, repeatable (max 5 on `grok-imagine-image-2.0`; older models take 3) | -- | Edit mode only |
-| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` | (none) | No |
+| `--input-image` | file path, repeatable (max 5; older models than `grok-imagine-image-2.0` take 3, which the API enforces, not the script) | -- | Edit mode only |
+| `--aspect-ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `auto`; `21:9` and `5:2` on `grok-imagine-image-2.0` only. The script refuses any other before the request | (none) | No |
 | `--resolution` | `1k`, `2k` (LOWERCASE) | (API default) | No |
 | `--size-tier` | `1K`, `2K`, `4K`; sent as `--resolution`, `4K` as `2k` with a line that says so; `--resolution` wins | (none) | No |
 | `--quality` | `low`, `medium`, `auto` (`grok-imagine-image-2.0` only) | unset (API `auto`: low for generation, medium for edits; billed as served) | No |
@@ -490,7 +490,7 @@ bash scripts/openrouter.sh \
 | `--input-image` | file path, repeatable | -- | Edit mode; in generate mode also sent as references |
 | `--model` | any OpenRouter image model slug | `google/gemini-nano-banana-2.1` | No |
 | `--aspect-ratio` | `W:H`; checked for `google/` and `x-ai/` models, unchecked for others | (none) | No |
-| `--size-tier` | `1K`, `2K`, `4K`; `2K` for `4K` on `x-ai/` models | (none) | No |
+| `--size-tier` | `1K`, `2K`, `4K`; `2K` for `4K` on `x-ai/` models; refused for `google/gemini-2.5-flash-image`, which takes no size | (none) | No |
 | `--site-url` | URL | (none) | No (sent as `HTTP-Referer` for OpenRouter attribution) |
 | `--site-name` | text | (none) | No (sent as `X-Title` for OpenRouter attribution) |
 
@@ -506,7 +506,7 @@ Each `--input-image` must be a PNG, JPEG, WebP or GIF file. The scripts copy eac
 |----------|------------|-------|
 | Gemini | 14 | `generate` (references for a fresh composition) and `edit` |
 | OpenAI | 16 | `edit` only (its generation endpoint takes no images) |
-| xAI | 5 on `grok-imagine-image-2.0` (older models take 3) | `edit` only |
+| xAI | 5 (older models than `grok-imagine-image-2.0` take 3; the API refuses the rest) | `edit` only |
 | OpenRouter | model-dependent | `generate` and `edit` (input images attached as chat image parts, or as `input_references` on the images endpoint) |
 
 ```bash
@@ -552,7 +552,7 @@ Gemini's flat 14-image budget is best composed as up to 6 object + 5 character-c
 
 ### Retries
 
-Each provider script retries a transient API error (429 or a 5xx status, or a network failure) up to three times, with a delay that doubles each attempt (1 second, 2 seconds, 4 seconds). `IMAGE_MAX_RETRIES` and `IMAGE_RETRY_DELAY` tune the count and the starting delay. Inside a streaming pane, a retry shows on the `waiting on` line as `(retry 2/3)`; once an image is on the pane that line is only written when the next block lands, so a retry that starts between blocks shows only in the final banner or error text.
+Each provider script retries a transient API error (HTTP 429, 500, 502, 503 or 504, or a network failure) up to three times, with a delay that doubles each attempt (1 second, 2 seconds, 4 seconds). `IMAGE_MAX_RETRIES` and `IMAGE_RETRY_DELAY` tune the count and the starting delay. Inside a streaming pane, a retry shows on the `waiting on` line as `(retry 2/3)`; once an image is on the pane that line is only written when the next block lands, so a retry that starts between blocks shows only in the final banner or error text.
 
 When a provider run through `run-all.sh` fails outright, its error shows under a red `✗ provider error` heading, and if any provider failed the pane offers `[r] retry failed (xai) · [esc/ctrl-d] close 45s`. The offer counts down until the first image is on the pane; after that it shows the time budget once, as `[r] retry failed (xai) · [esc/ctrl-d] close (up to 45s)`, because a rewritten line erases the pane's images. Pressing `r` re-runs only the failed providers inside the same run; Esc closes the pane and the run returns with what it has. `DISPLAY_PANE_RETRY_WAIT` sets how long the offer stays open (default 45 seconds; 0 disables it), and a run with a failure can take that much longer plus one more provider round. In the gallery the offer is the run's **Retry failed** button, made only while a page is open, and once the run has ended each failed frame has its own **Retry** (see [Image Display](#image-display)).
 
@@ -615,12 +615,12 @@ Delete the verdict directory to try the default again before the verdict expires
 | Model fallback | `scripts/model-fallback.sh` | Sends the request once more with the provider's fallback model when the default is unavailable to the key, and remembers that verdict per key |
 | Input image check | `scripts/input-images.sh` | Copies each `--input-image` into a private temp folder, reads the copy's type from its bytes and refuses anything that is not a PNG, JPEG, WebP or GIF file |
 | Output image save | `scripts/output-image.sh` | Refuses an `--output` that already exists, decodes the image into a temp file beside it and hard-links that to the output's name, so it never replaces or follows anything at the path |
+| Aspect ratio tables | `scripts/aspect-ratios.sh` | The ratios each Gemini and xAI model draws, OpenAI's ratio-to-`WxH` table, and the checks that refuse a ratio or size before the script pays for a request |
 | Parallel runner | `scripts/run-all.sh` | Forks all providers in parallel as one gallery run or under one streaming pane; holds a token for the batch |
 | Display utility | `scripts/display.sh` | Decides the display mode, writes gallery runs, and does multi-protocol terminal image display (iTerm2, Kitty, Sixel, tmux pane, shared streaming pane with colored banners + pending-provider waiting line) |
-| Gallery server | `scripts/gallery-server.py` | Serves the gallery's runs on 127.0.0.1, deletes runs with their image files, starts `run-all.sh` again for a resend, and starts, reuses or replaces that server for `display.sh` |
+| Gallery server | `scripts/gallery-server.py` | Serves the gallery's runs on 127.0.0.1, deletes runs or a single frame with their image files, starts `run-all.sh` again for a resend or a failed frame's Retry, and starts, reuses or replaces that server for `display.sh` |
 | Gallery page | `scripts/gallery/` | The page, script and stylesheet the gallery server serves |
 | API reference | `skills/image-generation/references/api-details.md` | Endpoint and payload documentation |
-| Skill evals | `skills/image-generation/evals/evals.json` | Trigger prompts for the skill's eval suite |
 | Hooks module | `hooks/index.ts` | Registers the `generate` tool and serves its calls through `run-all.sh` |
 | Tool input rules | `hooks/argv.ts` | Checks a `generate` call's input and builds `run-all.sh`'s argv |
 | Hooks manifest | `hooks/hooks.json` | Points the engine at `hooks/index.ts` |

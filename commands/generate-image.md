@@ -26,8 +26,8 @@ Generate or edit an image based on the user's request.
      It never overwrites: when the refusal says a file `already exists`, call it again with an
      unused `outputBase` (add `-2`, `-3`) and leave the existing files alone.
    Take the Bash path in steps 3-5 instead when the tool is not available, or when the
-   request needs an option the tool does not take (image size, quality, transparent
-   background, a specific model, or another per-provider flag).
+   request needs an option the tool does not take (quality, transparent background, a
+   specific model, or another per-provider flag).
 
 3. Ask the user which provider to use with AskUserQuestion:
    - **Gemini** (gemini-3-pro-image): Premium quality, professional asset production, up to 14 reference images

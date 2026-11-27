@@ -5,7 +5,7 @@ This file lists every notable change to claude-image-generation. The format foll
 versioning in `YYYY.M.PATCH` format. [GitHub releases](https://github.com/hex/claude-image-generation/releases)
 cover the versions up to 2026.9.1.
 
-## Unreleased
+## 2026.11.3 - 2026-11-27
 
 ### Added
 - One aspect ratio and size for every provider: the generate tool takes `aspectRatio` (`W:H`, `19.5:9` included) and `size` (`1K`, `2K` or `4K`), and `run-all.sh` takes `--aspect-ratio` and `--size`. Gemini gets `aspectRatio` and `imageSize`, xAI `aspect_ratio` and `resolution` (`2k` for `4K`, with a line that says so), OpenAI one `WxH` from a table (16:9 at 2K is `2736x1536`), and OpenRouter `image_config` on chat completions or `aspect_ratio` and `resolution` on the images endpoint. A provider whose model does not draw the ratio fails before its request, naming the ratios it draws, and so does one whose fallback, after the default model answers that the key cannot reach it, does not draw it. `openrouter.sh` checks only `google/` and `x-ai/` models. `gemini-2.5-flash-image` takes no size, so its scripts refuse one for it. xAI keeps the input image's shape on a single-image edit, and its scripts say so. A provider's own flag in its extra arguments wins. With neither given, every provider sends what it sent before. A gallery run records both in its `meta.json` arguments. The gallery's prompt editor has an **Aspect ratio** and a **Size** menu, set to the run's own, or for a run that recorded none to the shape its extra arguments agree on, which **Resend** passes to `run-all.sh` in place of the extras' own shape flags; the server refuses any value the generate tool refuses with HTTP 400 before it starts anything. A failed frame's **Retry** asks for the run's own.

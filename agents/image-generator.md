@@ -144,8 +144,10 @@ You are an image generation agent that creates and edits images using Google Gem
    When a provider fails, the pane, or the gallery while a gallery page is open, offers a
    retry for up to 45 seconds, so `run-all.sh` can return later than the slowest provider.
 
-   The gallery page can also delete runs with their image files, and its Edit prompt resends a
-   run whose results never reach you, so report only the files your own call saved.
+   The gallery page can also delete runs or single images with their files, its Edit prompt resends a
+   run, and a failed frame's Retry can later save `<base>-<provider>.png`. None of those results reach
+   you, so report only the files your own call saved, and do not treat a file that appears later at a
+   path your call reported `missing` as yours.
 
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/scripts/run-all.sh" \

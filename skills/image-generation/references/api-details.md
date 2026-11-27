@@ -301,7 +301,7 @@ Header: `Authorization: Bearer YOUR_API_KEY`
 }
 ```
 
-Substitute `grok-imagine-image` for the standard-tier model — parameter schema is identical.
+Substitute `grok-imagine-image` for the standard-tier model. It takes the same parameters except `quality` and the `21:9` and `5:2` ratios; `xai.sh` refuses those two ratios for it before the request.
 
 ### Edit Request — legacy `image_url` via generations endpoint
 ```json

@@ -1,7 +1,7 @@
 ---
 name: image-generation
 description: Generates and edits images using Google Gemini, OpenAI GPT Image, xAI Grok Image, and OpenRouter APIs via shell scripts. This skill should be used when the user asks to "generate an image", "create an image", "edit an image", "modify an image", "make a picture", "draw me a", "text to image", "generate with gemini", "generate with openai", "generate with xai", "generate with grok", "generate with openrouter", "gpt image", "gemini image", "grok image", or "openrouter image".
-version: 2026.11.2
+version: 2026.11.3
 ---
 
 # Image Generation with Gemini, OpenAI, xAI, and OpenRouter
@@ -131,9 +131,11 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter.sh" \
 Use `scripts/run-all.sh` — a single Bash call that forks all providers in parallel as one run.
 By default (`IMAGE_DISPLAY=gallery`) the run shows on the browser gallery page every session
 shares: a section with one frame per provider, filled in as each finishes, with nothing drawn in the terminal.
-The page can also delete a finished run, or every finished run of a project, with the image files they saved,
-after a dialog that lists each file. Its Edit prompt button sends a run-all.sh run's prompt again, edited, to the
-providers the person picks; the server starts run-all.sh for it and the results show only on the page, never reaching Claude.
+The page can also delete a finished run, one image of it, or every finished run of a project, with the image files
+they saved, after a dialog that lists each file. Its Edit prompt button sends a run-all.sh run's prompt again, edited,
+with an aspect ratio and size, to the providers the person picks, and once a run has ended each failed frame has a
+Retry that runs that provider again and saves to `<base>-<provider>.png`; the server starts run-all.sh for both and
+the results show only on the page, never reaching Claude.
 With `IMAGE_DISPLAY=pane` it streams into one shared tmux pane instead, whose watcher renders per-provider colored banners (gemini
 blue / openai gray / xai red / openrouter indigo) with model + timing, plus a bottom `waiting on`
 line naming the pending providers. It animates until the first image renders; after that it is
@@ -209,7 +211,7 @@ with none open, a failed run returns at once.
 - HTTP errors include the status code and API error message
 - If multiple providers are used in parallel and one fails, report the error and present the successful results
 - Rate limit errors (HTTP 429) mean the provider's quota is exhausted. The script retries a 429 up to three times first; if it still fails, try again later or use another provider
-- The script automatically retries a 429 or 5xx status, or a network failure, up to three times with a doubling delay before giving up
+- The script automatically retries HTTP 429, 500, 502, 503 or 504, or a network failure, up to three times with a doubling delay before giving up
 - When the default model is unavailable to the key (HTTP 404, a 403 outside OpenRouter, or a 400 saying the model does not exist), the script sends the request once more with the provider's fallback and says so on stderr: gemini `gemini-nano-banana-2.1`, openai `gpt-image-2.5-sunburst`, xai `grok-imagine-image`, openrouter `google/gemini-3.1-flash-image`. Report which model drew the image. A model named with `--model` or `*_IMAGE_MODEL` never falls back. Once the fallback answers HTTP 200, even with no image in it, the script records the verdict and later runs send the fallback first until it expires: the default's own unavailable answer is the evidence, and the fallback's 200 shows the account and endpoint work
 
 | Env var | Default | Purpose |
@@ -229,8 +231,9 @@ with none open, a failed run returns at once.
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
 | `--input-image` | file path, repeatable (max 14) | (required for edit; optional refs in generate) |
-| `--aspect-ratio` | 14 ratios (1:1, 16:9, 21:9, 1:4, 4:1, 1:8, 8:1, etc.) | 1:1 |
+| `--aspect-ratio` | 10 on the default Pro model (1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9); the Nano Banana 2 models add 1:4, 4:1, 1:8, 8:1; the script refuses any other before the request | 1:1 |
 | `--image-size` | 512, 1K, 2K, 4K (UPPERCASE) | (API default 1K) |
+| `--size-tier` | 1K, 2K, 4K; sent as `--image-size`; `--image-size` wins | (none) |
 | `--thinking-level` | minimal, High | unset (API `minimal`) |
 | `--image-only` | (flag) | off |
 | `--search-grounding` | (flag) | off |
@@ -243,7 +246,9 @@ with none open, a failed run returns at once.
 | `--prompt` | text | (required) |
 | `--output` | file path | (required) |
 | `--input-image` | file path, repeatable (max 16) | (edit only) |
-| `--size` | auto or WxH (gpt-image-2 and the 2.5 models: edges multiples of 16, max edge 3840, ratio up to 3:1; gpt-image-2.6-sunburst drew `1536x864` in a 2026-11-05 test); older models: `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` |
+| `--size` | auto or WxH (gpt-image-2, the 2.5 and the 2.6 models: edges multiples of 16, max edge 3840, ratio up to 3:1, 655,360 to 8,294,400 pixels; above `2560x1440` is experimental on the 2.5 models); older models: `1024x1024`, `1536x1024`, `1024x1536` | `1024x1024` |
+| `--aspect-ratio` | a ratio from the README's table, drawn as its `WxH`; `--size` wins; refused on models that take only three sizes | (none) |
+| `--size-tier` | 1K, 2K, 4K, drawn as the table's `WxH` (1:1 when no ratio); `--size` wins | (none) |
 | `--quality` | auto, low, medium, high; xhigh and max on the 2.5 and 2.6 models | high |
 | `--background` | auto, transparent, opaque; transparent needs png or webp output | auto |
 | `--output-format` | png, jpeg, webp | png |
@@ -261,6 +266,7 @@ with none open, a failed run returns at once.
 | `--input-image` | file path, repeatable (max 5) | (edit only) |
 | `--aspect-ratio` | 16 ratios (1:1, 16:9, 21:9, 5:2, 20:9, auto, etc.) | (none) |
 | `--resolution` | 1k, 2k (LOWERCASE) | (API default) |
+| `--size-tier` | 1K, 2K, 4K; sent as `--resolution`, `4K` as `2k` with a line that says so; `--resolution` wins | (none) |
 | `--quality` | low, medium, auto (grok-imagine-image-2.0 only) | unset (API `auto`) |
 | `--model` | xAI model name | grok-imagine-image-2.0 |
 
@@ -272,5 +278,7 @@ with none open, a failed run returns at once.
 | `--output` | file path | (required) |
 | `--input-image` | file path, repeatable | (required for edit; also sent in generate) |
 | `--model` | any OpenRouter image model slug | google/gemini-nano-banana-2.1 |
+| `--aspect-ratio` | W:H; checked for `google/` and `x-ai/` models, unchecked for others | (none) |
+| `--size-tier` | 1K, 2K, 4K; `2K` for `4K` on `x-ai/` models; refused for `google/gemini-2.5-flash-image` | (none) |
 | `--site-url` | URL (sent as `HTTP-Referer`) | (from `OPENROUTER_SITE_URL`) |
 | `--site-name` | text (sent as `X-Title`) | (from `OPENROUTER_SITE_NAME`) |
