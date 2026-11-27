@@ -510,7 +510,8 @@ gallery_resume_run() {
   fi
   DISPLAY_PANE_DIR="$dir"
   __pane_acquire "$owner"
-  rm -f "$dir/.done"
+  # An offer a killed run-all left behind would show again while the run is live; nothing answers it.
+  rm -f "$dir/.done" "$dir/retry-offer"
 }
 
 # Makes sure the gallery server is running at this plugin's version and that a page shows it:

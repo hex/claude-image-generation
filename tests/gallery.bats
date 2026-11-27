@@ -1415,3 +1415,32 @@ delete_frame() {
   [[ -f "$out/held-gemini.png" && -f "$out/fine-gemini.png" ]]
   [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$b/status")" == "$(printf 'gemini\tcomplete\t1000\tmodel-a\t%s' "$out/fine-gemini.png")" ]]
 }
+
+@test "a frame's Retry turns its run live before the provider starts, with no stale offer, so the page shows it working and Delete keeps it" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash first
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  # The offer a run-all killed while it waited would leave behind.
+  printf '45\ngemini\n' > "$IMAGE_GALLERY_DIR/runs/$a/retry-offer"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds gemini.sh back until the test lets it go, or gives
+  # up once the test's folder is gone, and runs run-all.sh at once.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */gemini.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  wait_for_snapshot '.runs[0].status == "live"'
+  [[ "$(jq -c '.runs[0] | [.retry, .providers[0].state, .providers[0].retryable]' <<< "$SNAPSHOT")" == '[null,"error",false]' ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  [[ "$(delete_runs "{\"runs\": {\"$a\": []}}")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is still generating\"}], \"error\": \"run $a is still generating\"} 409" ]]
+  touch "$MOCK_DIR/go"
+  wait "$first"
+  [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash"
+}
