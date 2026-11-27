@@ -39,6 +39,9 @@ Options:
   --openrouter-extra extra args passed to openrouter.sh (single shell-split string)
                      A provider's own flag in its extra args, such as --image-size for
                      gemini or --size for openai, wins over --aspect-ratio and --size.
+  --gallery-run    the id of a gallery run that has ended, to run the providers again in: their
+                   records join its frames and no run-level retry is offered. The gallery server
+                   passes it for a failed frame's Retry; it needs the gallery display.
 
 With pane, outside tmux the streaming pane cannot open and providers fall back to
 direct terminal display in this shell (sequential output, but functional).
@@ -57,6 +60,7 @@ GEMINI_EXTRA=""
 OPENAI_EXTRA=""
 XAI_EXTRA=""
 OPENROUTER_EXTRA=""
+GALLERY_RUN=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -71,6 +75,7 @@ while [[ $# -gt 0 ]]; do
     --openai-extra) OPENAI_EXTRA="$2"; shift 2 ;;
     --xai-extra) XAI_EXTRA="$2"; shift 2 ;;
     --openrouter-extra) OPENROUTER_EXTRA="$2"; shift 2 ;;
+    --gallery-run) GALLERY_RUN="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
@@ -132,6 +137,10 @@ run_arguments() {
 # the fallback notice. A bad IMAGE_DISPLAY ends the run here, before any provider is paid.
 DISPLAY_MODE=$(display_mode)
 export IMAGE_DISPLAY="$DISPLAY_MODE"
+if [[ -n "$GALLERY_RUN" && "$DISPLAY_MODE" != gallery ]]; then
+  echo "Error: --gallery-run needs the gallery display, and this run's is $DISPLAY_MODE" >&2
+  exit 1
+fi
 
 # Either way run-all holds a token for the whole batch and releases it once every provider has
 # been waited on, so the surface outlives any single provider and is finished on the same
@@ -143,6 +152,11 @@ if [[ "$DISPLAY_MODE" == pane ]]; then
     mkdir -p "$DISPLAY_PANE_DIR/logs"
     __pane_acquire run-all
   fi
+elif [[ -n "$GALLERY_RUN" ]]; then
+  # A frame's retry joins the run it belongs to, which must still be there: without it nothing is paid for.
+  gallery_resume_run run-all "$GALLERY_RUN" || exit 1
+  export DISPLAY_PANE_DIR
+  trap '__pane_release run-all' EXIT
 elif [[ "$DISPLAY_MODE" == gallery && -z "${DISPLAY_PANE_DIR:-}" ]]; then
   # The run directory comes first, so a server deciding whether it is idle already sees a live run.
   if gallery_begin_run run-all "$PROMPT" "$(run_arguments)" "${provider_list[@]}"; then
@@ -291,8 +305,9 @@ declare -a FAILED=()
 overall_status=0
 run_round "${provider_list[@]}" || overall_status=1
 
-# One offer per run: a provider that fails its retry simply shows its error.
-if [[ $overall_status -eq 1 ]] && offer_retry; then
+# One offer per run: a provider that fails its retry simply shows its error. A run continued for a
+# frame's retry has had its offer already, and the frame's own Retry button is the way back.
+if [[ $overall_status -eq 1 && -z "$GALLERY_RUN" ]] && offer_retry; then
   overall_status=0
   run_round "${FAILED[@]}" || overall_status=1
 fi

@@ -4,7 +4,7 @@
 """Image gallery server and its client commands. Python 3.9 standard library only.
 
     gallery-server.py serve   --root DIR [--version V]  detach and serve the runs under DIR/runs
-    gallery-server.py ensure  --root DIR                 make sure a server of this version runs
+    gallery-server.py ensure  --root DIR                 make sure a server of this version or newer runs
     gallery-server.py clients --root DIR                 print how many pages are connected
 
 Each run is a directory DIR/runs/<run-id> written by display.sh in the tmux pane's layout:
@@ -83,6 +83,8 @@ PAGE_FILES = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
 }
+# The line of app.js that the server serving it rewrites to name its own version.
+PAGE_VERSION_LINE = b"const PAGE_VERSION = '';\n"
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     "X-Content-Type-Options": "nosniff",
@@ -95,13 +97,34 @@ def plugin_version():
         return json.load(f)["version"]
 
 
+def version_order(version):
+    """A calendar version, YYYY.M.PATCH, as the numbers its parts hold, for comparing versions: 2026.11.10
+    comes after 2026.11.2. Any other string comes before every calendar version and ties with any
+    other such string."""
+    parts = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", version)
+    return tuple(int(part) for part in parts.groups()) if parts else ()
+
+
+def stamp_version(script, version):
+    """app.js with its PAGE_VERSION line naming version, the version of the server that serves it."""
+    if script.count(PAGE_VERSION_LINE) != 1:
+        raise ValueError("app.js must hold the line %r exactly once" % PAGE_VERSION_LINE.decode())
+    return script.replace(PAGE_VERSION_LINE, b"const PAGE_VERSION = %s;\n" % json.dumps(version).encode())
+
+
 def write_private(path, text):
-    """Writes text to path through a temp file and a rename, readable by this user only."""
+    """Writes text to path through a temp file and a rename, readable by this user only. A write that
+    fails removes its temp file: a dot file left in a run's active/ would keep run-all from finishing
+    the run."""
     tmp = path.with_name(".%s.%s" % (path.name, secrets.token_hex(4)))
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(str(tmp), str(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(str(tmp), str(path))
+    except BaseException:
+        os.unlink(str(tmp))
+        raise
 
 
 # ── Runs ──────────────────────────────────────────────────────────────
@@ -150,6 +173,12 @@ def on_error(p, ms, path):
     p["state"] = "error"
 
 
+def on_deleted(p, ms, path):
+    # The gallery deleted the frame: the run names its images no more.
+    p["state"] = "deleted"
+    p["images"] = []
+
+
 # What each status record does to its provider. The record's model, when it names one, always
 # becomes the provider's model.
 TRANSITIONS = {
@@ -157,6 +186,7 @@ TRANSITIONS = {
     "retrying": on_retrying,
     "complete": on_complete,
     "error": on_error,
+    "deleted": on_deleted,
 }
 
 
@@ -230,6 +260,20 @@ def forget_unchecked_holders():
             del confirmed_holders[key]
 
 
+def hold_run(run_dir, pid):
+    """Writes the token that run-all.sh, running as pid, writes for itself once it continues the run
+    (gallery_resume_run, as owner run-all), so the run is held from the moment the server starts it. Any
+    server reads it, as a server that replaces this one must: that one never learns what this one
+    started. Raises OSError saying why when it writes no token: ps cannot say when pid started, or the
+    token cannot be written."""
+    started = process_started(pid)
+    if started is None:
+        raise OSError("ps could not say when the retry's run-all.sh started")
+    active = run_dir / "active"
+    active.mkdir(mode=0o700, exist_ok=True)
+    write_private(active / ("run-all.%d" % pid), started + "\n")
+
+
 def run_is_held(run_dir):
     """True while any process holding a token on the run is still alive. A token is named
     <name>.<pid> and holds its process's start time; a dot name is one still being written."""
@@ -255,11 +299,51 @@ def run_is_held(run_dir):
     return False
 
 
+def fold_status(run_dir, providers):
+    """Folds a run's status log into providers (reduce_status) as far as it parses. Returns why it does
+    not parse past there, or None when it all does or the run has no status log yet."""
+    try:
+        reduce_status(read_status_log(run_dir), providers)
+    except FileNotFoundError:
+        pass
+    except ValueError as e:
+        return str(e)
+    return None
+
+
+def drop_cut_off_record(run_dir):
+    """Drops a record cut off part way at the end of a run's status log, as a writer that died in the
+    middle of one leaves it. No reader counts it and, its writer being gone, nothing will finish it, so
+    a record appended after it would run on from it into one line that does not parse. Call it holding
+    runs_lock before appending to a run no process works in: one no process holds, or one the server
+    holds for a retry's run-all.sh that has not started yet. A provider that holds no token can still
+    append to the log meanwhile, so a log that ends in a whole record is left as it is."""
+    with open(str(run_dir / "status"), "r+b") as status:
+        log = status.read()
+        if log.endswith(b"\n") or not log:
+            return
+        # Bytes appended since the read have run on from the cut-off record and belong to another writer,
+        # so they stay. A record can still land between this check and the truncate.
+        if os.fstat(status.fileno()).st_size == len(log):
+            status.truncate(log.rfind(b"\n") + 1)
+
+
 def read_status_log(run_dir):
     """A run's status log as display.sh wrote it. A newline alone ends a record; a carriage return
     is part of a field, so line endings are not translated."""
     with open(str(run_dir / "status"), encoding="utf-8", errors="replace", newline="") as f:
         return f.read()
+
+
+def status_size(run_dir):
+    """How many bytes a run's status log holds: 0 before it exists. Only drop_cut_off_record shortens
+    the log, under runs_lock: a frame's delete in a run no process holds, and a frame's retry once it
+    holds the run, before it measures the log it then watches grow. A delete removes it only from a run
+    neither held nor starting a retry."""
+    try:
+        return os.stat(str(run_dir / "status")).st_size
+    except FileNotFoundError:
+        return 0
 
 
 def read_text(path, limit=None):
@@ -316,21 +400,37 @@ def check_arguments(arguments):
         raise bad("extras", extras, "a string for each of %s" % ", ".join(RESEND_PROVIDERS))
 
 
-def read_run(run_dir):
-    """The page's view of one run. Raises RunRejected or OSError when the directory is not one."""
+def retry_refusal(run_id, meta, providers, unreadable, held, name):
+    """Why the failed frame of provider name cannot run again in its run, or None when it can: only once
+    the run has ended, with no frame still at work when it did, only in a run run-all.sh started and
+    recorded its arguments for, and only when the frame's last record is an error. providers and
+    unreadable are what fold_status made of the run's status log; held, whether a process holds the run."""
+    if unreadable is not None:
+        return "run %s's status log is unreadable (%s), so how its frames ended is unknown" % (run_id, unreadable)
+    if held:
+        return "run %s is still generating" % run_id
+    if name not in RESEND_PROVIDERS:
+        return "%s is not a provider run-all.sh runs" % json.dumps(name)
+    if "arguments" not in meta:
+        return "run %s did not record the arguments it was started with, so its frames cannot be retried" % run_id
+    at_work = [p["name"] for p in providers.values() if p["state"] in IN_FLIGHT]
+    if at_work:
+        return "run %s stopped while its %s frame was at work, so its frames cannot be retried" % (run_id, at_work[0])
+    if providers[name]["state"] != "error":
+        return "run %s's %s frame did not fail, so there is nothing to retry" % (run_id, name)
+    return None
+
+
+def read_run(run_dir, held):
+    """The page's view of one run, held saying whether a process holds it. Raises RunRejected or OSError
+    when the directory is not one."""
     meta = read_meta(run_dir)
     providers = {name: new_provider(name) for name in meta["providers"]}
-    problem = None
-    try:
-        reduce_status(read_status_log(run_dir), providers)
-    except FileNotFoundError:
-        pass
-    except ValueError as e:
-        problem = "unreadable status log: %s" % e
+    unreadable = fold_status(run_dir, providers)
 
     if (run_dir / ".done").exists():
         status = "done"
-    elif run_is_held(run_dir):
+    elif held:
         status = "live"
     else:
         status = "interrupted"
@@ -377,6 +477,7 @@ def read_run(run_dir):
         cards.append({
             "name": p["name"], "state": state, "model": p["model"], "ms": p["ms"],
             "attempt": p["attempt"], "round": p["round"], "error": error, "image": image,
+            "retryable": retry_refusal(run_dir.name, meta, providers, unreadable, held, p["name"]) is None,
         })
     return {
         "id": run_dir.name,
@@ -389,7 +490,7 @@ def read_run(run_dir):
         "retry_seconds": retry_seconds,
         "retry_ends_ms": retry_ends_ms,
         "updated_ms": updated_ms,
-        "problem": problem,
+        "problem": None if unreadable is None else "unreadable status log: %s" % unreadable,
         "providers": cards,
         "files": [{"path": path, "provider": name} for name, path in unique_images(recorded_images(providers))],
         "input_images": meta["arguments"]["input_images"] if "arguments" in meta else [],
@@ -539,6 +640,40 @@ def image_type(head):
 # ── Server ────────────────────────────────────────────────────────────
 
 
+class Refusal(Exception):
+    """Why the gallery does not do what the page asked: the HTTP status, and the error the page shows."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def check_places(run_id, meta):
+    """Raises Refusal naming what is gone when the working folder, the image folder or an input image
+    of a run that recorded its arguments is no longer there, since run-all.sh cannot run again
+    without them."""
+    arguments = meta["arguments"]
+    for path, what in ((meta["cwd"], "working folder"), (os.path.dirname(arguments["output_base"]), "image folder")):
+        if not os.path.isdir(path):
+            raise Refusal(409, "run %s's %s %s is gone" % (run_id, what, path))
+    for path in arguments["input_images"]:
+        if not os.path.isfile(path):
+            raise Refusal(409, "run %s's input image %s is gone" % (run_id, path))
+
+
+def run_all_argv(arguments, prompt, base, providers):
+    """The command that runs run-all.sh with a run's recorded arguments, prompt and providers, saving
+    under base."""
+    argv = ["bash", str(SCRIPT.parent / "run-all.sh"), "--mode", arguments["mode"], "--prompt", prompt,
+            "--output-base", base, "--providers", ",".join(providers)]
+    for path in arguments["input_images"]:
+        argv += ["--input-image", path]
+    for name in providers:
+        if arguments["extras"][name]:
+            argv += ["--%s-extra" % name, arguments["extras"][name]]
+    return argv
+
+
 class Gallery:
     """What the request threads share with the scanning loop."""
 
@@ -551,7 +686,7 @@ class Gallery:
         self.instance = secrets.token_hex(8)
         self.origin = "http://127.0.0.1:%d" % port
         self.changed = threading.Condition()
-        self.snapshot = json.dumps({"instance": self.instance, "runs": []})
+        self.snapshot = json.dumps({"instance": self.instance, "version": version, "runs": []})
         self.clients = 0
         self.stop = threading.Event()
         self.last_open = 0.0
@@ -568,6 +703,8 @@ class Gallery:
         self.page = {}
         for route, (name, ctype) in PAGE_FILES.items():
             self.page[route] = ((PAGE_DIR / name).read_bytes(), ctype)
+        script, ctype = self.page["/app.js"]
+        self.page["/app.js"] = (stamp_version(script, version), ctype)
 
     def scan(self):
         """Reads every run whose files changed or whose holder went away, newest first, prunes
@@ -594,7 +731,7 @@ class Gallery:
         runs = []
         for index, name in enumerate(names):
             run_dir = self.runs_dir / name
-            if index >= KEEP_RUNS and not run_is_held(run_dir):
+            if index >= KEEP_RUNS and self.in_use(run_dir) is None:
                 shutil.rmtree(str(run_dir), ignore_errors=True)
                 continue
             run = self.run(run_dir)
@@ -604,7 +741,7 @@ class Gallery:
             del self.read_runs[name]
         add_usual_times(runs)
         mark_files(runs)
-        snapshot = json.dumps({"instance": self.instance, "runs": runs})
+        snapshot = json.dumps({"instance": self.instance, "version": self.version, "runs": runs})
         if snapshot != self.snapshot:
             with self.changed:
                 self.snapshot = snapshot
@@ -613,23 +750,25 @@ class Gallery:
 
     def run(self, run_dir):
         """The page's view of a run, or None for a rejected one. A run is read again only once one
-        of its files changed, or, while it is live, once no process holds it any more."""
+        of its files changed, or, when a process held it as it was read, once none does any more: a
+        retry's run-all.sh that the server held a finished run for can exit before it continues it."""
         files = run_files_state(run_dir)
         known = self.read_runs.get(run_dir.name)
         if known is not None and known[0] == files:
-            run = known[1]
-            if run is None or run["status"] != "live" or run_is_held(run_dir):
+            run, held = known[1], known[2]
+            if run is None or not held or run_is_held(run_dir):
                 return run
-        self.read_runs[run_dir.name] = (files, None)
+        self.read_runs[run_dir.name] = (files, None, False)
+        held = run_is_held(run_dir)
         try:
-            run = read_run(run_dir)
+            run = read_run(run_dir, held)
         except RunRejected as e:
             self.reject(run_dir, str(e))
             return None
         except OSError as e:
             self.reject(run_dir, "%s: %s" % (os.path.basename(e.filename or run_dir.name), e.strerror))
             return None
-        self.read_runs[run_dir.name] = (files, run)
+        self.read_runs[run_dir.name] = (files, run, held)
         return run
 
     def image_namers(self):
@@ -644,13 +783,10 @@ class Gallery:
                 continue
             run_dir = self.runs_dir / name
             providers = {}
-            try:
-                reduce_status(read_status_log(run_dir), providers)
-            except FileNotFoundError:
-                pass
-            except ValueError as e:
+            unreadable = fold_status(run_dir, providers)
+            if unreadable is not None:
                 raise RunRejected("run %s's status log is unreadable (%s), so which images it names is unknown"
-                                  % (name, e))
+                                  % (name, unreadable))
             try:
                 meta = read_meta(run_dir)
             except RunRejected as e:
@@ -662,32 +798,50 @@ class Gallery:
                 namers.setdefault(file_entry(path), {}).setdefault(name, reason)
         return namers
 
-    def delete(self, run_id, listed, namers):
-        """Deletes a run: each file its complete records name as an image that the page listed for it
-        in listed, keep_reason lets go and no other run in namers (image_namers) names or uses as an
-        input image, by any path, then its directory. Every other file a record names stays, and so
-        does every listed path no record names: the page's list only narrows what goes. Answers (HTTP status, outcome): 200
-        with the paths removed, those already gone and those kept with why, or the error that kept
-        the run in place. A deleted run leaves namers. Call it holding runs_lock."""
-        run_dir = self.runs_dir / run_id
-        if not RUN_ID.match(run_id) or not run_dir.is_dir():
-            return 404, {"id": run_id, "error": "no run %s" % run_id}
+    def in_use(self, run_dir):
+        """Why a run must stay, which neither a delete nor pruning past KEEP_RUNS removes, or None when
+        nothing keeps it. Call it holding runs_lock."""
         # A run's retry offer is open only while run-all holds the run, so this keeps an open offer
         # too; an offer a killed run-all left behind does not keep its run.
         if run_is_held(run_dir):
-            return 409, {"id": run_id, "error": "run %s is still generating" % run_id}
-        providers = {}
+            return "run %s is still generating" % run_dir.name
+        # A frame's retry also claims the run's output base as the server starts run-all.sh, which keeps
+        # the run while that run-all.sh runs though its token does not: ps cannot confirm the token's
+        # holder, or the token is gone. A run whose meta.json cannot be read is one no retry starts in.
         try:
-            reduce_status(read_status_log(run_dir), providers)
-        except FileNotFoundError:
-            pass
-        except ValueError as e:
-            return 409, {"id": run_id, "error": "run %s's status log is unreadable (%s), so which images it saved is "
-                                                "unknown; nothing was deleted" % (run_id, e)}
+            arguments = read_meta(run_dir).get("arguments")
+        except (RunRejected, OSError):
+            return None
+        if arguments is not None and self.saving_to(arguments["output_base"]):
+            return "run %s is starting a retry" % run_dir.name
+        return None
+
+    def deletable(self, run_id):
+        """The directory and folded status log (reduce_status) of a run whose images may be deleted
+        now: one in the gallery that no process holds, no frame's retry is starting in, and whose
+        status log parses. Raises Refusal saying why not."""
+        run_dir = self.runs_dir / run_id
+        if not RUN_ID.match(run_id) or not run_dir.is_dir():
+            raise Refusal(404, "no run %s" % run_id)
+        in_use = self.in_use(run_dir)
+        if in_use is not None:
+            raise Refusal(409, in_use)
+        providers = {}
+        unreadable = fold_status(run_dir, providers)
+        if unreadable is not None:
+            raise Refusal(409, "run %s's status log is unreadable (%s), so which images it saved is unknown; "
+                               "nothing was deleted" % (run_id, unreadable))
+        return run_dir, providers
+
+    def remove_images(self, run_id, images, listed, namers):
+        """Deletes each of images, (provider, path) pairs run run_id's complete records name, that the
+        page listed in listed, keep_reason lets go and no other run in namers (image_namers) names or
+        uses as an input image, by any path. Every other one stays, and so does every listed path that
+        images does not name: the page's list only narrows what goes. Returns the paths removed, those
+        already gone and those kept with why, and the error that stopped it part way, or None."""
         removed = []
         missing = []
         kept = []
-        images = unique_images(recorded_images(providers))
         for provider, path in images:
             reason = keep_reason(provider, path)
             others = [why for name, why in namers.get(file_entry(path), {}).items() if name != run_id]
@@ -704,100 +858,208 @@ class Gallery:
             except (FileNotFoundError, NotADirectoryError):
                 missing.append(path)
             except OSError as e:
-                return 500, {"id": run_id, "error": "could not delete %s: %s; the run is kept" % (path, e.strerror),
-                             "removed": removed, "missing": missing, "kept_files": kept}
+                return {"removed": removed, "missing": missing, "kept_files": kept}, "could not delete %s: %s" % (path, e.strerror)
         named = {path for provider, path in images}
         for path in dict.fromkeys(listed):
             if path not in named:
                 kept.append({"path": path, "reason": "run %s's records do not name it" % run_id})
+        return {"removed": removed, "missing": missing, "kept_files": kept}, None
+
+    def delete(self, run_id, listed, namers):
+        """Deletes a run: the image files of its complete records that remove_images lets go, then its
+        directory. Answers (HTTP status, outcome): 200 with the paths removed, those already gone and
+        those kept with why, or the error that kept the run in place. A deleted run leaves namers.
+        Call it holding runs_lock."""
+        try:
+            run_dir, providers = self.deletable(run_id)
+        except Refusal as e:
+            return e.code, {"id": run_id, "error": str(e)}
+        outcome, error = self.remove_images(run_id, unique_images(recorded_images(providers)), listed, namers)
+        if error is not None:
+            return 500, {"id": run_id, "error": "%s; the run is kept" % error, **outcome}
         shutil.rmtree(str(run_dir), ignore_errors=True)
         if os.path.lexists(str(run_dir)):
-            return 500, {"id": run_id, "error": "could not remove the run's folder %s" % run_dir,
-                         "removed": removed, "missing": missing, "kept_files": kept}
+            return 500, {"id": run_id, "error": "could not remove the run's folder %s" % run_dir, **outcome}
         for users in namers.values():
             users.pop(run_id, None)
-        return 200, {"id": run_id, "removed": removed, "missing": missing, "kept_files": kept}
+        return 200, {"id": run_id, **outcome}
+
+    def delete_frame(self, run_id, provider, listed, namers):
+        """Deletes one frame of a run: the image files its provider's complete records name that
+        remove_images lets go, then appends a deleted record for it to the run's status log. The run
+        names those files no more, and the frame shows as deleted, after a restart too. Answers
+        (HTTP status, outcome) as delete does, the outcome naming the provider as well. Call it
+        holding runs_lock."""
+        try:
+            run_dir, providers = self.deletable(run_id)
+            frame = providers.get(provider)
+            if frame is None:
+                raise Refusal(404, "run %s has no %s frame" % (run_id, provider))
+            if not frame["images"]:
+                raise Refusal(409, "run %s's %s frame has no image to delete" % (run_id, provider))
+        except Refusal as e:
+            return e.code, {"id": run_id, "provider": provider, "error": str(e)}
+        outcome, error = self.remove_images(run_id, unique_images([(provider, path) for path in frame["images"]]), listed, namers)
+        if error is not None:
+            return 500, {"id": run_id, "provider": provider, "error": "%s; the frame is kept" % error, **outcome}
+        try:
+            drop_cut_off_record(run_dir)
+            with open(str(run_dir / "status"), "ab") as status:
+                status.write(("%s\tdeleted\t\t\t\n" % provider).encode())
+        except OSError as e:
+            return 500, {"id": run_id, "provider": provider,
+                         "error": "could not record the %s frame as deleted in %s: %s" % (provider, run_dir / "status", e.strerror),
+                         **outcome}
+        return 200, {"id": run_id, "provider": provider, **outcome}
+
+    def run_meta(self, run_id):
+        """The directory and meta.json of a run in the gallery, or Refusal saying why there is none."""
+        run_dir = self.runs_dir / run_id
+        if not RUN_ID.match(run_id) or not run_dir.is_dir():
+            raise Refusal(404, "no run %s" % run_id)
+        try:
+            return run_dir, read_meta(run_dir)
+        except RunRejected as e:
+            raise Refusal(409, "run %s cannot be read: %s" % (run_id, e))
+        except OSError as e:
+            raise Refusal(409, "run %s cannot be read: %s: %s" % (run_id, e.filename, e.strerror))
 
     def resend(self, run_id, prompt, providers):
         """Starts run-all.sh again for a run that recorded its arguments, with prompt and providers in
         place of its own, saving in the folder of the run's output base under a fresh image-<stamp>
-        base. Answers (HTTP status, body) once the new run's directory exists, with 202 and the launch
-        id when run-all.sh is still starting after RESEND_START_SECONDS, or with why none was
-        started."""
-        run_dir = self.runs_dir / run_id
-        if not RUN_ID.match(run_id) or not run_dir.is_dir():
-            return 404, {"error": "no run %s" % run_id}
+        base. Answers (HTTP status, body) as await_run does, or with why none was started."""
         try:
-            meta = read_meta(run_dir)
-        except RunRejected as e:
-            return 409, {"error": "run %s cannot be read: %s" % (run_id, e)}
-        except OSError as e:
-            return 409, {"error": "run %s cannot be read: %s: %s" % (run_id, e.filename, e.strerror)}
-        arguments = meta.get("arguments")
-        if arguments is None:
-            return 409, {"error": "run %s did not record the arguments it was started with, so it cannot be resent" % run_id}
-        folder = os.path.dirname(arguments["output_base"])
-        cwd = meta["cwd"]
-        for path, what in ((cwd, "working folder"), (folder, "image folder")):
-            if not os.path.isdir(path):
-                return 409, {"error": "run %s's %s %s is gone" % (run_id, what, path)}
-        for path in arguments["input_images"]:
-            if not os.path.isfile(path):
-                return 409, {"error": "run %s's input image %s is gone" % (run_id, path)}
-        base = os.path.join(folder, "image-" + time.strftime("%Y%m%d-%H%M%S"))
-        launch = secrets.token_hex(8)
-        argv = ["bash", str(SCRIPT.parent / "run-all.sh"), "--mode", arguments["mode"], "--prompt", prompt,
-                "--output-base", base, "--providers", ",".join(providers)]
-        for path in arguments["input_images"]:
-            argv += ["--input-image", path]
-        for name in providers:
-            if arguments["extras"][name]:
-                argv += ["--%s-extra" % name, arguments["extras"][name]]
+            meta = self.run_meta(run_id)[1]
+            arguments = meta.get("arguments")
+            if arguments is None:
+                raise Refusal(409, "run %s did not record the arguments it was started with, so it cannot be resent" % run_id)
+            check_places(run_id, meta)
+            base = os.path.join(os.path.dirname(arguments["output_base"]), "image-" + time.strftime("%Y%m%d-%H%M%S"))
+            launch = secrets.token_hex(8)
+            started = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(time.time() - 1))
+            child, log_path = self.launch_run_all(run_all_argv(arguments, prompt, base, providers), meta["cwd"], base,
+                                                  providers, launch)
+        except Refusal as e:
+            return e.code, {"error": str(e)}
+        return self.await_run(child, log_path, lambda: self.resent_run(launch, started), {"pending": True, "launch": launch})
+
+    def retry_frame(self, run_id, name):
+        """Runs the failed frame of provider name again in its own run: run-all.sh with the run's own
+        prompt and arguments, saving to <output base>-<name>.png, the file the run first meant to
+        save, and adding its records to the run's status log, so the frame shows the retry as it
+        goes. retry_refusal says which frames may. Answers (HTTP status, body) as await_run does, the
+        run having started once its status log grows, or with why none was started."""
+        try:
+            # Held while the run is checked and run-all.sh claims its output base and holds the run, so a
+            # delete either comes first, and there is no run to retry, or finds the run held and keeps it.
+            with self.runs_lock:
+                run_dir, meta = self.run_meta(run_id)
+                if name not in meta["providers"]:
+                    raise Refusal(404, "run %s has no %s frame" % (run_id, name))
+                providers = {provider: new_provider(provider) for provider in meta["providers"]}
+                unreadable = fold_status(run_dir, providers)
+                refusal = retry_refusal(run_id, meta, providers, unreadable, run_is_held(run_dir), name)
+                if refusal is not None:
+                    raise Refusal(409, refusal)
+                check_places(run_id, meta)
+                arguments = meta["arguments"]
+                base = arguments["output_base"]
+                argv = run_all_argv(arguments, meta["prompt"], base, [name]) + ["--gallery-run", run_id]
+                # run-all.sh waits behind a line on its stdin, which the server writes once the run is held
+                # for it. The pipe closing with no line, when the run cannot be held or the server stops,
+                # ends it before it calls the provider. exec keeps the pid the token names.
+                gated = ["bash", "-c", 'read -r go && exec "$@" < /dev/null', "bash"] + argv
+                child, log_path = self.launch_run_all(gated, meta["cwd"], base, [name], None, stdin=subprocess.PIPE)
+                with child.stdin:
+                    try:
+                        hold_run(run_dir, child.pid)
+                    except OSError as e:
+                        raise Refusal(500, "could not hold run %s for its retry (%s), so the retry stopped before it "
+                                           "called the provider" % (run_id, e))
+                    # Only a retry that holds its run, and so starts, readies the log for its records: a refused
+                    # one leaves the log as it was.
+                    try:
+                        drop_cut_off_record(run_dir)
+                    except OSError as e:
+                        raise Refusal(500, "could not ready run %s's status log %s for the retry: %s"
+                                      % (run_id, run_dir / "status", e.strerror))
+                    size = status_size(run_dir)
+                    try:
+                        os.write(child.stdin.fileno(), b"go\n")
+                    except BrokenPipeError:
+                        # run-all.sh has exited already; await_run answers with how it exited.
+                        pass
+        except Refusal as e:
+            return e.code, {"error": str(e)}
+        return self.await_run(child, log_path, lambda: run_id if status_size(run_dir) > size else None, {"pending": True})
+
+    def saving_to(self, base):
+        """True while a run-all.sh the server started saves under base."""
+        with self.resend_lock:
+            return base in self.resends
+
+    def launch_run_all(self, argv, cwd, base, providers, launch, stdin=subprocess.DEVNULL):
+        """Starts run-all.sh with argv in cwd, its stdin as given, saving each of providers to
+        <base>-<provider>.png, and returns it with the file its output goes to. It runs as
+        resend_environment makes it, in a session of its own, its images readable by this user only,
+        and the server reaps it. Raises Refusal, starting nothing, while another run-all.sh the server
+        started saves to base, or when any of those files already exists."""
         with self.resend_lock:
             outputs = ["%s-%s.png" % (base, name) for name in providers]
             if base in self.resends:
-                return 409, {"error": "a resend saving to %s-<provider>.png is already starting; try again in a second" % base}
+                raise Refusal(409, "a run saving to %s-<provider>.png is already starting; try again in a second" % base)
             taken = [path for path in outputs if os.path.lexists(path)]
             if taken:
-                return 409, {"error": "%s already exists, and nothing is overwritten" % taken[0]}
+                raise Refusal(409, "%s already exists, and nothing is overwritten" % taken[0])
             log_path = self.resend_log()
-            started = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(time.time() - 1))
             try:
                 # The server cannot know the umask of the run it resends, so the images are saved
                 # readable by this user only, as the gallery's own files are.
                 with open(str(log_path), "ab") as log:
-                    child = subprocess.Popen(argv, cwd=cwd, env=self.resend_environment(cwd, launch), stdin=subprocess.DEVNULL,
+                    child = subprocess.Popen(argv, cwd=cwd, env=self.resend_environment(cwd, launch), stdin=stdin,
                                              stdout=log, stderr=subprocess.STDOUT, start_new_session=True, umask=0o077)
             except OSError as e:
-                return 500, {"error": "could not start run-all.sh: %s" % e.strerror}
+                raise Refusal(500, "could not start run-all.sh: %s" % e.strerror)
             self.resends[base] = child
         threading.Thread(target=self.reap, args=(base, child), daemon=True).start()
+        return child, log_path
+
+    def await_run(self, child, log_path, found, pending):
+        """Waits for a run-all.sh launch_run_all started to start its run, which found() names once
+        it has, or None before. Answers (HTTP status, body): 200 naming the run, 502 when run-all.sh
+        exited before it started one, or 202 with pending when it is still starting after
+        RESEND_START_SECONDS."""
         deadline = time.monotonic() + RESEND_START_SECONDS
         while True:
             # Whether it exited is read before the runs are, so a child that made its run and exited
             # in between is still found.
             code = child.returncode
-            new_id = self.resent_run(launch, started)
-            if new_id is not None:
+            run_id = found()
+            if run_id is not None:
                 self.scan()
-                return 200, {"run": new_id}
+                return 200, {"run": run_id}
             if code is not None:
                 return 502, {"error": "run-all.sh exited %d before it started a run: %s" % (code, self.log_tail(log_path))}
             if time.monotonic() > deadline:
                 # Only a run-all.sh that exited has failed. One still starting may yet start its run,
                 # which the page then shows; calling it failed would invite the page to pay again.
-                return 202, {"pending": True, "launch": launch}
+                return 202, pending
             time.sleep(0.05)
 
     def resend_environment(self, cwd, launch):
         """The server's environment, which holds the API keys of the run-all.sh that started it, as a
-        resent run-all.sh gets it: in cwd, showing its run in this gallery and nowhere else, and
-        recording launch in the run's meta.json so the server can find it."""
+        run-all.sh the page starts gets it: in cwd, showing its run in this gallery and nowhere else,
+        and, given a launch id, recording it in the new run's meta.json so the server can find it. A
+        frame's retry starts no new run, so it gets none, not even one the server inherited."""
         env = {name: value for name, value in os.environ.items() if name not in RESEND_DROPPED_ENV}
         # Bash keeps an inherited PWD that names its working folder, so the new run records the
         # folder spelled as the run it resends did, symlinks and all, and lands in the same project.
         env.update(PWD=cwd, IMAGE_DISPLAY="gallery", IMAGE_GALLERY_DIR=str(self.root),
-                   DISPLAY_IMAGE_TARGET="/dev/null", IMAGE_GALLERY_NO_OPEN="1", IMAGE_GALLERY_LAUNCH_ID=launch)
+                   DISPLAY_IMAGE_TARGET="/dev/null", IMAGE_GALLERY_NO_OPEN="1")
+        if launch is None:
+            env.pop("IMAGE_GALLERY_LAUNCH_ID", None)
+        else:
+            env["IMAGE_GALLERY_LAUNCH_ID"] = launch
         return env
 
     def resend_log(self):
@@ -980,6 +1242,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if segments == ["delete"]:
             self.delete()
             return
+        if segments[0] == "delete" and len(segments) == 3:
+            self.delete_frame(segments[1], segments[2])
+            return
         if self.headers.get("Content-Length", "0") != "0" or "Transfer-Encoding" in self.headers:
             self.send_json(413, {"error": "these actions take no request body"})
             return
@@ -987,6 +1252,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reveal(segments[1:])
         elif segments[0] == "retry" and len(segments) == 2:
             self.retry(segments[1])
+        elif segments[0] == "retry" and len(segments) == 3:
+            self.send_json(*self.gallery.retry_frame(segments[1], segments[2]))
         else:
             self.send_json(404, {"error": "no such action: %s" % route})
 
@@ -1144,9 +1411,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def delete(self):
         """Deletes each run the page's JSON body names that may go, with the files the page listed for
-        it, and publishes the change. Answers which runs were deleted, with their files, and which
-        were kept and why: 200 when any run was deleted, else the status of what kept them, 404 when
-        no run named exists."""
+        it, and publishes the change, answering as answer_deletes does."""
         try:
             runs = parse_delete(self.read_body(DELETE_BODY_LIMIT, "delete"))
         except ValueError as e:
@@ -1155,6 +1420,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except BodyRefused as e:
             self.send_json(e.code, {"error": str(e)})
             return
+        self.answer_deletes([lambda namers, run_id=run_id, listed=listed: self.gallery.delete(run_id, listed, namers)
+                             for run_id, listed in runs.items()])
+
+    def delete_frame(self, run_id, provider):
+        """Deletes one frame of a run with the files the page's JSON body lists for it, and publishes
+        the change, answering as answer_deletes does."""
+        try:
+            listed = parse_delete_frame(self.read_body(DELETE_BODY_LIMIT, "delete"))
+        except ValueError as e:
+            self.send_json(400, {"error": str(e)})
+            return
+        except BodyRefused as e:
+            self.send_json(e.code, {"error": str(e)})
+            return
+        self.answer_deletes([lambda namers: self.gallery.delete_frame(run_id, provider, listed, namers)])
+
+    def answer_deletes(self, deletes):
+        """Runs each of deletes, a function of image_namers' map answering (HTTP status, outcome), holding
+        runs_lock, and publishes the change. Answers which were deleted, with their files, and which
+        were kept and why: 200 when any was deleted, else the status of what kept them, 404 when none
+        named exists. Nothing is deleted when a run in the gallery cannot be read."""
         outcomes = []
         with self.gallery.runs_lock:
             try:
@@ -1166,8 +1452,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json(500, {"error": "could not read %s: %s, so which runs share an image is unknown; "
                                               "nothing was deleted" % (e.filename, e.strerror)})
                 return
-            for run_id, listed in runs.items():
-                outcomes.append(self.gallery.delete(run_id, listed, namers))
+            for delete in deletes:
+                outcomes.append(delete(namers))
         self.gallery.scan()
         deleted = [outcome for code, outcome in outcomes if code == 200]
         kept = [outcome for code, outcome in outcomes if code != 200]
@@ -1202,6 +1488,19 @@ def parse_delete(body):
         if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
             raise ValueError("run %s's paths are %s, not a list of paths" % (json.dumps(run_id)[:80], json.dumps(paths)[:80]))
     return runs
+
+
+def parse_delete_frame(body):
+    """The paths of the files a frame's delete lists as going with it, or ValueError saying what is
+    wrong with them."""
+    try:
+        request = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as e:
+        raise ValueError("the body is not JSON: %s" % e)
+    paths = request.get("paths") if isinstance(request, dict) and sorted(request) == ["paths"] else None
+    if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+        raise ValueError("the body must be an object with paths, the files the page listed for the frame")
+    return paths
 
 
 def parse_resend(body):
@@ -1404,6 +1703,9 @@ def serve(root, version):
             # A run may have begun since the scan that found none live; look once more.
             if not gallery.scan() and gallery.clients == 0 and not gallery.resending():
                 break
+    # A frame's retry holds runs_lock from starting run-all.sh until the run is held for it, so the
+    # server stops between retries, never with one started that no server knows of.
+    gallery.runs_lock.acquire()
     # Gone before the server stops answering, and while this process still holds server.lock, so
     # the socket is never a successor's.
     os.unlink(str(root / CONTROL_SOCKET))
@@ -1464,9 +1766,11 @@ def ensure(root):
     version = plugin_version()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     health = control(root, "health")
+    # The newest version serves: a run replaces a server older than its plugin and uses one of the same
+    # version or newer, as a session the plugin was updated under but not yet restarted does.
     # Pages of a server this one replaces reconnect to its successor when it binds the same port.
     old_port, old_pages = None, 0
-    if health is not None and health["version"] != version:
+    if health is not None and version_order(health["version"]) < version_order(version):
         old_port, old_pages = health["port"], health["clients"]
         # The answer does not matter: a server another run started since says no, and one that
         # another run's shutdown is stopping can exit before it answers. Either way the old pid

@@ -463,6 +463,12 @@ body {
 .stopped-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-3); }
 .stopped-label::before { content: ""; width: 8px; height: 8px; border-radius: 1px; background: currentColor; }
 
+/* A frame's delete button, on a run that is not working. */
+.strip[data-state="working"] .frame-delete { display: none; }
+
+/* A frame whose image was deleted from the gallery: the empty plate, saying so. */
+.deleted-label { font-size: 13px; font-weight: 600; color: var(--ink-3); }
+
 /* A failed frame: the status and any error code in red, the message as text, the whole file on
    demand. */
 .frame[data-state="error"] .plate {
@@ -493,9 +499,17 @@ body {
   -webkit-user-select: text; user-select: text;
   cursor: text;
 }
-.more {
+/* The foot of a failed frame: Retry, when the server offers it, then "Full error". */
+.error-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
   margin-top: auto;
-  padding: 8px 0 0;
+  padding-top: 10px;
+}
+.more {
+  padding: 0;
   border: 0;
   background: none;
   font: inherit;
@@ -515,6 +529,8 @@ body {
 .compact .frame[data-state="error"] .plate { padding: 10px; justify-content: center; align-items: center; }
 .compact .code { margin: 0; text-align: center; }
 .compact .message, .compact .more, .compact .full-error { display: none; }
+.compact .error-foot { margin-top: 8px; padding-top: 0; }
+.compact .error-foot .retry { padding: 2px 10px; font-size: 12px; }
 
 .gone { margin: 0; font-size: 12px; color: var(--ink-3); }
 
