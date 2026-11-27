@@ -134,6 +134,10 @@ check_request_fits() {
 
 use_remembered_fallback
 check_request_fits "$MODEL"
+# xAI draws a single-image edit at the input image's shape, whatever aspect_ratio asks.
+if [[ -n "$ASPECT_RATIO" && "$MODE" == edit && ${#INPUT_IMAGES[@]} -eq 1 ]]; then
+  echo "xAI keeps the input image's shape on a single-image edit, so it ignores aspect ratio ${ASPECT_RATIO}" >&2
+fi
 echo "Calling xAI API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 

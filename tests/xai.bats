@@ -115,6 +115,16 @@ setup() {
   [[ "$sent" == "5" ]] || { echo "edit request carried '$sent' images, want 5"; return 1; }
 }
 
+@test "xai: a single-image edit says it ignores the aspect ratio, and a two-image edit takes it" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  local img="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
+  run "$XAI_SH" --mode edit --prompt "make it blue" --output "$OUT" --input-image "$img" --aspect-ratio 16:9
+  assert_output_contains "xAI keeps the input image's shape on a single-image edit, so it ignores aspect ratio 16:9"
+  run "$XAI_SH" --mode edit --prompt "combine these" --output "$OUT" --input-image "$img" --input-image "$img" --aspect-ratio 16:9
+  assert_output_not_contains "single-image edit"
+  [[ "$(jq -r '.aspect_ratio' "$PROVIDER_API_STUB_DIR/body")" == 16:9 ]] || { echo "$output"; return 1; }
+}
+
 @test "xai: --quality rejects a value the API does not know" {
   export XAI_API_KEY="$DUMMY_XAI_KEY"
   run "$XAI_SH" --mode generate --prompt "a cat" --output "$OUT" --quality high

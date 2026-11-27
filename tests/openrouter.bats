@@ -257,6 +257,22 @@ NO_ENDPOINTS_404='{"error":{"message":"No endpoints found that support the reque
   [[ ! -e "$OUT" ]] || { echo "A failed run left $OUT"; return 1; }
 }
 
+@test "openrouter: an x-ai/ model given one input image says it ignores the aspect ratio, and given two takes it" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  local input="${BATS_TEST_TMPDIR}/photo.png"
+  { printf '\211PNG\r\n\032\n'; printf 'bytes of the photo'; } > "$input"
+  stub_openrouter 404 "$NO_ENDPOINTS_404" 200 "$IMAGE_200"
+  run "$OPENROUTER_SH" --mode edit --prompt "make it blue" --input-image "$input" --output "$OUT" \
+    --model x-ai/grok-imagine-image-2.0 --aspect-ratio 16:9
+  assert_status 0
+  assert_output_contains "xAI keeps the input image's shape on a single-image edit, so it ignores aspect ratio 16:9"
+  rm -f "$OUT" "$STUB_DIR/calls"
+  run "$OPENROUTER_SH" --mode edit --prompt "combine these" --input-image "$input" --input-image "$input" --output "$OUT" \
+    --model x-ai/grok-imagine-image-2.0 --aspect-ratio 16:9
+  assert_status 0
+  assert_output_not_contains "single-image edit"
+}
+
 @test "openrouter: an edit sent on to the images endpoint carries the input image as a reference" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
   local input="${BATS_TEST_TMPDIR}/photo.png"

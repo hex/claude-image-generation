@@ -339,7 +339,7 @@ Multi-image (up to 5):
 
 The plugin always sends the `images` array form — even for a single input image — with each entry a base64 data URI: `{"type": "image_url", "url": "data:image/png;base64,..."}`.
 
-**Important quirk**: For single-image edits, the output aspect ratio matches the input image's ratio. You cannot override `aspect_ratio` on single-image edits. Multi-image edits allow override (defaults to first image's ratio).
+**Important quirk**: For single-image edits, the output aspect ratio matches the input image's ratio. You cannot override `aspect_ratio` on single-image edits. Multi-image edits allow override (defaults to first image's ratio). Given a ratio and one input image, `xai.sh` and `openrouter.sh` (for an `x-ai/` model) print a line that says xAI ignores it.
 
 ### Optional Parameters
 | Parameter | Values | Notes |

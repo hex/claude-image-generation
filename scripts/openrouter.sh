@@ -167,6 +167,10 @@ if [[ "$MODEL" == x-ai/* && "$SIZE_TIER" == 4K ]]; then
   SIZE_TIER=2K
   echo "xAI draws at most 2K; drawing 2K for the 4K size tier" >&2
 fi
+# xAI draws an edit of a single image at that image's shape, whatever aspect_ratio asks.
+if [[ "$MODEL" == x-ai/* && -n "$ASPECT_RATIO" && ${#INPUT_IMAGES[@]} -eq 1 ]]; then
+  echo "xAI keeps the input image's shape on a single-image edit, so it ignores aspect ratio ${ASPECT_RATIO}" >&2
+fi
 check_request_fits "$MODEL"
 # The ratio and tier each body carries, under the names CHAT_BODY and IMAGES_BODY give them.
 SHAPE=$(jq -n --arg ratio "$ASPECT_RATIO" --arg size "$SIZE_TIER" \
