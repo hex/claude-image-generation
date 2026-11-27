@@ -1321,11 +1321,11 @@ retry_frame() {
     [[ -n "$(ls "$IMAGE_GALLERY_DIR/resend-logs" 2>/dev/null)" ]] && break
     sleep 0.1
   done
-  [[ "$(retry_frame "$a" gemini)" == \
-    "{\"error\": \"a run saving to $out/hero-<provider>.png is already starting; try again in a second\"} 409" ]]
+  # The server holds the run for the run-all it started before that run-all holds it itself.
+  [[ "$(retry_frame "$a" gemini)" == "{\"error\": \"run $a is still generating\"} 409" ]]
   # Nor can the run be deleted before its run-all holds it.
   [[ "$(delete_runs "{\"runs\": {\"$a\": []}}")" == \
-    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is starting a retry\"}], \"error\": \"run $a is starting a retry\"} 409" ]]
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is still generating\"}], \"error\": \"run $a is still generating\"} 409" ]]
   touch "$MOCK_DIR/go"
   wait "$first"
   [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
@@ -1354,6 +1354,40 @@ retry_frame() {
   [[ "$(retry_frame "$a" gemini)" == "{\"run\": \"$a\"} 200" ]]
   wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
   [[ -z "$(ls -A "$active")" ]] || { ls -la "$active"; return 1; }
+}
+
+@test "a frame's Retry still starting holds its run when another server replaces the one that started it, so the provider is paid once" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  serve_other_version
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds run-all.sh back until the test lets it go, or gives
+  # up once the test's folder is gone, so the server is replaced before run-all holds the run itself.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  for i in $(seq 1 50); do
+    [[ -n "$(ls "$IMAGE_GALLERY_DIR/resend-logs" 2>/dev/null)" ]] && break
+    sleep 0.1
+  done
+  # A run of this plugin's version replaces the server that started the retry, and with it what that
+  # server remembered of it.
+  start_gallery
+  [[ "$(server_field version)" == "$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")" ]]
+  [[ "$(retry_frame "$a" gemini)" == "{\"error\": \"run $a is still generating\"} 409" ]]
+  [[ "$(delete_runs "{\"runs\": {\"$a\": []}}")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is still generating\"}], \"error\": \"run $a is still generating\"} 409" ]]
+  touch "$MOCK_DIR/go"
+  # The first click's server stopped before it could answer.
+  wait "$first" || true
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
 }
 
 @test "Delete run removes the image a frame's Retry saved, which the run's records name" {

@@ -253,6 +253,19 @@ def forget_unchecked_holders():
             del confirmed_holders[key]
 
 
+def hold_run(run_dir, pid):
+    """Writes the token that run-all.sh, running as pid, writes for itself once it continues the run
+    (gallery_resume_run, as owner run-all), so the run is held from the moment the server starts it. Any
+    server reads it, as a server that replaces this one must: that one never learns what this one
+    started. Writes nothing for a pid that has already ended."""
+    started = process_started(pid)
+    if started is None:
+        return
+    active = run_dir / "active"
+    active.mkdir(mode=0o700, exist_ok=True)
+    write_private(active / ("run-all.%d" % pid), started + "\n")
+
+
 def run_is_held(run_dir):
     """True while any process holding a token on the run is still alive. A token is named
     <name>.<pid> and holds its process's start time; a dot name is one still being written."""
@@ -766,7 +779,8 @@ class Gallery:
         # too; an offer a killed run-all left behind does not keep its run.
         if run_is_held(run_dir):
             raise Refusal(409, "run %s is still generating" % run_id)
-        # A frame's retry claims the run's output base before its run-all.sh holds the run.
+        # A frame's retry claims the run's output base as it starts run-all.sh, which keeps the run
+        # when hold_run could not read the start time it needs to hold the run itself.
         arguments = read_meta(run_dir).get("arguments")
         if arguments is not None and self.saving_to(arguments["output_base"]):
             raise Refusal(409, "run %s is starting a retry" % run_id)
@@ -898,8 +912,8 @@ class Gallery:
         goes. retry_refusal says which frames may. Answers (HTTP status, body) as await_run does, the
         run having started once its status log grows, or with why none was started."""
         try:
-            # Held while the run is checked and run-all.sh claims its output base, so a delete either
-            # comes first, and there is no run to retry, or finds the claim and keeps the run.
+            # Held while the run is checked and run-all.sh claims its output base and holds the run, so a
+            # delete either comes first, and there is no run to retry, or finds the run held and keeps it.
             with self.runs_lock:
                 run_dir, meta = self.run_meta(run_id)
                 if name not in meta["providers"]:
@@ -914,6 +928,7 @@ class Gallery:
                 size = status_size(run_dir)
                 argv = run_all_argv(arguments, meta["prompt"], base, [name]) + ["--gallery-run", run_id]
                 child, log_path = self.launch_run_all(argv, meta["cwd"], base, [name], None)
+                hold_run(run_dir, child.pid)
         except Refusal as e:
             return e.code, {"error": str(e)}
         return self.await_run(child, log_path, lambda: run_id if status_size(run_dir) > size else None, {"pending": True})
@@ -1628,6 +1643,9 @@ def serve(root, version):
             # A run may have begun since the scan that found none live; look once more.
             if not gallery.scan() and gallery.clients == 0 and not gallery.resending():
                 break
+    # A frame's retry holds runs_lock from starting run-all.sh until the run is held for it, so the
+    # server stops between retries, never with one started that no server knows of.
+    gallery.runs_lock.acquire()
     # Gone before the server stops answering, and while this process still holds server.lock, so
     # the socket is never a successor's.
     os.unlink(str(root / CONTROL_SOCKET))
