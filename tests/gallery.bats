@@ -1315,3 +1315,15 @@ retry_frame() {
     echo "$answer"; return 1; }
   [[ -z "$(ls "$out")" && ! -e "$IMAGE_GALLERY_DIR/runs/$a" ]]
 }
+
+@test "run-all --gallery-run stops before any provider runs when the run is not in the gallery or the display is not the gallery" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local id=20261125T100000Z-00000000a1
+  run bash "${SCRIPTS}/run-all.sh" --mode generate --prompt "a kettle" --output-base "$OUT_BASE" --providers gemini --gallery-run "$id"
+  assert_status 1
+  [[ "$output" == "image gallery: there is no run $id in $IMAGE_GALLERY_DIR/runs to continue" ]] || { echo "$output"; return 1; }
+  IMAGE_DISPLAY=none run bash "${SCRIPTS}/run-all.sh" --mode generate --prompt "a kettle" --output-base "$OUT_BASE" --providers gemini --gallery-run "$id"
+  assert_status 1
+  [[ "$output" == "Error: --gallery-run needs the gallery display, and this run's is none" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$MOCK_DIR/calls" && ! -e "${OUT_BASE}-gemini.png" ]]
+}
