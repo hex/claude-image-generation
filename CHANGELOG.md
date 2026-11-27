@@ -5,6 +5,11 @@ This file lists every notable change to claude-image-generation. The format foll
 versioning in `YYYY.M.PATCH` format. [GitHub releases](https://github.com/hex/claude-image-generation/releases)
 cover the versions up to 2026.9.1.
 
+## Unreleased
+
+### Added
+- Retrying one failed frame from the gallery: once a run that `run-all.sh` started has ended, each failed frame has a **Retry** button under its error. It runs that provider again in the same run, with the run's own prompt and arguments, and saves to the file the run first meant to, `<output base>-<provider>.png`, readable by you only. The frame shows the retry as it runs and then its image or new error. The server refuses, and starts nothing, when that file exists, while the run is still working or stopped with a provider at work, and on a second click while the first retry starts. The server keeps a run while a retry starts in it, and **Delete run** deletes the retried image with the run. `run-all.sh` gains `--gallery-run <id>` for this, which continues a gallery run that has ended and makes no **Retry failed** offer. The server starts it as it starts a resend, so anyone with the page's address could already spend this money through **Resend**.
+
 ## 2026.11.2 - 2026-11-26
 
 ### Added

@@ -370,6 +370,21 @@ wait
 - When the resent run has not started within 15 seconds, the editor closes and a note under the run's line reads `The resend started and will appear in the gallery.` for 10 seconds; the run shows once it starts
 - Step 4 starts nothing: the editor stays open and shows `run <id>'s image folder <path> is gone`
 
+**Retry a failed frame:**
+
+1. Unset one provider's API key in the shell that starts Claude Code (`unset XAI_API_KEY`), start it, and run `/generate-image a paper boat`. Close the gallery page while it runs, so the run makes no **Retry failed** offer
+2. Open the page again and check the run's xAI frame: `xai exited 1 before reporting a result; its error output says why` with a **Retry** button under it. Tab to the button: a screen reader reads `Retry xAI, button`
+3. Create the file the frame would save, `touch <output base>-xai.png`, and click **Retry**
+4. Run `rm <output base>-xai.png`. Give the gallery server the key: stop it (`pkill -f 'gallery-server.py serve'`), start Claude Code with the key set, and run `/generate-image a paper cup`, which starts the server again. Then click **Retry** on the first run's xAI frame twice in quick succession
+5. Click the run's trash button
+
+**Expected:**
+
+- Step 3 starts nothing: a note under the frame reads `<output base>-xai.png already exists, and nothing is overwritten`
+- After step 4 the frame shows Generating, then the image, in the same run, and `<output base>-xai.png` exists with mode `600`. The second click either finds no button or shows a note under the frame that the run is still generating or that a run is already starting, and `resend-logs/` gains one log, not two
+- Step 5's dialog lists `<output base>-xai.png` with the run's other images, and **Delete** deletes it
+- A run whose process died while a provider was generating, a run still working, and a run from a single provider script show no **Retry** on their failed frames
+
 **Theme switch:**
 
 1. Click **Light**, then **Dark**, then **Auto** at the bottom of the rail, and switch the system between light and dark mode after each
