@@ -14,10 +14,13 @@ gemini_aspect_ratios() {
 }
 
 # xai_aspect_ratios <model> — prints the ratios an xAI image model draws, space-separated, or
-# nothing for a model this table does not know.
+# nothing for a model this table does not know. grok-imagine-image-2.0 adds 21:9 and 5:2 to the
+# standard model's, which grok-imagine-image-2026-03-02 is a version of.
 xai_aspect_ratios() {
+  local standard="1:1 16:9 9:16 4:3 3:4 3:2 2:3 2:1 1:2 19.5:9 9:19.5 20:9 9:20"
   case "$1" in
-    grok-imagine-image*) echo "1:1 16:9 9:16 4:3 3:4 3:2 2:3 2:1 1:2 19.5:9 9:19.5 20:9 9:20 21:9 5:2 auto" ;;
+    grok-imagine-image-2.0*) echo "$standard 21:9 5:2 auto" ;;
+    grok-imagine-image|grok-imagine-image-20[0-9][0-9]-*) echo "$standard auto" ;;
   esac
 }
 

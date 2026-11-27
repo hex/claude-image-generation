@@ -344,7 +344,7 @@ The plugin always sends the `images` array form — even for a single input imag
 ### Optional Parameters
 | Parameter | Values | Notes |
 |-----------|--------|-------|
-| `aspect_ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` | `auto` lets model pick; `21:9` and `5:2` added 2026-08-28 |
+| `aspect_ratio` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`, `2:1`, `1:2`, `19.5:9`, `9:19.5`, `20:9`, `9:20`, `21:9`, `5:2`, `auto` | `auto` lets model pick; `21:9` and `5:2` added 2026-08-28 with `grok-imagine-image-2.0`, so `xai.sh` refuses them for `grok-imagine-image`, the fallback, before the request |
 | `resolution` | `1k`, `2k` | **LOWERCASE required** — opposite of Gemini! Same price at both resolutions. `xai.sh` sends `2k` for a `4K` `--size-tier`, and prints a line that says so. |
 | `quality` | `low`, `medium`, `auto` | `grok-imagine-image-2.0` only. Omitted means `auto`: `low` for generation, `medium` for edits |
 | `n` | 1-10 | Images per request |

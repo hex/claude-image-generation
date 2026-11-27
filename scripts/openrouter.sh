@@ -145,23 +145,27 @@ readonly IMAGES_BODY='{"model": $model, "prompt": $prompt, "response_format": "b
   + (if length > 0 then {"input_references": .} else {} end)
   + ($shape | with_entries(.key |= if . == "size" then "resolution" else . end))'
 
+# model_aspect_ratios <model> — prints the ratios <model> draws, for the vendors whose own scripts
+# know their models, or nothing for any other model.
+model_aspect_ratios() {
+  case "$1" in
+    google/*) gemini_aspect_ratios "${1#google/}" ;;
+    x-ai/*) xai_aspect_ratios "${1#x-ai/}" ;;
+  esac
+}
+
+# check_request_fits <model> — exits 1 naming the ratios <model> draws when it does not draw the
+# asked one. Run for the model the request goes to first, and for a fallback before it is sent.
+check_request_fits() {
+  [[ -z "$ASPECT_RATIO" ]] || check_aspect_ratio "$1" "$ASPECT_RATIO" "$(model_aspect_ratios "$1")"
+}
+
 use_remembered_fallback
-# The ratio is checked against the model the request goes to first, for the vendors whose own
-# scripts know their models; the default's fallback, google/gemini-3.1-flash-image, draws every
-# ratio the default does.
-case "$MODEL" in
-  google/*) MODEL_RATIOS=$(gemini_aspect_ratios "${MODEL#google/}") ;;
-  x-ai/*)
-    MODEL_RATIOS=$(xai_aspect_ratios "${MODEL#x-ai/}")
-    if [[ "$SIZE_TIER" == 4K ]]; then
-      SIZE_TIER=2K
-      echo "xAI draws at most 2K; drawing 2K for the 4K size tier" >&2
-    fi ;;
-  *) MODEL_RATIOS="" ;;
-esac
-if [[ -n "$ASPECT_RATIO" ]]; then
-  check_aspect_ratio "$MODEL" "$ASPECT_RATIO" "$MODEL_RATIOS"
+if [[ "$MODEL" == x-ai/* && "$SIZE_TIER" == 4K ]]; then
+  SIZE_TIER=2K
+  echo "xAI draws at most 2K; drawing 2K for the 4K size tier" >&2
 fi
+check_request_fits "$MODEL"
 # The ratio and tier each body carries, under the names CHAT_BODY and IMAGES_BODY give them.
 SHAPE=$(jq -n --arg ratio "$ASPECT_RATIO" --arg size "$SIZE_TIER" \
   '(if $ratio == "" then {} else {"aspect_ratio": $ratio} end) + (if $size == "" then {} else {"size": $size} end)')
@@ -204,7 +208,7 @@ images_endpoint_answer() {
 }
 
 ENDPOINT="chat/completions"
-request_with_model_fallback send_chat_request
+request_with_model_fallback send_chat_request check_request_fits
 if images_endpoint_answer "$RESPONSE"; then
   echo "${MODEL} is not served on chat completions (HTTP 404); sending the request to OpenRouter's images endpoint" >&2
   ENDPOINT="images"

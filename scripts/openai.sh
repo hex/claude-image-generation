@@ -157,16 +157,28 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
-use_remembered_fallback
-# A ratio or tier becomes a size from the table for the model the request goes to first. The
-# fallback, gpt-image-2.5-sunburst, takes the same sizes as the default.
+# A ratio or tier becomes a size from the table, unless --size names one.
+SIZE_FROM_TABLE=""
 if [[ -z "$SIZE" && ( -n "$ASPECT_RATIO" || -n "$SIZE_TIER" ) ]]; then
-  case "$MODEL" in
+  SIZE_FROM_TABLE=1
+fi
+
+# check_request_fits <model> — exits 1 when the size is to come from the table and <model> takes
+# none of its sizes, or not the asked ratio's. Run for the model the request goes to first, and
+# for a fallback before it is sent.
+check_request_fits() {
+  [[ -n "$SIZE_FROM_TABLE" ]] || return 0
+  case "$1" in
     gpt-image-1*|chatgpt-image-*|dall-e-*)
-      echo "Error: ${MODEL} draws only 1024x1024, 1536x1024 or 1024x1536, so it takes no aspect ratio or size tier; pass --size, or a gpt-image-2 model" >&2
+      echo "Error: ${1} draws only 1024x1024, 1536x1024 or 1024x1536, so it takes no aspect ratio or size tier; pass --size, or a gpt-image-2 model" >&2
       exit 1 ;;
   esac
-  check_aspect_ratio "$MODEL" "${ASPECT_RATIO:-1:1}" "$(openai_aspect_ratios)"
+  check_aspect_ratio "$1" "${ASPECT_RATIO:-1:1}" "$(openai_aspect_ratios)"
+}
+
+use_remembered_fallback
+check_request_fits "$MODEL"
+if [[ -n "$SIZE_FROM_TABLE" ]]; then
   SIZE=$(openai_size "${ASPECT_RATIO:-1:1}" "${SIZE_TIER:-1K}")
   echo "Drawing ${SIZE} for ${ASPECT_RATIO:-1:1} at ${SIZE_TIER:-1K}" >&2
 fi
@@ -243,7 +255,7 @@ send_request() {
   fi
 }
 
-request_with_model_fallback send_request
+request_with_model_fallback send_request check_request_fits
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')

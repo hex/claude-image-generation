@@ -126,10 +126,14 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
+# check_request_fits <model> — exits 1 naming the ratios <model> draws when it does not draw the
+# asked one. Run for the model the request goes to first, and for a fallback before it is sent.
+check_request_fits() {
+  [[ -z "$ASPECT_RATIO" ]] || check_aspect_ratio "$1" "$ASPECT_RATIO" "$(xai_aspect_ratios "$1")"
+}
+
 use_remembered_fallback
-if [[ -n "$ASPECT_RATIO" ]]; then
-  check_aspect_ratio "$MODEL" "$ASPECT_RATIO" "$(xai_aspect_ratios "$MODEL")"
-fi
+check_request_fits "$MODEL"
 echo "Calling xAI API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 
@@ -185,7 +189,7 @@ send_request() {
       --data-binary @-
 }
 
-request_with_model_fallback send_request
+request_with_model_fallback send_request check_request_fits
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
