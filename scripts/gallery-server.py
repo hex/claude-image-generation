@@ -83,6 +83,8 @@ PAGE_FILES = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
 }
+# The line of app.js that the server serving it rewrites to name its own version.
+PAGE_VERSION_LINE = b"const PAGE_VERSION = '';\n"
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     "X-Content-Type-Options": "nosniff",
@@ -100,6 +102,13 @@ def version_order(version):
     comes after 2026.11.2. Any other string comes before every calendar version and ties with any other such string."""
     parts = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", version)
     return tuple(int(part) for part in parts.groups()) if parts else ()
+
+
+def stamp_version(script, version):
+    """app.js with its PAGE_VERSION line naming version, the version of the server that serves it."""
+    if script.count(PAGE_VERSION_LINE) != 1:
+        raise ValueError("app.js must hold the line %r exactly once" % PAGE_VERSION_LINE.decode())
+    return script.replace(PAGE_VERSION_LINE, b"const PAGE_VERSION = %s;\n" % json.dumps(version).encode())
 
 
 def write_private(path, text):
@@ -627,7 +636,7 @@ class Gallery:
         self.instance = secrets.token_hex(8)
         self.origin = "http://127.0.0.1:%d" % port
         self.changed = threading.Condition()
-        self.snapshot = json.dumps({"instance": self.instance, "runs": []})
+        self.snapshot = json.dumps({"instance": self.instance, "version": version, "runs": []})
         self.clients = 0
         self.stop = threading.Event()
         self.last_open = 0.0
@@ -644,6 +653,8 @@ class Gallery:
         self.page = {}
         for route, (name, ctype) in PAGE_FILES.items():
             self.page[route] = ((PAGE_DIR / name).read_bytes(), ctype)
+        script, ctype = self.page["/app.js"]
+        self.page["/app.js"] = (stamp_version(script, version), ctype)
 
     def scan(self):
         """Reads every run whose files changed or whose holder went away, newest first, prunes
@@ -680,7 +691,7 @@ class Gallery:
             del self.read_runs[name]
         add_usual_times(runs)
         mark_files(runs)
-        snapshot = json.dumps({"instance": self.instance, "runs": runs})
+        snapshot = json.dumps({"instance": self.instance, "version": self.version, "runs": runs})
         if snapshot != self.snapshot:
             with self.changed:
                 self.snapshot = snapshot

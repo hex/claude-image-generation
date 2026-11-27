@@ -13,6 +13,7 @@ cover the versions up to 2026.9.1.
 
 ### Changed
 - The newest gallery server wins. A run replaces a server older than its own plugin and uses one of the same version or newer, comparing `YYYY.M.PATCH` part by part as numbers; a version not of that form counts as older. A run used to replace a server of any other version, so a session not yet restarted after an update put its older server back. A session still running 2026.11.2 does that still, because the replacing code ships in 2026.11.2: each run it starts while a newer server runs swaps in its 2026.11.2 server, until a run from an updated session swaps the newer one back. The 2026.11.2 server cannot read a run with a deleted frame, so while it runs it flags that run's status log as unreadable, serves none of its images and refuses every delete. Restart sessions after updating.
+- An open gallery page reloads itself when the server it reconnects to names a version other than the one that served the page, so it never draws a newer server's snapshots with an older script. It reloads once per version; a page still out of step after that says so on its top line. A server that names no version, 2026.11.2 or older, sends snapshots the page can read, so the page stays. Tabs opened from a 2026.11.2 server have no such check: after updating, reload them by hand, or a deleted frame makes them stop updating.
 
 ## 2026.11.2 - 2026-11-26
 

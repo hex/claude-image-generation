@@ -368,6 +368,13 @@ serve_other_version() {
     echo "serving: $(server_field pid) $(server_field version), expected a new pid and $version"; return 1; }
 }
 
+@test "the page's script and each snapshot carry the version of the server that serves them, so a page can tell it outlived its server" {
+  serve_other_version
+  [[ "$(gallery_curl /app.js | grep -c '^const PAGE_VERSION = "0.0.0-other";$')" == 1 ]] || {
+    gallery_curl /app.js | grep -n PAGE_VERSION; return 1; }
+  [[ "$(snapshot | jq -r .version)" == 0.0.0-other ]] || { snapshot; return 1; }
+}
+
 @test "runs started together each print the page's address when the browser never finishes opening" {
   # The first run's answer comes when the server gives up on its launch after ten seconds. The
   # second run's own launch then hangs past its fifteen-second wait, and the server answers it

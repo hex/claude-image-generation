@@ -5,6 +5,10 @@
 // the DOM, never as HTML. Strips are kept by run id and frames by provider name, so a
 // snapshot rebuilds only the parts that changed and an image already shown never reloads.
 
+// The version of the server that served this script, which that server writes in here.
+const PAGE_VERSION = '';
+// The server version this tab last reloaded to catch up with, kept across the reload.
+const RELOAD_KEY = 'gallery-reloaded-for';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 // Phosphor regular icons, the path data read out of @phosphor-icons/core 2.1.1 (assets/regular).
 const ICONS = {
@@ -1071,10 +1075,50 @@ setInterval(() => {
   sizeStrips();
 }, 1000);
 
+// A server of another version, which an open tab reconnects to after a plugin update, can send
+// snapshots this script does not understand, so the tab reloads to get that server's script. It
+// reloads once per version: a tab that comes back still out of step says so instead of reloading
+// again. A server that names no version predates this check, and its snapshots are older than this
+// script, which reads them. True when the snapshot must not be drawn.
+function outlivedServer(snapshot) {
+  if (snapshot.version === undefined) return false;
+  if (snapshot.version === PAGE_VERSION) {
+    forgetReload();
+    return false;
+  }
+  if (reloadOnce(snapshot.version)) location.reload();
+  else connection.textContent = 'The gallery server is now version ' + snapshot.version + ': reload the page';
+  return true;
+}
+
+// True, and recorded, when this tab has not yet reloaded for version. A browser that blocks site
+// data throws on any use of sessionStorage; such a tab never reloads on its own.
+function reloadOnce(version) {
+  try {
+    if (sessionStorage.getItem(RELOAD_KEY) === version) return false;
+    sessionStorage.setItem(RELOAD_KEY, version);
+    return true;
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+    return false;
+  }
+}
+
+function forgetReload() {
+  try {
+    sessionStorage.removeItem(RELOAD_KEY);
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+  }
+}
+
 function connect() {
   const source = new EventSource('events');
   source.onopen = () => { connection.textContent = 'Live'; };
-  source.onmessage = event => render(JSON.parse(event.data));
+  source.onmessage = event => {
+    const snapshot = JSON.parse(event.data);
+    if (!outlivedServer(snapshot)) render(snapshot);
+  };
   source.onerror = () => {
     if (source.readyState === EventSource.CLOSED) {
       connection.textContent = 'Turned away: open the address the image tool printed';
