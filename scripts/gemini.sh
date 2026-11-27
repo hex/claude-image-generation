@@ -28,7 +28,8 @@ Options:
                       Standard: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
                       Extreme (Nano Banana 2 models only): 1:4, 4:1, 1:8, 8:1
   --image-size        Output resolution: 512, 1K, 2K, 4K (UPPERCASE required)
-                      512 requires gemini-3.1-flash-image (Pro supports 1K/2K/4K)
+                      512 requires gemini-3.1-flash-image (Pro supports 1K/2K/4K);
+                      gemini-2.5-flash-image takes none and is refused one before the request
   --size-tier         Size tier run-all.sh hands every provider: 1K, 2K or 4K; sent as
                       --image-size, which wins when both are given
   --thinking-level    Thinking level: minimal, High (default: minimal)
@@ -178,9 +179,11 @@ build_request_body() {
 REQUEST_BODY=$(build_request_body)
 
 # check_request_fits <model> — exits 1 naming the ratios <model> draws when it does not draw the
-# asked one. Run for the model the request goes to first, and for a fallback before it is sent.
+# asked one, or when it takes no image size and one is asked. Run for the model the request goes to
+# first, and for a fallback before it is sent.
 check_request_fits() {
   [[ -z "$ASPECT_RATIO" ]] || check_aspect_ratio "$1" "$ASPECT_RATIO" "$(gemini_aspect_ratios "$1")"
+  [[ -z "$IMAGE_SIZE" ]] || check_gemini_image_size "$1" "$IMAGE_SIZE"
 }
 
 use_remembered_fallback

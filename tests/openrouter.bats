@@ -311,6 +311,16 @@ CHAT_IMAGE_200='{"choices":[{"message":{"images":[{"image_url":{"url":"data:imag
   assert_output_contains "xAI draws at most 2K; drawing 2K for the 4K size tier"
 }
 
+@test "openrouter: a size tier for a google/ model that takes none is refused before any request" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
+  stub_openrouter 200 "$CHAT_IMAGE_200"
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT" --size-tier 2K --model google/gemini-2.5-flash-image
+  assert_status 1
+  [[ "$output" == "Error: google/gemini-2.5-flash-image takes no image size (it draws 1K only), got 2K" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$STUB_DIR/url" ]] || { echo "a request went to $(cat "$STUB_DIR/url")"; return 1; }
+}
+
 @test "openrouter: a ratio a google/ model does not draw is refused before any request; another vendor's model gets it unchecked" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
   export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"

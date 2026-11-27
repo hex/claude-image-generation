@@ -155,9 +155,11 @@ model_aspect_ratios() {
 }
 
 # check_request_fits <model> — exits 1 naming the ratios <model> draws when it does not draw the
-# asked one. Run for the model the request goes to first, and for a fallback before it is sent.
+# asked one, or when it is a google/ model that takes no image size and a tier is asked. Run for the
+# model the request goes to first, and for a fallback before it is sent.
 check_request_fits() {
   [[ -z "$ASPECT_RATIO" ]] || check_aspect_ratio "$1" "$ASPECT_RATIO" "$(model_aspect_ratios "$1")"
+  [[ -z "$SIZE_TIER" ]] || check_gemini_image_size "$1" "$SIZE_TIER"
 }
 
 use_remembered_fallback

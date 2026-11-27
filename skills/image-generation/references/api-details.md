@@ -100,7 +100,7 @@ Pricing: 5,000 grounding prompts/month free across Gemini 3 models, then $14 per
 - `gemini-3.1-flash-image`: "Nano Banana 2", GA 2026-05-28. 4K output, 14 aspect ratios (incl. extreme 1:4, 4:1, 1:8, 8:1), thinking, search grounding. Also supports `512` resolution.
 - `gemini-3.1-flash-lite-image`: "Nano Banana 2 Lite". Cheapest tier, about $0.034 per 1K image.
 - `gemini-3-pro-image-preview` and `gemini-3.1-flash-image-preview`: the pre-GA IDs. Still answer as of 2026-09-02 but passed their earliest shutdown date (2026-06-25) and are gone from the model tables.
-- `gemini-2.5-flash-image`: Previous generation, 1K only. **Earliest shutdown 2027-03-15**. Google names `gemini-3.1-flash-lite-image` as its replacement.
+- `gemini-2.5-flash-image`: Previous generation, 1K only, with no `imageSize`: `gemini.sh` and `openrouter.sh` refuse a size for it before the request. **Earliest shutdown 2027-03-15**. Google names `gemini-3.1-flash-lite-image` as its replacement.
 - `gemini-nano-banana-2.1`: "Nano Banana 2.1", released 2026-10-06, Flash tier, Google's named replacement for `gemini-3.1-flash-image`. The plugin's fallback when the default is unavailable to the key.
 - An unknown or retired model answers HTTP 404 with `{"error": {"code": 404, "message": "models/<id> is not found for API version v1beta, or is not supported for generateContent. ...", "status": "NOT_FOUND"}}` (captured 2026-11-05).
 

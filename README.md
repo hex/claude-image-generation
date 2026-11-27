@@ -256,7 +256,7 @@ The generate tool's `aspectRatio` and `size`, and `run-all.sh`'s `--aspect-ratio
 
 | Provider | Aspect ratio becomes | Size tier becomes |
 |----------|----------------------|-------------------|
-| gemini | `imageConfig.aspectRatio` | `imageConfig.imageSize` (`1K`, `2K`, `4K`) |
+| gemini | `imageConfig.aspectRatio` | `imageConfig.imageSize` (`1K`, `2K`, `4K`); `gemini-2.5-flash-image` takes none, so the script refuses a tier for it before the request |
 | openai | one `size` in `WxH` from the table below | the same `size` |
 | xai | `aspect_ratio` | `resolution` `1k` or `2k`; `4K` draws at `2k`, and the script prints `xAI draws at most 2k; drawing 2k for the 4K size tier` |
 | openrouter | `image_config.aspect_ratio` on chat completions, `aspect_ratio` on the images endpoint | `image_config.image_size` on chat completions, `resolution` on the images endpoint; `x-ai/` models draw `2K` for `4K` and say so |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: The aspect ratios each Gemini, xAI and OpenAI image model draws, the size OpenAI is asked
-# ABOUTME: for at each, and the check that refuses any other ratio before a request is paid for.
+# ABOUTME: for at each, and the checks that refuse another ratio, or a size, before a request is paid for.
 
 # gemini_aspect_ratios <model> — prints the ratios a Gemini image model draws, space-separated, or
 # nothing for a model this table does not know. The Nano Banana 2 models (3.1 Flash, 3.1 Flash Lite
@@ -10,6 +10,16 @@ gemini_aspect_ratios() {
   case "$1" in
     gemini-3.1-flash-image*|gemini-3.1-flash-lite-image*|gemini-nano-banana-2*) echo "$common 1:4 4:1 1:8 8:1" ;;
     gemini-3-pro-image*|gemini-2.5-flash-image*) echo "$common" ;;
+  esac
+}
+
+# check_gemini_image_size <model> <size> — exits 1 when <model> takes no imageSize at all:
+# gemini-2.5-flash-image draws 1K only. Every other model is sent the size as asked.
+check_gemini_image_size() {
+  case "$1" in
+    gemini-2.5-flash-image*|google/gemini-2.5-flash-image*)
+      echo "Error: ${1} takes no image size (it draws 1K only), got ${2}" >&2
+      exit 1 ;;
   esac
 }
 
