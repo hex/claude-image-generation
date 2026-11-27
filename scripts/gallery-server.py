@@ -539,6 +539,40 @@ def image_type(head):
 # ── Server ────────────────────────────────────────────────────────────
 
 
+class Refusal(Exception):
+    """Why the gallery does not do what the page asked: the HTTP status, and the error the page shows."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def check_places(run_id, meta):
+    """Raises Refusal naming what is gone when the working folder, the image folder or an input image
+    of a run that recorded its arguments is no longer there, since run-all.sh cannot run again
+    without them."""
+    arguments = meta["arguments"]
+    for path, what in ((meta["cwd"], "working folder"), (os.path.dirname(arguments["output_base"]), "image folder")):
+        if not os.path.isdir(path):
+            raise Refusal(409, "run %s's %s %s is gone" % (run_id, what, path))
+    for path in arguments["input_images"]:
+        if not os.path.isfile(path):
+            raise Refusal(409, "run %s's input image %s is gone" % (run_id, path))
+
+
+def run_all_argv(arguments, prompt, base, providers):
+    """The command that runs run-all.sh with a run's recorded arguments, prompt and providers, saving
+    under base."""
+    argv = ["bash", str(SCRIPT.parent / "run-all.sh"), "--mode", arguments["mode"], "--prompt", prompt,
+            "--output-base", base, "--providers", ",".join(providers)]
+    for path in arguments["input_images"]:
+        argv += ["--input-image", path]
+    for name in providers:
+        if arguments["extras"][name]:
+            argv += ["--%s-extra" % name, arguments["extras"][name]]
+    return argv
+
+
 class Gallery:
     """What the request threads share with the scanning loop."""
 
@@ -718,50 +752,51 @@ class Gallery:
             users.pop(run_id, None)
         return 200, {"id": run_id, "removed": removed, "missing": missing, "kept_files": kept}
 
+    def run_meta(self, run_id):
+        """The directory and meta.json of a run in the gallery, or Refusal saying why there is none."""
+        run_dir = self.runs_dir / run_id
+        if not RUN_ID.match(run_id) or not run_dir.is_dir():
+            raise Refusal(404, "no run %s" % run_id)
+        try:
+            return run_dir, read_meta(run_dir)
+        except RunRejected as e:
+            raise Refusal(409, "run %s cannot be read: %s" % (run_id, e))
+        except OSError as e:
+            raise Refusal(409, "run %s cannot be read: %s: %s" % (run_id, e.filename, e.strerror))
+
     def resend(self, run_id, prompt, providers):
         """Starts run-all.sh again for a run that recorded its arguments, with prompt and providers in
         place of its own, saving in the folder of the run's output base under a fresh image-<stamp>
-        base. Answers (HTTP status, body) once the new run's directory exists, with 202 and the launch
-        id when run-all.sh is still starting after RESEND_START_SECONDS, or with why none was
-        started."""
-        run_dir = self.runs_dir / run_id
-        if not RUN_ID.match(run_id) or not run_dir.is_dir():
-            return 404, {"error": "no run %s" % run_id}
+        base. Answers (HTTP status, body) as await_run does, or with why none was started."""
         try:
-            meta = read_meta(run_dir)
-        except RunRejected as e:
-            return 409, {"error": "run %s cannot be read: %s" % (run_id, e)}
-        except OSError as e:
-            return 409, {"error": "run %s cannot be read: %s: %s" % (run_id, e.filename, e.strerror)}
-        arguments = meta.get("arguments")
-        if arguments is None:
-            return 409, {"error": "run %s did not record the arguments it was started with, so it cannot be resent" % run_id}
-        folder = os.path.dirname(arguments["output_base"])
-        cwd = meta["cwd"]
-        for path, what in ((cwd, "working folder"), (folder, "image folder")):
-            if not os.path.isdir(path):
-                return 409, {"error": "run %s's %s %s is gone" % (run_id, what, path)}
-        for path in arguments["input_images"]:
-            if not os.path.isfile(path):
-                return 409, {"error": "run %s's input image %s is gone" % (run_id, path)}
-        base = os.path.join(folder, "image-" + time.strftime("%Y%m%d-%H%M%S"))
-        launch = secrets.token_hex(8)
-        argv = ["bash", str(SCRIPT.parent / "run-all.sh"), "--mode", arguments["mode"], "--prompt", prompt,
-                "--output-base", base, "--providers", ",".join(providers)]
-        for path in arguments["input_images"]:
-            argv += ["--input-image", path]
-        for name in providers:
-            if arguments["extras"][name]:
-                argv += ["--%s-extra" % name, arguments["extras"][name]]
+            meta = self.run_meta(run_id)[1]
+            arguments = meta.get("arguments")
+            if arguments is None:
+                raise Refusal(409, "run %s did not record the arguments it was started with, so it cannot be resent" % run_id)
+            check_places(run_id, meta)
+            base = os.path.join(os.path.dirname(arguments["output_base"]), "image-" + time.strftime("%Y%m%d-%H%M%S"))
+            launch = secrets.token_hex(8)
+            started = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(time.time() - 1))
+            child, log_path = self.launch_run_all(run_all_argv(arguments, prompt, base, providers), meta["cwd"], base,
+                                                  providers, launch)
+        except Refusal as e:
+            return e.code, {"error": str(e)}
+        return self.await_run(child, log_path, lambda: self.resent_run(launch, started), {"pending": True, "launch": launch})
+
+    def launch_run_all(self, argv, cwd, base, providers, launch):
+        """Starts run-all.sh with argv in cwd, saving each of providers to <base>-<provider>.png, and
+        returns it with the file its output goes to. It runs as resend_environment makes it, in a
+        session of its own, its images readable by this user only, and the server reaps it. Raises
+        Refusal, starting nothing, while another run-all.sh the server started saves to base, or
+        when any of those files already exists."""
         with self.resend_lock:
             outputs = ["%s-%s.png" % (base, name) for name in providers]
             if base in self.resends:
-                return 409, {"error": "a resend saving to %s-<provider>.png is already starting; try again in a second" % base}
+                raise Refusal(409, "a resend saving to %s-<provider>.png is already starting; try again in a second" % base)
             taken = [path for path in outputs if os.path.lexists(path)]
             if taken:
-                return 409, {"error": "%s already exists, and nothing is overwritten" % taken[0]}
+                raise Refusal(409, "%s already exists, and nothing is overwritten" % taken[0])
             log_path = self.resend_log()
-            started = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(time.time() - 1))
             try:
                 # The server cannot know the umask of the run it resends, so the images are saved
                 # readable by this user only, as the gallery's own files are.
@@ -769,24 +804,31 @@ class Gallery:
                     child = subprocess.Popen(argv, cwd=cwd, env=self.resend_environment(cwd, launch), stdin=subprocess.DEVNULL,
                                              stdout=log, stderr=subprocess.STDOUT, start_new_session=True, umask=0o077)
             except OSError as e:
-                return 500, {"error": "could not start run-all.sh: %s" % e.strerror}
+                raise Refusal(500, "could not start run-all.sh: %s" % e.strerror)
             self.resends[base] = child
         threading.Thread(target=self.reap, args=(base, child), daemon=True).start()
+        return child, log_path
+
+    def await_run(self, child, log_path, found, pending):
+        """Waits for a run-all.sh launch_run_all started to start its run, which found() names once
+        it has, or None before. Answers (HTTP status, body): 200 naming the run, 502 when run-all.sh
+        exited before it started one, or 202 with pending when it is still starting after
+        RESEND_START_SECONDS."""
         deadline = time.monotonic() + RESEND_START_SECONDS
         while True:
             # Whether it exited is read before the runs are, so a child that made its run and exited
             # in between is still found.
             code = child.returncode
-            new_id = self.resent_run(launch, started)
-            if new_id is not None:
+            run_id = found()
+            if run_id is not None:
                 self.scan()
-                return 200, {"run": new_id}
+                return 200, {"run": run_id}
             if code is not None:
                 return 502, {"error": "run-all.sh exited %d before it started a run: %s" % (code, self.log_tail(log_path))}
             if time.monotonic() > deadline:
                 # Only a run-all.sh that exited has failed. One still starting may yet start its run,
                 # which the page then shows; calling it failed would invite the page to pay again.
-                return 202, {"pending": True, "launch": launch}
+                return 202, pending
             time.sleep(0.05)
 
     def resend_environment(self, cwd, launch):
