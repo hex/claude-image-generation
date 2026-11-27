@@ -30,10 +30,15 @@ Options:
   --input-image    input image path (required for edit mode, repeatable)
   --providers      comma-separated subset (default: gemini,openai,xai;
                    openrouter is available but opt-in, e.g. --providers gemini,openrouter)
+  --aspect-ratio   W:H such as 16:9, for every provider; one a provider's model does not
+                   draw fails that provider before its request
+  --size           size tier for every provider: 1K, 2K or 4K; xAI draws 2K for 4K
   --gemini-extra     extra args passed to gemini.sh     (single shell-split string)
   --openai-extra     extra args passed to openai.sh     (single shell-split string)
   --xai-extra        extra args passed to xai.sh        (single shell-split string)
   --openrouter-extra extra args passed to openrouter.sh (single shell-split string)
+                     A provider's own flag in its extra args, such as --image-size for
+                     gemini or --size for openai, wins over --aspect-ratio and --size.
 
 With pane, outside tmux the streaming pane cannot open and providers fall back to
 direct terminal display in this shell (sequential output, but functional).
@@ -46,6 +51,8 @@ PROMPT=""
 OUTPUT_BASE=""
 INPUT_IMAGES=()
 PROVIDERS="gemini,openai,xai"
+ASPECT_RATIO=""
+SIZE_TIER=""
 GEMINI_EXTRA=""
 OPENAI_EXTRA=""
 XAI_EXTRA=""
@@ -58,6 +65,8 @@ while [[ $# -gt 0 ]]; do
     --output-base) OUTPUT_BASE="$2"; shift 2 ;;
     --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --providers) PROVIDERS="$2"; shift 2 ;;
+    --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
+    --size) SIZE_TIER="$2"; shift 2 ;;
     --gemini-extra) GEMINI_EXTRA="$2"; shift 2 ;;
     --openai-extra) OPENAI_EXTRA="$2"; shift 2 ;;
     --xai-extra) XAI_EXTRA="$2"; shift 2 ;;
@@ -82,6 +91,17 @@ if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   usage
 fi
 
+ratio_pattern='^[0-9]+(\.[0-9]+)?:[0-9]+(\.[0-9]+)?$'
+if [[ -n "$ASPECT_RATIO" && ! "$ASPECT_RATIO" =~ $ratio_pattern ]]; then
+  echo "Error: --aspect-ratio must look like 16:9, got '$ASPECT_RATIO'" >&2
+  exit 1
+fi
+
+case "$SIZE_TIER" in
+  ""|1K|2K|4K) ;;
+  *) echo "Error: --size must be 1K, 2K or 4K, got '$SIZE_TIER'" >&2; exit 1 ;;
+esac
+
 IFS=',' read -ra provider_list <<< "$PROVIDERS"
 for i in "${!provider_list[@]}"; do
   provider_list[$i]="${provider_list[$i]// /}"
@@ -89,7 +109,7 @@ done
 
 # run_arguments — prints this run's arguments as the JSON object the gallery records, so its page can
 # resend the run: the mode, the output base and input images made absolute against the working
-# directory, and each provider's extra arguments.
+# directory, each provider's extra arguments, and the aspect ratio and size tier when given.
 run_arguments() {
   local path
   local -a inputs=()
@@ -100,9 +120,11 @@ run_arguments() {
   path="$OUTPUT_BASE"
   [[ "$path" == /* ]] || path="$PWD/$path"
   jq -n --arg mode "$MODE" --arg base "$path" --arg gemini "$GEMINI_EXTRA" --arg openai "$OPENAI_EXTRA" \
-    --arg xai "$XAI_EXTRA" --arg openrouter "$OPENROUTER_EXTRA" \
+    --arg xai "$XAI_EXTRA" --arg openrouter "$OPENROUTER_EXTRA" --arg ratio "$ASPECT_RATIO" --arg size "$SIZE_TIER" \
     '{mode: $mode, output_base: $base, input_images: $ARGS.positional,
-      extras: {gemini: $gemini, openai: $openai, xai: $xai, openrouter: $openrouter}}' \
+      extras: {gemini: $gemini, openai: $openai, xai: $xai, openrouter: $openrouter}}
+     + (if $ratio == "" then {} else {aspect_ratio: $ratio} end)
+     + (if $size == "" then {} else {size: $size} end)' \
     --args ${inputs[@]+"${inputs[@]}"}
 }
 
@@ -164,6 +186,9 @@ spawn_named() {
       args+=(--input-image "$img")
     done
   fi
+  # Ahead of the extra arguments, so a provider's own flag given there wins.
+  [[ -n "$ASPECT_RATIO" ]] && args+=(--aspect-ratio "$ASPECT_RATIO")
+  [[ -n "$SIZE_TIER" ]] && args+=(--size-tier "$SIZE_TIER")
   # ${arr[@]+"${arr[@]}"} expands to nothing when the array is empty, which bash 3.2
   # otherwise reports as an unbound variable under `set -u`.
   [[ -n "$extra" ]] && read -ra extra_arr <<<"$extra" && args+=(${extra_arr[@]+"${extra_arr[@]}"})

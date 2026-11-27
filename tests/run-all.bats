@@ -315,3 +315,53 @@ STUB
   assert_output_contains "Error: --mode must be generate or edit, got 'genrate'"
   [[ ! -e "$WORK_DIR/gemini.argv" ]]
 }
+
+@test "run-all hands every provider the aspect ratio and size tier ahead of its extra arguments, which win" {
+  local p
+  for p in gemini openai xai openrouter; do stub_provider "$p"; done
+  run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/out" \
+    --providers gemini,openai,xai,openrouter --aspect-ratio 16:9 --size 2K --gemini-extra "--image-size 4K"
+  assert_status 0
+  [[ "$(cat "$WORK_DIR/gemini.argv")" == "$(printf '%s\n' --mode generate --prompt p --output "$WORK_DIR/out-gemini.png" \
+    --aspect-ratio 16:9 --size-tier 2K --image-size 4K)" ]] || { cat "$WORK_DIR/gemini.argv"; return 1; }
+  for p in openai xai openrouter; do
+    [[ "$(cat "$WORK_DIR/$p.argv")" == "$(printf '%s\n' --mode generate --prompt p --output "$WORK_DIR/out-$p.png" \
+      --aspect-ratio 16:9 --size-tier 2K)" ]] || { echo "$p:"; cat "$WORK_DIR/$p.argv"; return 1; }
+  done
+}
+
+@test "run-all hands a provider no ratio or tier when it is given neither" {
+  stub_provider gemini
+  run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini
+  assert_status 0
+  [[ "$(cat "$WORK_DIR/gemini.argv")" == "$(printf '%s\n' --mode generate --prompt p --output "$WORK_DIR/out-gemini.png")" ]] || {
+    cat "$WORK_DIR/gemini.argv"; return 1; }
+}
+
+@test "run-all refuses a size tier or aspect ratio it cannot hand on before any provider runs" {
+  stub_provider gemini
+  run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini --size 3K
+  assert_status 1
+  [[ "$output" == "Error: --size must be 1K, 2K or 4K, got '3K'" ]] || { echo "$output"; return 1; }
+  run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini --aspect-ratio "16:9 --model x"
+  assert_status 1
+  [[ "$output" == "Error: --aspect-ratio must look like 16:9, got '16:9 --model x'" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$WORK_DIR/gemini.argv" ]]
+}
+
+@test "run-all records the aspect ratio and size tier in a gallery run's arguments, and neither when not given" {
+  stub_provider gemini
+  # The run is recorded as in use; the server that would show it is not started.
+  echo 'gallery_ensure() { :; }' >> "$WORK_DIR/display.sh"
+  export IMAGE_DISPLAY=gallery IMAGE_GALLERY_DIR="${BATS_TEST_TMPDIR}/gallery"
+  run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/wide" --providers gemini \
+    --aspect-ratio 16:9 --size 2K
+  assert_status 0
+  run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/plain" --providers gemini
+  assert_status 0
+  local meta
+  meta=$(jq -cs 'sort_by(.arguments.output_base) | map(.arguments | {output_base, aspect_ratio, size, has_ratio: has("aspect_ratio"), has_size: has("size")})' \
+    "$IMAGE_GALLERY_DIR"/runs/*/meta.json)
+  [[ "$meta" == "[{\"output_base\":\"$WORK_DIR/plain\",\"aspect_ratio\":null,\"size\":null,\"has_ratio\":false,\"has_size\":false},{\"output_base\":\"$WORK_DIR/wide\",\"aspect_ratio\":\"16:9\",\"size\":\"2K\",\"has_ratio\":true,\"has_size\":true}]" ]] || {
+    echo "$meta"; return 1; }
+}
