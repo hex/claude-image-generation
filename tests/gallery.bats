@@ -633,7 +633,7 @@ write_run() {
     $'interrupted\tinterrupted\tinterrupted\tinterrupted' ]] || { echo "$SNAPSHOT"; return 1; }
 }
 
-@test "a private file the server fails to put in place leaves no temp file behind, so no run is held by one" {
+@test "a private file the server fails to put in place leaves no temp file behind, which would keep run-all from finishing its run" {
   # A directory at the file's path fails the rename that puts it in place, after the temp file exists.
   local dir="${BATS_TEST_TMPDIR}/active"
   mkdir -p "$dir/run-all.1"
@@ -1316,6 +1316,20 @@ retry_frame() {
   [[ "$(retry_frame "$a" gemini)" == "{\"error\": \"$out/hero-gemini.png already exists, and nothing is overwritten\"} 409" ]]
   [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && "$(readlink "$out/hero-gemini.png")" == nowhere ]]
   [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$(printf 'gemini\terror\t\tmodel-a\t')" && -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
+}
+
+@test "a frame's Retry refused for a file at its image's path leaves its run's status log as it was, a cut-off last record too" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 before
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\ngemini\tcompl' done
+  record_arguments "$a" "$out/hero"
+  printf 'png' > "$out/hero-gemini.png"
+  before=$(od -c "$IMAGE_GALLERY_DIR/runs/$a/status")
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"error\": \"$out/hero-gemini.png already exists, and nothing is overwritten\"} 409" ]]
+  [[ "$(od -c "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$before" ]] || { od -c "$IMAGE_GALLERY_DIR/runs/$a/status"; return 1; }
+  [[ ! -e "$MOCK_DIR/calls" && "$(cat "$out/hero-gemini.png")" == png ]]
 }
 
 @test "while a frame's Retry is starting, a second click and a delete of its run are refused, so the provider is paid once" {

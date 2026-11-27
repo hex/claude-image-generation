@@ -328,9 +328,10 @@ def read_status_log(run_dir):
 
 
 def status_size(run_dir):
-    """How many bytes a run's status log holds: 0 before it exists. The log only grows while a process
-    holds the run or a retry the server started is starting in it: drop_cut_off_record shortens it,
-    and a delete removes it, only in a run that is neither."""
+    """How many bytes a run's status log holds: 0 before it exists. Only drop_cut_off_record shortens
+    the log, under runs_lock in a run no process holds, a frame's retry doing so before it measures
+    the log it then watches grow; a delete removes it only from a run neither held nor starting a
+    retry."""
     try:
         return os.stat(str(run_dir / "status")).st_size
     except FileNotFoundError:
@@ -942,14 +943,8 @@ class Gallery:
                 if refusal is not None:
                     raise Refusal(409, refusal)
                 check_places(run_id, meta)
-                try:
-                    drop_cut_off_record(run_dir)
-                except OSError as e:
-                    raise Refusal(500, "could not ready run %s's status log %s for the retry: %s"
-                                  % (run_id, run_dir / "status", e.strerror))
                 arguments = meta["arguments"]
                 base = arguments["output_base"]
-                size = status_size(run_dir)
                 argv = run_all_argv(arguments, meta["prompt"], base, [name]) + ["--gallery-run", run_id]
                 # run-all.sh waits behind a line on its stdin, which the server writes once the run is held
                 # for it. The pipe closing with no line, when the run cannot be held or the server stops,
@@ -957,6 +952,14 @@ class Gallery:
                 gated = ["bash", "-c", 'read -r go && exec "$@" < /dev/null', "bash"] + argv
                 child, log_path = self.launch_run_all(gated, meta["cwd"], base, [name], None, stdin=subprocess.PIPE)
                 with child.stdin:
+                    # Only a retry that has its output base, and so starts, readies the log for its records:
+                    # a refused one leaves the log as it was.
+                    try:
+                        drop_cut_off_record(run_dir)
+                    except OSError as e:
+                        raise Refusal(500, "could not ready run %s's status log %s for the retry: %s"
+                                      % (run_id, run_dir / "status", e.strerror))
+                    size = status_size(run_dir)
                     try:
                         hold_run(run_dir, child.pid)
                     except OSError as e:
