@@ -349,6 +349,15 @@ wait
 - Step 2's body reads `Removes it from the gallery. It deletes no images. 1 file stays on disk. This can’t be undone.`, and the list shows `<path>/generated.png: kept, its name does not end in -gemini and .png, .jpg, .jpeg, .webp or .gif`. After **Delete** the run leaves the page and `generated.png` stays on disk
 - Step 3's list shows the edited image as `<path>: kept, run <id> uses it as an input image`, and the count of images it deletes leaves that file out
 
+**Delete a frame:**
+
+1. Hover over an image of a finished run, or tab to it, and click the trash button beside the reveal and full-size buttons (screen readers read `Delete the Gemini image`)
+2. Check the dialog: the title `Delete the Gemini image?`, the body `Removes it from this run and deletes 1 image from disk. This can’t be undone.`, the file's path listed under it, and the focus on **Cancel**
+3. Click **Delete**
+4. Quit Claude Code and stop the gallery server (`pkill -f 'gallery-server.py serve'`), then start a new run so the page opens again
+
+**Expected:** After step 3 the frame shows Deleted, the run's other frames keep their images, and the file no longer exists on disk. After step 4 the frame still shows Deleted. The run's own trash button no longer lists that file. An image of a run still generating has no trash button.
+
 **Delete project…:**
 
 1. Click a project in the rail, then **Delete project…** on the top line. Hovering over a project's row in the rail, or tabbing to it, shows a trash button (tooltip `Delete project`) that opens the same dialog
