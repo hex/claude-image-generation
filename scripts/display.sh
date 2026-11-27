@@ -681,6 +681,9 @@ __pane_acquire() {
   # gallery never reads one half written.
   local started=""
   started=$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$ 2>/dev/null) || started=""
+  # A token the gallery server already wrote for this process, holding the run for a frame's retry,
+  # says what ps could not, so it stays rather than give way to one no reader can confirm.
+  [[ -z "$started" && -s "$DISPLAY_PANE_DIR/active/${1}.$$" ]] && return 0
   printf '%s\n' "$started" > "$DISPLAY_PANE_DIR/active/.${1}.$$"
   mv -f "$DISPLAY_PANE_DIR/active/.${1}.$$" "$DISPLAY_PANE_DIR/active/${1}.$$"
 }

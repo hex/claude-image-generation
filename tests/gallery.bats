@@ -1547,6 +1547,45 @@ write_finished_run() {
   [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
 }
 
+@test "a frame's Retry whose run-all cannot read its own start time keeps the server's hold, so a server that replaced the one that started it refuses a second click" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash real_ps i first answer
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  serve_other_version
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds bash and ps on its PATH. This bash marks run-all.sh, whose ps then fails while each
+  # server's still answers, and holds gemini.sh back until the test lets it go, or gives up once the
+  # test's folder is gone, so no record of the retry lands.
+  real_bash=$(command -v bash)
+  real_ps=$(command -v ps)
+  printf '#!/bin/sh\ncase "$1" in\n  */run-all.sh) export RUN_ALL_PS_FAILS=1 ;;\n  */gemini.sh)\n    while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n    [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  printf '#!/bin/sh\n[ -z "${RUN_ALL_PS_FAILS:-}" ] || exit 1\nexec %q "$@"\n' "$real_ps" > "$MOCK_DIR/ps"
+  chmod +x "$MOCK_DIR/bash" "$MOCK_DIR/ps"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  # run-all removes .done once it has taken its token for the run.
+  for i in $(seq 1 50); do
+    [[ -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]] || break
+    sleep 0.1
+  done
+  [[ ! -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
+  # A run of this plugin's version replaces the server that started the retry, and with it that server's
+  # claim on the run's output base.
+  start_gallery
+  [[ "$(server_field version)" == "$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")" ]]
+  answer=$(retry_frame "$a" gemini) || true
+  [[ "$answer" == "{\"error\": \"run $a is still generating\"} 409" ]] || {
+    echo "$answer"; head "$IMAGE_GALLERY_DIR/runs/$a/active"/*; return 1; }
+  touch "$MOCK_DIR/go"
+  # The first click's server stopped before it could answer.
+  wait "$first" || true
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  rm "$MOCK_DIR/bash" "$MOCK_DIR/ps"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+}
+
 @test "a frame's Retry the server cannot hold its run for, as when ps fails, stops before the provider is paid and says why" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer i before
