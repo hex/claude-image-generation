@@ -1223,3 +1223,31 @@ retry_frame() {
   [[ "$(retry_frame 20261125T100400Z-00000000e5 gemini)" == '{"error": "no run 20261125T100400Z-00000000e5"} 404' ]]
   [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && ! -e "$out/hero-gemini.png" ]]
 }
+
+@test "a failed frame's Retry runs its provider again in the same run, saving where the run meant to, and a second failure shows with no run-level offer" {
+  answer_provider_with "$GEMINI_REFUSAL" "$GEMINI_REFUSAL" "$GEMINI_IMAGE"
+  start_gallery
+  connect_page
+  DISPLAY_PANE_RETRY_WAIT=0 run_all_gemini
+  assert_status 1
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].retryable'
+  local id answer
+  id=$(jq -r '.runs[0].id' <<< "$SNAPSHOT")
+  [[ ! -e "${OUT_BASE}-gemini.png" ]]
+  answer=$(retry_frame "$id" gemini)
+  [[ "$answer" == "{\"run\": \"$id\"} 200" ]] || { echo "answer: $answer"; return 1; }
+  # It fails again. The page is connected, yet the run ends at once with the frame's new error and no
+  # offer: the frame's own Retry is the way back.
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].round == 1'
+  [[ "$(jq -r '[(.runs | length), .runs[0].retry, (.runs[0].providers[0] | .state, .retryable, .error)] | @tsv' <<< "$SNAPSHOT")" == \
+    $'1\t\terror\ttrue\tNo image data in response. Model said: no picture today' ]] || { echo "$SNAPSHOT"; return 1; }
+  answer=$(retry_frame "$id" gemini)
+  [[ "$answer" == "{\"run\": \"$id\"} 200" ]] || { echo "answer: $answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ "$(jq -r '[(.runs | length), .runs[0].id, (.runs[0].providers[0] | .round, .image.path, .retryable)] | @tsv' <<< "$SNAPSHOT")" == \
+    "1	$id	2	${OUT_BASE}-gemini.png	false" ]] || { echo "$SNAPSHOT"; return 1; }
+  # The image is the provider's, saved readable by this user only, as a resend saves its images.
+  [[ "$(base64 < "${OUT_BASE}-gemini.png" | tr -d '\n')" == "$PNG_B64" ]]
+  [[ "$(ls -l "${OUT_BASE}-gemini.png" | cut -c1-10)" == "-rw-------" ]]
+  [[ "$(cat "$MOCK_DIR/calls")" == 3 ]]
+}

@@ -496,6 +496,23 @@ gallery_begin_run() {
   DISPLAY_PANE_DIR="$root/runs/$run_id"
 }
 
+# Points DISPLAY_PANE_DIR at the gallery run <run-id>, which has ended, so providers can run in it
+# again: holds a token for <owner>, then removes .done, so the run reads as live from that moment,
+# never as interrupted, and __pane_release finishes it again. A run without its meta.json is not
+# one: the token is not written into a folder a delete is removing. Fails with one line on stderr,
+# leaving DISPLAY_PANE_DIR unset. Usage: gallery_resume_run <owner> <run-id>
+gallery_resume_run() {
+  local owner="$1" run_id="$2" dir
+  dir="$(gallery_root)/runs/$run_id"
+  if [[ ! "$run_id" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{10}$ || ! -f "$dir/meta.json" ]]; then
+    echo "image gallery: there is no run $run_id in $(gallery_root)/runs to continue" >&2
+    return 1
+  fi
+  DISPLAY_PANE_DIR="$dir"
+  __pane_acquire "$owner"
+  rm -f "$dir/.done"
+}
+
 # Makes sure the gallery server is running at this plugin's version and that a page shows it:
 # reuses the running server, replaces one of another version, starts one when there is none,
 # then opens the page in the browser when no page is connected (IMAGE_GALLERY_NO_OPEN=1 skips
