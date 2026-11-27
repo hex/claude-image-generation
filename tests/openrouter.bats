@@ -225,6 +225,19 @@ NO_ENDPOINTS_404='{"error":{"message":"No endpoints found that support the reque
   [[ "$(cat "$OUT")" == "fake" ]] || { echo "Expected the decoded image 'fake' in $OUT"; return 1; }
 }
 
+@test "openrouter: the fallback model answered 404 with no endpoint for image and text output goes on to the images endpoint" {
+  export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
+  export XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache"
+  stub_openrouter 404 "$NO_ENDPOINTS_404" 404 "$NO_ENDPOINTS_404" 400 '{"error":{"code":400,"message":"Invalid request parameters"}}'
+  run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
+  assert_status 1
+  assert_urls "$CHAT_URL" "$CHAT_URL" "$IMAGES_URL"
+  [[ "$(jq -r .model "$STUB_DIR/body.1" "$STUB_DIR/body.2" "$STUB_DIR/body.3")" == $'google/gemini-nano-banana-2.1\ngoogle/gemini-3.1-flash-image\ngoogle/gemini-3.1-flash-image' ]] || {
+    echo "Expected the default, then the fallback twice:"; jq -r .model "$STUB_DIR"/body.*; return 1; }
+  assert_output_contains "OpenRouter API returned HTTP 400: Invalid request parameters"
+  [[ ! -e "$OUT" ]] || { echo "A failed run left $OUT"; return 1; }
+}
+
 @test "openrouter: an images endpoint answer without b64_json fails naming the answer" {
   export OPENROUTER_API_KEY="$DUMMY_OPENROUTER_KEY"
   stub_openrouter 404 "$GPT_IMAGE_404" 200 '{"created":1748372400,"data":[{"url":"https://example.com/image.png"}]}'
