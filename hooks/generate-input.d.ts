@@ -11,6 +11,7 @@ declare module 'claude-code' {
       outputBase?: string
       inputImages?: string[]
       aspectRatio?: string
+      size?: '1K' | '2K' | '4K'
     }
   }
 }

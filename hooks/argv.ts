@@ -14,13 +14,16 @@ type GenerateInput = {
   outputBase: string | undefined
   inputImages: string[]
   aspectRatio: string | undefined
+  size: SizeTier | undefined
 }
+
+// The size tiers run-all.sh hands every provider; each maps a tier to what its API takes.
+const SIZE_TIERS = ['1K', '2K', '4K'] as const
+type SizeTier = (typeof SIZE_TIERS)[number]
 
 // What run-all.sh runs when no provider is named; openrouter is opt-in there too.
 const ALL = ['gemini', 'openai', 'xai']
 const PROVIDERS = [...ALL, 'openrouter']
-// The providers whose scripts take --aspect-ratio; openai sizes by --size, openrouter by model.
-const TAKES_ASPECT_RATIO = ['gemini', 'xai']
 // A prompt travels as one program argument at every step down to curl, and macOS caps a
 // program's arguments plus environment at 1048576 bytes. openai.sh sends its JSON body as an
 // argument, where a control character escapes to six bytes: the largest prompt of control
@@ -43,7 +46,7 @@ export function buildRun(raw: Record<string, unknown>, options: GenerateOptions,
   const repeated = providers.find((p, i) => providers.indexOf(p) !== i)
   if (repeated !== undefined) return { error: `provider "${repeated}" is named twice; each provider runs once and saves one file` }
   const ratio = input.aspectRatio
-  if (ratio !== undefined && !/^[1-9]\d*:[1-9]\d*$/.test(ratio)) return { error: `aspectRatio must look like 16:9, got "${ratio}"` }
+  if (ratio !== undefined && !isAspectRatio(ratio)) return { error: `aspectRatio must look like 16:9, got "${ratio}"` }
   if (input.outputBase?.trim() === '') return { error: 'outputBase is blank; leave it out to use the configured folder' }
   const base = input.outputBase ?? `${options.outputDir}/image-${stamp}`
   if (/\.(png|jpe?g|webp)$/i.test(base)) {
@@ -64,9 +67,8 @@ export function buildRun(raw: Record<string, unknown>, options: GenerateOptions,
     '--output-base', base,
     '--providers', providers.join(','),
     ...images.flatMap(image => ['--input-image', image]),
-    ...(ratio === undefined ? [] : providers
-      .filter(p => TAKES_ASPECT_RATIO.includes(p))
-      .flatMap(p => [`--${p}-extra`, `--aspect-ratio ${ratio}`])),
+    ...(ratio === undefined ? [] : ['--aspect-ratio', ratio]),
+    ...(input.size === undefined ? [] : ['--size', input.size]),
   ]
   return { argv, outputs: providers.map(p => `${base}-${p}.png`) }
 }
@@ -88,7 +90,20 @@ function parseInput(raw: Record<string, unknown>): GenerateInput | { error: stri
   if (isError(outputBase)) return outputBase
   const aspectRatio = optionalString(raw, 'aspectRatio')
   if (isError(aspectRatio)) return aspectRatio
-  return { prompt, providers, inputImages: inputImages ?? [], outputBase, aspectRatio }
+  const size = optionalString(raw, 'size')
+  if (isError(size)) return size
+  if (size !== undefined && !isSizeTier(size)) return { error: `size must be 1K, 2K or 4K, got "${size}"` }
+  return { prompt, providers, inputImages: inputImages ?? [], outputBase, aspectRatio, size }
+}
+
+function isSizeTier(value: string): value is SizeTier {
+  return (SIZE_TIERS as readonly string[]).includes(value)
+}
+
+// W:H with whole or decimal sides above zero, such as 16:9 or xAI's 19.5:9.
+function isAspectRatio(value: string): boolean {
+  const sides = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(value)
+  return sides !== null && Number(sides[1]) > 0 && Number(sides[2]) > 0
 }
 
 // The first control character in the value as U+XXXX, or undefined when it has none.

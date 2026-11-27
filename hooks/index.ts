@@ -18,7 +18,8 @@ Providers: gemini (gemini-3-pro-image, professional assets, many reference image
 openai (gpt-image-2.6-sunburst, text rendering, transparent backgrounds), \
 xai (grok-imagine-image-2.0, prompt revision, flat per-image pricing), \
 openrouter (google/gemini-nano-banana-2.1 by default, opt-in). \
-Pass inputImages to edit instead of generate. aspectRatio (W:H) applies to gemini and xai only.`
+Pass inputImages to edit instead of generate. aspectRatio (W:H) and size (1K, 2K or 4K) apply to every \
+provider: a ratio a provider's model does not draw fails that provider before it is paid, and xai draws 2K for 4K.`
 
 const INPUT_SCHEMA = {
   type: 'object',
@@ -34,7 +35,8 @@ const INPUT_SCHEMA = {
       description: 'Path without extension, e.g. "art/hero"; omitted, <configured dir>/image-<timestamp>.',
     },
     inputImages: { type: 'array', items: { type: 'string' }, description: 'PNG, JPEG, WebP or GIF files to edit; switches to edit mode.' },
-    aspectRatio: { type: 'string', description: 'W:H such as 16:9; gemini and xai only.' },
+    aspectRatio: { type: 'string', description: 'W:H such as 16:9, for every provider; omitted, each provider\'s default.' },
+    size: { type: 'string', enum: ['1K', '2K', '4K'], description: 'Size tier for every provider; omitted, each provider\'s default.' },
   },
   required: ['prompt'],
   additionalProperties: false,
