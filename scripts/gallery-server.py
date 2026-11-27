@@ -1535,7 +1535,7 @@ def parse_resend(body):
         raise ValueError("the body is not JSON: %s" % e)
     if (not isinstance(request, dict) or not {"prompt", "providers"} <= set(request)
             or not set(request) <= {"prompt", "providers", "aspect_ratio", "size"}):
-        raise ValueError("the body must be an object with prompt and providers, and aspect_ratio and size or neither, got %s"
+        raise ValueError("the body must be an object with prompt and providers, and aspect_ratio and size if any, got %s"
                          % body[:80].decode("utf-8", "replace"))
     prompt, providers = request["prompt"], request["providers"]
     if not isinstance(prompt, str) or not prompt.strip():

@@ -345,7 +345,10 @@ STUB
   [[ "$output" == "Error: --size must be 1K, 2K or 4K, got '3K'" ]] || { echo "$output"; return 1; }
   run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini --aspect-ratio "16:9 --model x"
   assert_status 1
-  [[ "$output" == "Error: --aspect-ratio must look like 16:9, got '16:9 --model x'" ]] || { echo "$output"; return 1; }
+  [[ "$output" == "Error: --aspect-ratio must look like 16:9, with both sides above zero, got '16:9 --model x'" ]] || { echo "$output"; return 1; }
+  run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini --aspect-ratio 0:9
+  assert_status 1
+  [[ "$output" == "Error: --aspect-ratio must look like 16:9, with both sides above zero, got '0:9'" ]] || { echo "$output"; return 1; }
   [[ ! -e "$WORK_DIR/gemini.argv" ]]
 }
 

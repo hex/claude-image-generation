@@ -669,6 +669,14 @@ gallery.write_private(Path(sys.argv[2]), "Thu Nov 26 10:00:00 2026\n")' "$GALLER
   printf '[]' > "$runs/20261125T100100Z-00000000b2/meta.json"
   printf '{"prompt": "a kettle", "cwd": 5, "started_at": "", "providers": []}' > "$runs/20261125T100200Z-00000000c3/meta.json"
   printf 'not a run' > "$runs/20261125T100300Z-00000000d4"
+  local bad
+  for bad in '20261125T100500Z-00000000f6 aspect_ratio "16x9"' '20261125T100600Z-00000000a7 size "3K"'; do
+    set -- $bad
+    write_run "$1" /work/alpha 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' done
+    record_arguments "$1" /work/alpha/a
+    jq --arg key "$2" --argjson value "$3" '.arguments[$key] = $value' "$runs/$1/meta.json" > "$runs/$1/meta.tmp"
+    mv "$runs/$1/meta.tmp" "$runs/$1/meta.json"
+  done
   # A run still being assembled under its dot name that is gone by the time the server looks.
   ln -s "$runs/nowhere" "$runs/.20261125T100400Z-00000000e5"
   start_gallery
@@ -678,7 +686,9 @@ gallery.write_private(Path(sys.argv[2]), "Thu Nov 26 10:00:00 2026\n")' "$GALLER
   sleep 1
   local root
   root=$(cd "$IMAGE_GALLERY_DIR" && pwd -P)
-  [[ "$(cat "$IMAGE_GALLERY_DIR/server.log")" == "image gallery: skipping run $root/runs/20261125T100300Z-00000000d4: meta.json: Not a directory
+  [[ "$(cat "$IMAGE_GALLERY_DIR/server.log")" == "image gallery: skipping run $root/runs/20261125T100600Z-00000000a7: meta.json's arguments.size is \"3K\", not one of 1K, 2K, 4K
+image gallery: skipping run $root/runs/20261125T100500Z-00000000f6: meta.json's arguments.aspect_ratio is \"16x9\", not a ratio such as 16:9
+image gallery: skipping run $root/runs/20261125T100300Z-00000000d4: meta.json: Not a directory
 image gallery: skipping run $root/runs/20261125T100200Z-00000000c3: meta.json's cwd is 5, not a string
 image gallery: skipping run $root/runs/20261125T100100Z-00000000b2: meta.json holds [], not an object" ]] || {
     cat "$IMAGE_GALLERY_DIR/server.log"; return 1; }
@@ -1161,7 +1171,7 @@ write_resendable_run() {
   [[ "$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini"], "aspect_ratio": null, "size": "3K"}')" == \
     '{"error": "the size must be 1K, 2K, 4K, got \"3K\""} 400' ]]
   [[ "$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini"], "quality": "high"}')" == \
-    '{"error": "the body must be an object with prompt and providers, and aspect_ratio and size or neither, got {\"prompt\": \"a kettle\", \"providers\": [\"gemini\"], \"quality\": \"high\"}"} 400' ]]
+    '{"error": "the body must be an object with prompt and providers, and aspect_ratio and size if any, got {\"prompt\": \"a kettle\", \"providers\": [\"gemini\"], \"quality\": \"high\"}"} 400' ]]
   [[ "$(resend "$b" '{"prompt": "a kettle", "providers": ["gemini"]}')" == \
     "{\"error\": \"run $b's working folder ${BATS_TEST_TMPDIR}/gone is gone\"} 409" ]]
   [[ "$(resend "$c" '{"prompt": "a kettle", "providers": ["gemini"]}')" == \

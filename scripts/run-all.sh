@@ -97,8 +97,8 @@ if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
 fi
 
 ratio_pattern='^[0-9]+(\.[0-9]+)?:[0-9]+(\.[0-9]+)?$'
-if [[ -n "$ASPECT_RATIO" && ! "$ASPECT_RATIO" =~ $ratio_pattern ]]; then
-  echo "Error: --aspect-ratio must look like 16:9, got '$ASPECT_RATIO'" >&2
+if [[ -n "$ASPECT_RATIO" ]] && ! [[ "$ASPECT_RATIO" =~ $ratio_pattern && "${ASPECT_RATIO%%:*}" =~ [1-9] && "${ASPECT_RATIO#*:}" =~ [1-9] ]]; then
+  echo "Error: --aspect-ratio must look like 16:9, with both sides above zero, got '$ASPECT_RATIO'" >&2
   exit 1
 fi
 
