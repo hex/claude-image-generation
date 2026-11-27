@@ -349,7 +349,17 @@ STUB
   run bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini --aspect-ratio 0:9
   assert_status 1
   [[ "$output" == "Error: --aspect-ratio must look like 16:9, with both sides above zero, got '0:9'" ]] || { echo "$output"; return 1; }
+  # A side too small for a double reads as zero to the generate tool and the gallery server, so it
+  # is refused here too, under the bash a stock macOS runs.
+  local tiny
+  tiny="0.$(printf '0%.0s' {1..400})1:1"
+  run /bin/bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini --aspect-ratio "$tiny"
+  assert_status 1
+  [[ "$output" == "Error: --aspect-ratio must look like 16:9, with both sides above zero, got '$tiny'" ]] || { echo "$output"; return 1; }
   [[ ! -e "$WORK_DIR/gemini.argv" ]]
+  run /bin/bash "$WORK_DIR/run-all.sh" --mode generate --prompt "p" --output-base "$WORK_DIR/out" --providers gemini --aspect-ratio 19.5:9
+  assert_status 0
+  grep -qx 19.5:9 "$WORK_DIR/gemini.argv" || { cat "$WORK_DIR/gemini.argv"; return 1; }
 }
 
 @test "run-all records the aspect ratio and size tier in a gallery run's arguments, and neither when not given" {

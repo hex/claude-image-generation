@@ -96,8 +96,11 @@ if [[ "$MODE" == "edit" && ${#INPUT_IMAGES[@]} -eq 0 ]]; then
   usage
 fi
 
+# Each side is read as a double, as the generate tool's Number() and the gallery server's float()
+# read it, so a side too small for one is zero here too.
 ratio_pattern='^[0-9]+(\.[0-9]+)?:[0-9]+(\.[0-9]+)?$'
-if [[ -n "$ASPECT_RATIO" ]] && ! [[ "$ASPECT_RATIO" =~ $ratio_pattern && "${ASPECT_RATIO%%:*}" =~ [1-9] && "${ASPECT_RATIO#*:}" =~ [1-9] ]]; then
+if [[ -n "$ASPECT_RATIO" ]] && ! { [[ "$ASPECT_RATIO" =~ $ratio_pattern ]] &&
+    awk -v w="${ASPECT_RATIO%%:*}" -v h="${ASPECT_RATIO#*:}" 'BEGIN { exit !(w + 0 > 0 && h + 0 > 0) }'; }; then
   echo "Error: --aspect-ratio must look like 16:9, with both sides above zero, got '$ASPECT_RATIO'" >&2
   exit 1
 fi
