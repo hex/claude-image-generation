@@ -1249,7 +1249,16 @@ retry_frame() {
   [[ "$(retry_frame "$a" openai)" == "{\"error\": \"run $a's openai frame did not fail, so there is nothing to retry\"} 409" ]]
   [[ "$(retry_frame "$a" xai)" == "{\"error\": \"run $a has no xai frame\"} 404" ]]
   [[ "$(retry_frame 20261125T100400Z-00000000e5 gemini)" == '{"error": "no run 20261125T100400Z-00000000e5"} 404' ]]
-  [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && ! -e "$out/hero-gemini.png" ]]
+  # f failed and ended, but a record after its error does not parse, so how its frames ended is unknown.
+  local f=20261125T100500Z-00000000f6
+  write_run "$f" "$out" 'gemini\terror\t\tmodel-a\t\ngemini\tcomplete\t1000\n' done
+  record_arguments "$f" "$out/unreadable"
+  wait_for_snapshot ".runs[0].id == \"$f\""
+  [[ "$(jq -c '.runs[0] | [.problem, .providers[0].retryable]' <<< "$SNAPSHOT")" == \
+    '["unreadable status log: status line 2 has 3 fields, not 5",false]' ]] || { echo "$SNAPSHOT"; return 1; }
+  [[ "$(retry_frame "$f" gemini)" == \
+    "{\"error\": \"run $f's status log is unreadable (status line 2 has 3 fields, not 5), so how its frames ended is unknown\"} 409" ]]
+  [[ ! -e "$IMAGE_GALLERY_DIR/resend-logs" && ! -e "$MOCK_DIR/calls" && ! -e "$out/hero-gemini.png" && ! -e "$out/unreadable-gemini.png" ]]
 }
 
 @test "a failed frame's Retry runs its provider again in the same run, saving where the run meant to, and a second failure shows with no run-level offer" {

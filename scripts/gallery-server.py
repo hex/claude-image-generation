@@ -278,6 +278,18 @@ def run_is_held(run_dir):
     return False
 
 
+def fold_status(run_dir, providers):
+    """Folds a run's status log into providers (reduce_status) as far as it parses. Returns why it does
+    not parse past there, or None when it all does or the run has no status log yet."""
+    try:
+        reduce_status(read_status_log(run_dir), providers)
+    except FileNotFoundError:
+        pass
+    except ValueError as e:
+        return str(e)
+    return None
+
+
 def read_status_log(run_dir):
     """A run's status log as display.sh wrote it. A newline alone ends a record; a carriage return
     is part of a field, so line endings are not translated."""
@@ -347,11 +359,13 @@ def check_arguments(arguments):
         raise bad("extras", extras, "a string for each of %s" % ", ".join(RESEND_PROVIDERS))
 
 
-def retry_refusal(run_id, meta, providers, held, name):
+def retry_refusal(run_id, meta, providers, unreadable, held, name):
     """Why the failed frame of provider name cannot run again in its run, or None when it can: only once
     the run has ended, with no frame still at work when it did, only in a run run-all.sh started and
-    recorded its arguments for, and only when the frame's last record is an error. providers is the
-    run's status log folded by reduce_status; held, whether a process holds the run."""
+    recorded its arguments for, and only when the frame's last record is an error. providers and
+    unreadable are what fold_status made of the run's status log; held, whether a process holds the run."""
+    if unreadable is not None:
+        return "run %s's status log is unreadable (%s), so how its frames ended is unknown" % (run_id, unreadable)
     if held:
         return "run %s is still generating" % run_id
     if name not in RESEND_PROVIDERS:
@@ -370,17 +384,12 @@ def read_run(run_dir):
     """The page's view of one run. Raises RunRejected or OSError when the directory is not one."""
     meta = read_meta(run_dir)
     providers = {name: new_provider(name) for name in meta["providers"]}
-    problem = None
-    try:
-        reduce_status(read_status_log(run_dir), providers)
-    except FileNotFoundError:
-        pass
-    except ValueError as e:
-        problem = "unreadable status log: %s" % e
+    unreadable = fold_status(run_dir, providers)
+    held = run_is_held(run_dir)
 
     if (run_dir / ".done").exists():
         status = "done"
-    elif run_is_held(run_dir):
+    elif held:
         status = "live"
     else:
         status = "interrupted"
@@ -427,7 +436,7 @@ def read_run(run_dir):
         cards.append({
             "name": p["name"], "state": state, "model": p["model"], "ms": p["ms"],
             "attempt": p["attempt"], "round": p["round"], "error": error, "image": image,
-            "retryable": retry_refusal(run_dir.name, meta, providers, status == "live", p["name"]) is None,
+            "retryable": retry_refusal(run_dir.name, meta, providers, unreadable, held, p["name"]) is None,
         })
     return {
         "id": run_dir.name,
@@ -440,7 +449,7 @@ def read_run(run_dir):
         "retry_seconds": retry_seconds,
         "retry_ends_ms": retry_ends_ms,
         "updated_ms": updated_ms,
-        "problem": problem,
+        "problem": None if unreadable is None else "unreadable status log: %s" % unreadable,
         "providers": cards,
         "files": [{"path": path, "provider": name} for name, path in unique_images(recorded_images(providers))],
         "input_images": meta["arguments"]["input_images"] if "arguments" in meta else [],
@@ -731,13 +740,10 @@ class Gallery:
                 continue
             run_dir = self.runs_dir / name
             providers = {}
-            try:
-                reduce_status(read_status_log(run_dir), providers)
-            except FileNotFoundError:
-                pass
-            except ValueError as e:
+            unreadable = fold_status(run_dir, providers)
+            if unreadable is not None:
                 raise RunRejected("run %s's status log is unreadable (%s), so which images it names is unknown"
-                                  % (name, e))
+                                  % (name, unreadable))
             try:
                 meta = read_meta(run_dir)
             except RunRejected as e:
@@ -765,13 +771,10 @@ class Gallery:
         if arguments is not None and self.saving_to(arguments["output_base"]):
             raise Refusal(409, "run %s is starting a retry" % run_id)
         providers = {}
-        try:
-            reduce_status(read_status_log(run_dir), providers)
-        except FileNotFoundError:
-            pass
-        except ValueError as e:
+        unreadable = fold_status(run_dir, providers)
+        if unreadable is not None:
             raise Refusal(409, "run %s's status log is unreadable (%s), so which images it saved is unknown; "
-                               "nothing was deleted" % (run_id, e))
+                               "nothing was deleted" % (run_id, unreadable))
         return run_dir, providers
 
     def remove_images(self, run_id, images, listed, namers):
@@ -897,13 +900,7 @@ class Gallery:
                 if name not in meta["providers"]:
                     raise Refusal(404, "run %s has no %s frame" % (run_id, name))
                 providers = {provider: new_provider(provider) for provider in meta["providers"]}
-                try:
-                    reduce_status(read_status_log(run_dir), providers)
-                except FileNotFoundError:
-                    pass
-                except ValueError as e:
-                    raise Refusal(409, "run %s's status log is unreadable (%s), so how its frames ended is unknown" % (run_id, e))
-                refusal = retry_refusal(run_id, meta, providers, run_is_held(run_dir), name)
+                refusal = retry_refusal(run_id, meta, providers, fold_status(run_dir, providers), run_is_held(run_dir), name)
                 if refusal is not None:
                     raise Refusal(409, refusal)
                 check_places(run_id, meta)
