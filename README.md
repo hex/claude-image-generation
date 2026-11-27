@@ -265,7 +265,7 @@ Each provider script checks the ratio against the model it sends the request to,
 
 A provider's own flag in its `--<provider>-extra` arguments wins over the shared values for that provider: `--image-size` for gemini, `--resolution` for xai, `--size` for openai. With neither value given, every provider sends what it sent before: gemini `1:1` at the API's default size, openai `1024x1024`, xai and openrouter no ratio or size.
 
-OpenAI takes no ratio parameter, so `openai.sh` asks for the size this table gives. Each size is the ratio at about `1024x1024` pixels (1K), about `2048x2048` (2K), or the largest OpenAI allows (4K), with both edges multiples of 16, no edge over 3840 and at most 8,294,400 pixels. A ratio with no tier uses 1K, and a tier with no ratio uses `1:1`. `openai.sh` refuses ratios past 3:1, such as `4:1`. `gpt-image-1.5`, `gpt-image-1-mini` and the other models that draw only three sizes refuse a ratio or tier; pass `--size` to them instead.
+OpenAI takes no ratio parameter, so `openai.sh` asks for the size this table gives. Each size is the ratio at about `1024x1024` pixels (1K), about `2048x2048` (2K), or the largest OpenAI allows (4K), with both edges multiples of 16, no edge over 3840 and at most 8,294,400 pixels. A ratio with no tier uses 1K, and a tier with no ratio uses `1:1`. Every 2K and 4K size holds more pixels than `2560x1440`, which OpenAI calls experimental on the 2.5 models, so a run that falls back to `gpt-image-2.5-sunburst` draws them as experimental sizes. `openai.sh` refuses ratios past 3:1, such as `4:1`. `gpt-image-1.5`, `gpt-image-1-mini` and the other models that draw only three sizes refuse a ratio or tier; pass `--size` to them instead.
 
 | Ratio | 1K | 2K | 4K |
 |-------|----|----|----|

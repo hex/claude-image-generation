@@ -234,7 +234,7 @@ Accepts either `image_url` (URL or base64 data URL, max 20MB) or `file_id` (File
 - `gpt-image-1-mini`: 3-4x cheaper, same API surface, only first image gets high fidelity on edits. **Shutdown 2026-12-01**
 - `gpt-image-1`: Retired 2026-10-23, and gone from `/v1/models` (checked 2026-11-05)
 - `chatgpt-image-latest`: GA alias. **Shutdown 2026-12-01**. OpenAI names `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare` as the replacement for these four models
-- `gpt-image-2.5-sunburst`: "most capable model for image generation and editing", same per-token price as `gpt-image-2`, no announced shutdown. The plugin's fallback when the default is unavailable to the key.
+- `gpt-image-2.5-sunburst`: "most capable model for image generation and editing", same per-token price as `gpt-image-2`, no announced shutdown. The plugin's fallback when the default is unavailable to the key. Every 2K and 4K size in the `openai.sh` table holds more pixels than `2560x1440`, so on this fallback they are sizes OpenAI calls experimental.
 - An unknown or retired model answers HTTP 400 with `{"error": {"message": "The model '<id>' does not exist.", "type": "image_generation_user_error", "param": "model", "code": "invalid_value"}}` on both endpoints (captured 2026-11-05 for an unknown id and for `dall-e-3`).
 
 ### Pricing

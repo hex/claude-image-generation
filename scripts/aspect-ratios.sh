@@ -37,7 +37,9 @@ xai_aspect_ratios() {
 # The size OpenAI's gpt-image-2, 2.5 and 2.6 models are asked for at each ratio, as a line per ratio
 # of its 1K, 2K and 4K sizes. Each is the ratio at about 1024x1024 pixels (1K) or 2048x2048 (2K), or
 # as large as OpenAI allows (4K), with both edges multiples of 16, no edge over 3840 and at most
-# 8,294,400 pixels. Ratios past 3:1, which OpenAI refuses, are left out.
+# 8,294,400 pixels. Ratios past 3:1, which OpenAI refuses, are left out. Every 2K and 4K size holds
+# more pixels than 2560x1440, which OpenAI calls experimental on the 2.5 models, among them
+# gpt-image-2.5-sunburst, the fallback.
 readonly OPENAI_SIZES="1:1 1024x1024 2048x2048 2880x2880
 2:3 832x1248 1680x2528 2336x3504
 3:2 1248x832 2528x1680 3504x2336
