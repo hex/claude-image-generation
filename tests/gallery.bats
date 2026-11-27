@@ -1147,6 +1147,50 @@ write_resendable_run() {
     cat "$MOCK_DIR/request.raw"; return 1; }
 }
 
+@test "a run whose extras set its shape shows the page that shape, and the editor's choice replaces it for every provider" {
+  answer_provider_with "$GEMINI_IMAGE"
+  # Without keys xai and openai stop before any request, after run-all has recorded their extras, and
+  # with no wait the run offers no retry for them.
+  unset XAI_API_KEY GROK_API_KEY OPENAI_API_KEY
+  export DISPLAY_PANE_RETRY_WAIT=0
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 answer new
+  printf 'png' > "$out/hero-gemini.png"
+  printf 'png' > "$out/plain-gemini.png"
+  # A run the generate tool started before it took a size: its ratio is in gemini's and xai's extras.
+  write_resendable_run "$a" "$out" "$out/hero-gemini.png"
+  jq '.arguments.extras = {gemini: "--aspect-ratio 16:9 --image-size 2K", xai: "--aspect-ratio 16:9 --resolution 2k",
+                           openai: "--quality high --size 1536x1024", openrouter: ""}' \
+    "$IMAGE_GALLERY_DIR/runs/$a/meta.json" > "$IMAGE_GALLERY_DIR/runs/$a/meta.tmp"
+  mv "$IMAGE_GALLERY_DIR/runs/$a/meta.tmp" "$IMAGE_GALLERY_DIR/runs/$a/meta.json"
+  # Extras that disagree on the ratio, and a size the editor does not offer, show neither.
+  write_resendable_run "$b" "$out" "$out/plain-gemini.png"
+  jq '.arguments.extras = {gemini: "--aspect-ratio 16:9 --image-size 512", xai: "--aspect-ratio 4:3", openai: "", openrouter: ""}' \
+    "$IMAGE_GALLERY_DIR/runs/$b/meta.json" > "$IMAGE_GALLERY_DIR/runs/$b/meta.tmp"
+  mv "$IMAGE_GALLERY_DIR/runs/$b/meta.tmp" "$IMAGE_GALLERY_DIR/runs/$b/meta.json"
+  start_gallery
+  wait_for_snapshot '.runs | length == 2'
+  [[ "$(jq -c '[.runs[] | [.id, .aspect_ratio, .size]]' <<< "$SNAPSHOT")" == "[[\"$b\",null,null],[\"$a\",\"16:9\",\"2K\"]]" ]] || {
+    echo "$SNAPSHOT"; return 1; }
+  # The editor sends a ratio, and the default for the size it showed: the extras' ratio and size flags
+  # go, openai's --size with them, and the rest of the extras stay.
+  answer=$(resend "$a" '{"prompt": "a kettle", "providers": ["gemini", "xai", "openai"], "aspect_ratio": "1:1", "size": null}')
+  [[ "$answer" =~ ^\{\"run\":\ \"([0-9]{8}T[0-9]{6}Z-[0-9a-f]{10})\"\}\ 200$ ]] || { echo "answer: $answer"; return 1; }
+  new=${BASH_REMATCH[1]}
+  wait_for_snapshot "(.runs[0].id == \"$new\") and (.runs[0].status == \"done\")"
+  [[ "$(jq -c '.arguments.extras' "$IMAGE_GALLERY_DIR/runs/$new/meta.json")" == \
+    '{"gemini":"","openai":"--quality high","xai":"","openrouter":""}' ]] || { cat "$IMAGE_GALLERY_DIR/runs/$new/meta.json"; return 1; }
+  [[ "$(sed '1,/^\r$/d' "$MOCK_DIR/request.raw" | jq -c '.generationConfig.imageConfig')" == '{"aspectRatio":"1:1"}' ]] || {
+    cat "$MOCK_DIR/request.raw"; return 1; }
+  # The default for a shape the editor did not show leaves the extras as they were.
+  sleep 1
+  answer=$(resend "$b" '{"prompt": "a kettle", "providers": ["gemini"], "aspect_ratio": null, "size": null}')
+  [[ "$answer" =~ ^\{\"run\":\ \"([0-9]{8}T[0-9]{6}Z-[0-9a-f]{10})\"\}\ 200$ ]] || { echo "answer: $answer"; return 1; }
+  new=${BASH_REMATCH[1]}
+  wait_for_snapshot "(.runs[0].id == \"$new\") and (.runs[0].status == \"done\")"
+  [[ "$(sed '1,/^\r$/d' "$MOCK_DIR/request.raw" | jq -c '.generationConfig.imageConfig')" == '{"aspectRatio":"16:9","imageSize":"512"}' ]] || {
+    cat "$MOCK_DIR/request.raw"; return 1; }
+}
+
 @test "a resend is refused for an unknown provider, none, a blank prompt, a working folder or input image that is gone" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 \
