@@ -1390,3 +1390,28 @@ delete_frame() {
   [[ "$(snapshot | jq -c --arg a "$a" '.runs[] | select(.id == $a) | [[.providers[].state], .files]')" == \
     '[["deleted","deleted","deleted","deleted"],[]]' ]] || { snapshot; return 1; }
 }
+
+@test "a frame's delete deletes nothing while its run is live or any run in the gallery does not parse, and names a frame the run lacks" {
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 b=20261125T100100Z-00000000b2 \
+    c=20261125T100200Z-00000000c3 answer
+  printf 'png' > "$out/held-gemini.png"
+  printf 'png' > "$out/fine-gemini.png"
+  write_run "$a" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/held-gemini.png\nopenai\tquerying\t\tmodel-b\t\n"
+  sleep 60 &
+  HOLDER_PID=$!
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$HOLDER_PID" > "$IMAGE_GALLERY_DIR/runs/$a/active/run-all.$HOLDER_PID"
+  write_run "$b" "$out" "gemini\tcomplete\t1000\tmodel-a\t$out/fine-gemini.png\n" done
+  start_gallery
+  wait_for_snapshot '(.runs | length == 2) and .runs[1].status == "live"'
+  [[ "$(delete_frame "$a" gemini "[\"$out/held-gemini.png\"]")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"provider\": \"gemini\", \"error\": \"run $a is still generating\"}], \"error\": \"run $a is still generating\"} 409" ]]
+  [[ "$(delete_frame "$b" xai '[]')" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$b\", \"provider\": \"xai\", \"error\": \"run $b has no xai frame\"}], \"error\": \"run $b has no xai frame\"} 404" ]]
+  # c's status log has a line of four fields, so which images c names is unknown.
+  write_run "$c" "$out" 'gemini\tcomplete\t1000\tmodel-a\n' done
+  answer=$(delete_frame "$b" gemini "[\"$out/fine-gemini.png\"]")
+  [[ "$answer" == "{\"error\": \"run $c's status log is unreadable (status line 1 has 4 fields, not 5), so which images it names is unknown; nothing was deleted\"} 409" ]] || {
+    echo "$answer"; return 1; }
+  [[ -f "$out/held-gemini.png" && -f "$out/fine-gemini.png" ]]
+  [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$b/status")" == "$(printf 'gemini\tcomplete\t1000\tmodel-a\t%s' "$out/fine-gemini.png")" ]]
+}
