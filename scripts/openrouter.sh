@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Generates or edits images using OpenRouter as a model-flexible gateway.
-# ABOUTME: Uses chat completions, or the images endpoint for models that output only images.
+# ABOUTME: Uses chat completions, and the images endpoint for a model chat completions turns away.
 
 set -euo pipefail
 
@@ -19,8 +19,9 @@ Usage: $(basename "$0") --mode <generate|edit> --prompt <text> --output <path> [
 
 OpenRouter is a gateway: --model accepts any OpenRouter model slug that supports
 image output (e.g. google/gemini-3.1-flash-image, google/gemini-3-pro-image).
-A model that outputs only images (e.g. openai/gpt-image-2) is sent to OpenRouter's
-images endpoint, every other model to chat completions.
+Every request goes to chat completions first. When that answers HTTP 404 saying the
+model is served only on OpenRouter's images endpoint (e.g. openai/gpt-image-2), the
+same request goes to the images endpoint once.
 
 Options:
   --mode              generate or edit (required)
@@ -132,41 +133,44 @@ CURL_HEADERS=(-H "Content-Type: application/json" -H "Authorization: Bearer ${OP
 [[ -n "$SITE_URL" ]] && CURL_HEADERS+=(-H "HTTP-Referer: ${SITE_URL}")
 [[ -n "$SITE_NAME" ]] && CURL_HEADERS+=(-H "X-Title: ${SITE_NAME}")
 
-# OpenRouter serves a model that outputs images and no text only through its images endpoint; chat
-# completions answers it with HTTP 404. The public model list, read without the key, names them.
-MODEL_LIST=$(curl_with_retry -sS -w "\n%{http_code}" "https://openrouter.ai/api/v1/models?output_modalities=image")
-MODEL_LIST_CODE="${MODEL_LIST##*$'\n'}"
-if [[ "$MODEL_LIST_CODE" != "200" ]]; then
-  provider_die "Could not read OpenRouter's image model list to choose an endpoint for ${MODEL}: HTTP ${MODEL_LIST_CODE}"
-fi
-IMAGE_ONLY_MODELS=$(echo "${MODEL_LIST%$'\n'*}" | jq -r \
-  '.data[] | select(.architecture.output_modalities | arrays | index("text") | not) | .id' 2>/dev/null) \
-  || provider_die "Could not read OpenRouter's image model list to choose an endpoint for ${MODEL}: the answer is not a model list"
-
-# uses_images_endpoint <model> — true when OpenRouter lists the model as outputting images and no
-# text. Any other model, one missing from the list included, goes to chat completions.
-uses_images_endpoint() {
-  grep -qxF -- "$1" <<< "$IMAGE_ONLY_MODELS"
-}
-
-# send_request <model> — posts the body for this model to its endpoint and prints curl_with_retry's
-# body and status. The parts can hold a multi-megabyte base64 image, so they enter jq on stdin as
-# the main input rather than as --argjson, and the body reaches curl on stdin (--data-binary @-)
-# rather than as -d; either argument would exceed ARG_MAX.
-send_request() {
-  local endpoint="chat/completions" body="$CHAT_BODY"
-  if uses_images_endpoint "$1"; then
-    endpoint="images"
-    body="$IMAGES_BODY"
-  fi
-  printf '%s' "$IMAGE_PARTS" | jq --arg model "$1" --arg prompt "$PROMPT" "$body" \
+# send_to <endpoint> <body filter> <model> — posts the body for this model to OpenRouter's endpoint
+# and prints curl_with_retry's body and status. The parts can hold a multi-megabyte base64 image, so
+# they enter jq on stdin as the main input rather than as --argjson, and the body reaches curl on
+# stdin (--data-binary @-) rather than as -d; either argument would exceed ARG_MAX.
+send_to() {
+  printf '%s' "$IMAGE_PARTS" | jq --arg model "$3" --arg prompt "$PROMPT" "$2" \
     | curl_with_retry -s -w "\n%{http_code}" \
-      -X POST "https://openrouter.ai/api/v1/${endpoint}" \
+      -X POST "https://openrouter.ai/api/v1/$1" \
       "${CURL_HEADERS[@]}" \
       --data-binary @-
 }
 
-request_with_model_fallback send_request
+send_chat_request() {
+  send_to chat/completions "$CHAT_BODY" "$1"
+}
+
+# images_endpoint_answer <response> — true when chat completions answered HTTP 404 with one of the
+# messages OpenRouter gives a model it serves only through its images endpoint, measured 2026-11-26:
+# the first for openai/gpt-image-2, the second for x-ai/grok-imagine-image-2.0. The second also
+# answers a model with no image output at all, whose images request then reports its own error.
+images_endpoint_answer() {
+  local msg
+  [[ "${1##*$'\n'}" == 404 ]] || return 1
+  msg=$(jq -r '.error.message? // empty' <<< "${1%$'\n'*}" 2>/dev/null) || return 1
+  case "$msg" in
+    *"cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead."|\
+    "No endpoints found that support the requested output modalities: image, text") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ENDPOINT="chat/completions"
+request_with_model_fallback send_chat_request
+if images_endpoint_answer "$RESPONSE"; then
+  echo "${MODEL} is not served on chat completions (HTTP 404); sending the request to OpenRouter's images endpoint" >&2
+  ENDPOINT="images"
+  RESPONSE=$(send_to images "$IMAGES_BODY" "$MODEL")
+fi
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
@@ -176,7 +180,7 @@ if [[ "$HTTP_CODE" != "200" ]]; then
   provider_die "OpenRouter API returned HTTP ${HTTP_CODE}: ${api_msg}"
 fi
 
-if uses_images_endpoint "$MODEL"; then
+if [[ "$ENDPOINT" == images ]]; then
   IMAGE_DATA=$(echo "$BODY" | jq -r '.data[0].b64_json // empty' 2>/dev/null || true)
   if [[ -z "$IMAGE_DATA" ]]; then
     provider_die "No image data in response: $(echo "$BODY" | jq -c '.' 2>/dev/null || echo "$BODY")"
