@@ -112,7 +112,7 @@ setup() {
   local mock_dir="${BATS_TMPDIR}/openrouter_mocks_$$"
   mkdir -p "$mock_dir"
   printf '%s\n200\n' '{"choices":[{"error":{"code":502,"message":"upstream boom"},"finish_reason":"error","message":{"content":""}}]}' > "$mock_dir/response.txt"
-  printf '#!/bin/bash\n. "$OPENROUTER_MODEL_LIST_STUB"\ncat >/dev/null\ncat "$(dirname "$0")/response.txt"\n' > "$mock_dir/curl"
+  printf '#!/bin/bash\ncat >/dev/null\ncat "$(dirname "$0")/response.txt"\n' > "$mock_dir/curl"
   chmod +x "$mock_dir/curl"
   PATH="$mock_dir:$PATH" run "$OPENROUTER_SH" --mode generate --prompt "a cat" --output "$OUT"
   rm -rf "$mock_dir" "$DISPLAY_PANE_DIR"

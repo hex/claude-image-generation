@@ -24,8 +24,7 @@ teardown() {
 }
 
 # Writes the request-capturing prelude shared by every curl stub in this file, overwriting
-# $MOCK_DIR/curl with a shebang, the answer to OpenRouter's image model list, and the argv walk.
-# curl_with_retry rewrites a streamed
+# $MOCK_DIR/curl with a shebang and the argv walk. curl_with_retry rewrites a streamed
 # `--data-binary @-` body to `@<tempfile>` before every real curl invocation, so a stub never
 # actually sees `@-` from a provider script -- what it sees is `@<path>` from curl_with_retry,
 # or (openai's -d/-F calls, which pass no --data-binary at all) nothing. Real curl reads no stdin
@@ -35,7 +34,6 @@ teardown() {
 __stub_curl_prelude() {
   cat > "$MOCK_DIR/curl" <<'STUB'
 #!/bin/bash
-. "$OPENROUTER_MODEL_LIST_STUB"
 d="$(dirname "$0")"
 body_arg=""
 prev=""

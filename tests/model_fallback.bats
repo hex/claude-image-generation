@@ -55,7 +55,6 @@ stub_curl_answers() {
   printf '%s' "$n" > "$MOCK_DIR/answers"
   cat > "$MOCK_DIR/curl" <<'STUB'
 #!/bin/bash
-. "$OPENROUTER_MODEL_LIST_STUB"
 d="$(dirname "$0")"
 n=$(cat "$d/calls" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$d/calls"
 printf '%s\n' "$@" > "$d/argv.$n"
