@@ -1400,6 +1400,55 @@ retry_frame() {
   [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
 }
 
+# write_finished_run <run-id> — writes a finished run by hand, quickly, for tests that need many runs.
+write_finished_run() {
+  local dir="$IMAGE_GALLERY_DIR/runs/$1"
+  mkdir -p "$dir/active"
+  printf '{"prompt": "a kettle", "cwd": "/work/alpha", "started_at": "2026-11-25T10:00:00Z", "providers": ["gemini"]}' > "$dir/meta.json"
+  printf 'gemini\tcomplete\t1000\tmodel-a\t/tmp/a.png\n' > "$dir/status"
+  touch "$dir/.done"
+}
+
+@test "a frame's Retry starting in the oldest run the gallery keeps, with its run's token gone, keeps the run once a newer run pushes it past 200" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first active
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  active="$IMAGE_GALLERY_DIR/runs/$a/active"
+  for i in $(seq 1 199); do
+    write_finished_run "$(printf '20261126T%06dZ-%010x' "$i" "$i")"
+  done
+  start_gallery
+  wait_for_snapshot '(.runs | length == 200) and .runs[199].providers[0].retryable'
+  # The server finds bash on its PATH; this one holds run-all.sh back until the test lets it go, or gives
+  # up once the test's folder is gone.
+  real_bash=$(command -v bash)
+  printf '#!/bin/sh\ncase "$1" in */run-all.sh)\n  while [ -d %q ] && [ ! -e %q ]; do sleep 0.1; done\n  [ -e %q ] || exit 1 ;;\nesac\nexec %q "$@"\n' \
+    "$MOCK_DIR" "$MOCK_DIR/go" "$MOCK_DIR/go" "$real_bash" > "$MOCK_DIR/bash"
+  chmod +x "$MOCK_DIR/bash"
+  retry_frame "$a" gemini > "$MOCK_DIR/first.answer" &
+  first=$!
+  for i in $(seq 1 50); do
+    [[ -n "$(ls "$active")" ]] && break
+    sleep 0.1
+  done
+  # Without the token that holds the run for the retry, as when ps cannot confirm its holder, only the
+  # server's claim on the run's output base keeps the run.
+  rm "$active"/run-all.*
+  write_finished_run 20261126T000200Z-00000000c8
+  wait_for_snapshot '.runs | length == 201'
+  [[ -f "$IMAGE_GALLERY_DIR/runs/$a/meta.json" ]]
+  touch "$MOCK_DIR/go"
+  wait "$first"
+  [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
+  for i in $(seq 1 50); do
+    [[ -f "$out/hero-gemini.png" ]] && break
+    sleep 0.1
+  done
+  rm "$MOCK_DIR/bash"
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+}
+
 @test "a frame's Retry finishes its run though processes killed before they let go of it left their tokens" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 dead active

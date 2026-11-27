@@ -731,7 +731,7 @@ class Gallery:
         runs = []
         for index, name in enumerate(names):
             run_dir = self.runs_dir / name
-            if index >= KEEP_RUNS and not run_is_held(run_dir):
+            if index >= KEEP_RUNS and self.in_use(run_dir) is None:
                 shutil.rmtree(str(run_dir), ignore_errors=True)
                 continue
             run = self.run(run_dir)
@@ -798,6 +798,24 @@ class Gallery:
                 namers.setdefault(file_entry(path), {}).setdefault(name, reason)
         return namers
 
+    def in_use(self, run_dir):
+        """Why a run must stay, which neither a delete nor pruning past KEEP_RUNS removes, or None when
+        nothing keeps it. Call it holding runs_lock."""
+        # A run's retry offer is open only while run-all holds the run, so this keeps an open offer
+        # too; an offer a killed run-all left behind does not keep its run.
+        if run_is_held(run_dir):
+            return "run %s is still generating" % run_dir.name
+        # A frame's retry also claims the run's output base as the server starts run-all.sh, which keeps
+        # the run while that run-all.sh runs though its token does not: ps cannot confirm the token's
+        # holder, or the token is gone. A run whose meta.json cannot be read is one no retry starts in.
+        try:
+            arguments = read_meta(run_dir).get("arguments")
+        except (RunRejected, OSError):
+            return None
+        if arguments is not None and self.saving_to(arguments["output_base"]):
+            return "run %s is starting a retry" % run_dir.name
+        return None
+
     def deletable(self, run_id):
         """The directory and folded status log (reduce_status) of a run whose images may be deleted
         now: one in the gallery that no process holds, no frame's retry is starting in, and whose
@@ -805,16 +823,9 @@ class Gallery:
         run_dir = self.runs_dir / run_id
         if not RUN_ID.match(run_id) or not run_dir.is_dir():
             raise Refusal(404, "no run %s" % run_id)
-        # A run's retry offer is open only while run-all holds the run, so this keeps an open offer
-        # too; an offer a killed run-all left behind does not keep its run.
-        if run_is_held(run_dir):
-            raise Refusal(409, "run %s is still generating" % run_id)
-        # A frame's retry also claims the run's output base as the server starts run-all.sh, which keeps
-        # the run while that run-all.sh runs though its token does not: ps cannot confirm the token's
-        # holder, or the token is gone.
-        arguments = read_meta(run_dir).get("arguments")
-        if arguments is not None and self.saving_to(arguments["output_base"]):
-            raise Refusal(409, "run %s is starting a retry" % run_id)
+        in_use = self.in_use(run_dir)
+        if in_use is not None:
+            raise Refusal(409, in_use)
         providers = {}
         unreadable = fold_status(run_dir, providers)
         if unreadable is not None:
