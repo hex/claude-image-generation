@@ -322,12 +322,13 @@ stub_browser() {
   unset IMAGE_GALLERY_NO_OPEN SSH_CONNECTION SSH_TTY
 }
 
-# serve_other_version — starts a server that reports another version, the way an older install's does.
+# serve_other_version [version] — starts a server that reports another version, 0.0.0-other unless
+# given, the way another install's does.
 serve_other_version() {
-  local i
-  python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version 0.0.0-other
+  local i version="${1:-0.0.0-other}"
+  python3 -I "$GALLERY_PY" serve --root "$IMAGE_GALLERY_DIR" --version "$version"
   for i in $(seq 1 50); do
-    [[ "$(server_field version)" == 0.0.0-other ]] && return 0
+    [[ "$(server_field version)" == "$version" ]] && return 0
     sleep 0.1
   done
   echo "the server of another version never answered on its control socket"
@@ -345,6 +346,26 @@ serve_other_version() {
   start_gallery
   # The page reconnects to the server that replaced it on the same port, so no second tab opens.
   [[ "$(wc -l < "$MOCK_DIR/opened" | tr -d ' ')" == 1 ]] || { cat "$MOCK_DIR/opened"; return 1; }
+}
+
+@test "a run keeps a server of a newer version and replaces one of an older version, each part compared as a number" {
+  local version year month patch newer pid
+  version=$(jq -r .version "${PLUGIN_ROOT}/.claude-plugin/plugin.json")
+  IFS=. read -r year month patch <<< "$version"
+  # Newer by its patch number, though as text it sorts before this plugin's version.
+  newer="${year}.${month}.$((patch + 10))"
+  serve_other_version "$newer"
+  pid=$(server_field pid)
+  start_gallery
+  [[ "$(server_field pid)" == "$pid" && "$(server_field version)" == "$newer" ]] || {
+    echo "serving: $(server_field pid) $(server_field version), expected $pid $newer"; return 1; }
+  stop_gallery
+  # Older, though as text it sorts after this plugin's version.
+  serve_other_version 999.1.1
+  pid=$(server_field pid)
+  start_gallery
+  [[ "$(server_field pid)" != "$pid" && "$(server_field version)" == "$version" ]] || {
+    echo "serving: $(server_field pid) $(server_field version), expected a new pid and $version"; return 1; }
 }
 
 @test "runs started together each print the page's address when the browser never finishes opening" {

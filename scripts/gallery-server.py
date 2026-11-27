@@ -4,7 +4,7 @@
 """Image gallery server and its client commands. Python 3.9 standard library only.
 
     gallery-server.py serve   --root DIR [--version V]  detach and serve the runs under DIR/runs
-    gallery-server.py ensure  --root DIR                 make sure a server of this version runs
+    gallery-server.py ensure  --root DIR                 make sure a server of this version or newer runs
     gallery-server.py clients --root DIR                 print how many pages are connected
 
 Each run is a directory DIR/runs/<run-id> written by display.sh in the tmux pane's layout:
@@ -93,6 +93,13 @@ SECURITY_HEADERS = {
 def plugin_version():
     with open(PLUGIN_ROOT / ".claude-plugin" / "plugin.json", encoding="utf-8") as f:
         return json.load(f)["version"]
+
+
+def version_order(version):
+    """A calendar version, YYYY.M.PATCH, as the numbers its parts hold, for comparing versions: 2026.11.10
+    comes after 2026.11.2. Any other string comes before every calendar version and ties with any other such string."""
+    parts = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", version)
+    return tuple(int(part) for part in parts.groups()) if parts else ()
 
 
 def write_private(path, text):
@@ -1668,9 +1675,11 @@ def ensure(root):
     version = plugin_version()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     health = control(root, "health")
+    # The newest version serves: a run replaces a server older than its plugin and uses one of the same
+    # version or newer, as a session the plugin was updated under but not yet restarted does.
     # Pages of a server this one replaces reconnect to its successor when it binds the same port.
     old_port, old_pages = None, 0
-    if health is not None and health["version"] != version:
+    if health is not None and version_order(health["version"]) < version_order(version):
         old_port, old_pages = health["port"], health["clients"]
         # The answer does not matter: a server another run started since says no, and one that
         # another run's shutdown is stopping can exit before it answers. Either way the old pid

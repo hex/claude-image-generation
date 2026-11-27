@@ -514,8 +514,8 @@ gallery_resume_run() {
   rm -f "$dir/.done" "$dir/retry-offer"
 }
 
-# Makes sure the gallery server is running at this plugin's version and that a page shows it:
-# reuses the running server, replaces one of another version, starts one when there is none,
+# Makes sure a gallery server of this plugin's version or newer is running and that a page shows it:
+# reuses a running server of this version or newer, replaces an older one, starts one when there is none,
 # then opens the page in the browser when no page is connected (IMAGE_GALLERY_NO_OPEN=1 skips
 # that), printing its address instead when the browser cannot be opened. A failure costs one
 # line on stderr and never stops the image run. Usage: gallery_ensure
