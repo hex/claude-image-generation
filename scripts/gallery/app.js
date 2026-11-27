@@ -184,7 +184,9 @@ function imageUrl(run, card) {
   return 'img/' + [run.id, card.name, String(card.image.n)].map(encodeURIComponent).join('/');
 }
 
-async function post(url, button, note) {
+// unanswered is the note when no answer comes back: a request cut off with the server it reached may
+// still have done its work.
+async function post(url, button, note, unanswered = 'Could not reach the gallery server.') {
   button.disabled = true;
   button.setAttribute('aria-busy', 'true');
   note.textContent = '';
@@ -193,7 +195,7 @@ async function post(url, button, note) {
     const answer = await response.json().catch(() => ({}));
     if (!response.ok) note.textContent = answer.error || 'The server answered ' + response.status + '.';
   } catch (error) {
-    note.textContent = 'Could not reach the gallery server.';
+    note.textContent = unanswered;
   } finally {
     button.disabled = false;
     button.removeAttribute('aria-busy');
@@ -312,7 +314,8 @@ function errorPlate(run, card, frame) {
   const foot = el('div', { class: 'error-foot' });
   if (card.retryable) {
     const retry = el('button', { type: 'button', class: 'retry', 'data-key': 'retry-frame', 'aria-label': 'Retry ' + providerName(card.name) }, el('span', { text: 'Retry' }));
-    retry.addEventListener('click', () => post('retry/' + [run.id, card.name].map(encodeURIComponent).join('/'), retry, frame.note));
+    retry.addEventListener('click', () => post('retry/' + [run.id, card.name].map(encodeURIComponent).join('/'), retry, frame.note,
+      'The gallery server did not answer. The retry may have started; if it did, this frame shows it.'));
     foot.append(retry);
   }
   if (error.full) {
