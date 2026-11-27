@@ -1426,6 +1426,36 @@ retry_frame() {
   [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
 }
 
+@test "a frame's Retry the server cannot hold its run for, as when ps fails, stops before the provider is paid and says why" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer i
+  write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
+  record_arguments "$a" "$out/hero"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  # The server finds ps on its PATH; this one fails, so the server cannot read when the run-all it
+  # started began, which the token holding the run must say.
+  printf '#!/bin/sh\nexit 1\n' > "$MOCK_DIR/ps"
+  chmod +x "$MOCK_DIR/ps"
+  answer=$(retry_frame "$a" gemini)
+  rm "$MOCK_DIR/ps"
+  [[ "$answer" == "{\"error\": \"could not hold run $a for its retry (ps could not say when the retry's run-all.sh started), so the retry stopped before it called the provider\"} 500" ]] || {
+    echo "$answer"; return 1; }
+  [[ ! -e "$MOCK_DIR/calls" && ! -e "$out/hero-gemini.png" && -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
+  [[ -z "$(ls -A "$IMAGE_GALLERY_DIR/runs/$a/active")" ]] || { ls -la "$IMAGE_GALLERY_DIR/runs/$a/active"; return 1; }
+  [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$(printf 'gemini\terror\t\tmodel-a\t')" ]]
+  # Clicked again once the stopped run-all has exited, the retry runs and pays the provider once.
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].retryable'
+  for i in $(seq 1 50); do
+    answer=$(retry_frame "$a" gemini)
+    [[ "$answer" == *"is already starting; try again in a second"* ]] || break
+    sleep 0.1
+  done
+  [[ "$answer" == "{\"run\": \"$a\"} 200" ]] || { echo "$answer"; return 1; }
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
+}
+
 @test "a frame's Retry whose run-all exits before it continues the run is answered 502, and the frame offers Retry again" {
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash
   write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done

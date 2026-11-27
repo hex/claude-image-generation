@@ -264,17 +264,14 @@ def hold_run(run_dir, pid):
     """Writes the token that run-all.sh, running as pid, writes for itself once it continues the run
     (gallery_resume_run, as owner run-all), so the run is held from the moment the server starts it. Any
     server reads it, as a server that replaces this one must: that one never learns what this one
-    started. Writes nothing for a pid that has already ended, and names in server.log a token it could
-    not write; the server that started run-all.sh still keeps the run by its claim on the output base."""
+    started. Raises OSError saying why when it writes no token: ps cannot say when pid started, or the
+    token cannot be written."""
     started = process_started(pid)
     if started is None:
-        return
-    try:
-        active = run_dir / "active"
-        active.mkdir(mode=0o700, exist_ok=True)
-        write_private(active / ("run-all.%d" % pid), started + "\n")
-    except OSError as e:
-        print("image gallery: cannot hold run %s for the retry it started: %s" % (run_dir.name, e), file=sys.stderr, flush=True)
+        raise OSError("ps could not say when the retry's run-all.sh started")
+    active = run_dir / "active"
+    active.mkdir(mode=0o700, exist_ok=True)
+    write_private(active / ("run-all.%d" % pid), started + "\n")
 
 
 def run_is_held(run_dir):
@@ -803,8 +800,9 @@ class Gallery:
         # too; an offer a killed run-all left behind does not keep its run.
         if run_is_held(run_dir):
             raise Refusal(409, "run %s is still generating" % run_id)
-        # A frame's retry claims the run's output base as it starts run-all.sh, which keeps the run
-        # when hold_run could not read the start time it needs to hold the run itself.
+        # A frame's retry also claims the run's output base as the server starts run-all.sh, which keeps
+        # the run while that run-all.sh runs though its token does not: ps cannot confirm the token's
+        # holder, or the token is gone.
         arguments = read_meta(run_dir).get("arguments")
         if arguments is not None and self.saving_to(arguments["output_base"]):
             raise Refusal(409, "run %s is starting a retry" % run_id)
@@ -953,8 +951,22 @@ class Gallery:
                 base = arguments["output_base"]
                 size = status_size(run_dir)
                 argv = run_all_argv(arguments, meta["prompt"], base, [name]) + ["--gallery-run", run_id]
-                child, log_path = self.launch_run_all(argv, meta["cwd"], base, [name], None)
-                hold_run(run_dir, child.pid)
+                # run-all.sh waits behind a line on its stdin, which the server writes once the run is held
+                # for it. The pipe closing with no line, when the run cannot be held or the server stops,
+                # ends it before it calls the provider. exec keeps the pid the token names.
+                gated = ["bash", "-c", 'read -r go && exec "$@" < /dev/null', "bash"] + argv
+                child, log_path = self.launch_run_all(gated, meta["cwd"], base, [name], None, stdin=subprocess.PIPE)
+                with child.stdin:
+                    try:
+                        hold_run(run_dir, child.pid)
+                    except OSError as e:
+                        raise Refusal(500, "could not hold run %s for its retry (%s), so the retry stopped before it "
+                                           "called the provider" % (run_id, e))
+                    try:
+                        os.write(child.stdin.fileno(), b"go\n")
+                    except BrokenPipeError:
+                        # run-all.sh has exited already; await_run answers with how it exited.
+                        pass
         except Refusal as e:
             return e.code, {"error": str(e)}
         return self.await_run(child, log_path, lambda: run_id if status_size(run_dir) > size else None, {"pending": True})
@@ -964,9 +976,9 @@ class Gallery:
         with self.resend_lock:
             return base in self.resends
 
-    def launch_run_all(self, argv, cwd, base, providers, launch):
-        """Starts run-all.sh with argv in cwd, saving each of providers to <base>-<provider>.png, and
-        returns it with the file its output goes to. It runs as resend_environment makes it, in a
+    def launch_run_all(self, argv, cwd, base, providers, launch, stdin=subprocess.DEVNULL):
+        """Starts run-all.sh with argv in cwd, its stdin as given, saving each of providers to
+        <base>-<provider>.png, and returns it with the file its output goes to. It runs as resend_environment makes it, in a
         session of its own, its images readable by this user only, and the server reaps it. Raises
         Refusal, starting nothing, while another run-all.sh the server started saves to base, or
         when any of those files already exists."""
@@ -982,7 +994,7 @@ class Gallery:
                 # The server cannot know the umask of the run it resends, so the images are saved
                 # readable by this user only, as the gallery's own files are.
                 with open(str(log_path), "ab") as log:
-                    child = subprocess.Popen(argv, cwd=cwd, env=self.resend_environment(cwd, launch), stdin=subprocess.DEVNULL,
+                    child = subprocess.Popen(argv, cwd=cwd, env=self.resend_environment(cwd, launch), stdin=stdin,
                                              stdout=log, stderr=subprocess.STDOUT, start_new_session=True, umask=0o077)
             except OSError as e:
                 raise Refusal(500, "could not start run-all.sh: %s" % e.strerror)
