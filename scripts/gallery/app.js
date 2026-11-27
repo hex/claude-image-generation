@@ -290,10 +290,11 @@ function readError(text) {
   };
 }
 
-// A failed frame: the status and code, the message, and "Full error" to open the whole file in
-// place. The button shows when the file holds more than the message, or when the message runs
-// past the square. A frame drawn while its run is filtered out has no size yet, so that check runs
-// whenever it gets one.
+// A failed frame: the status and code, the message, and at its foot Retry, when the server offers
+// it, and "Full error" to open the whole file in place. Retry runs the provider again in this run,
+// and the frame then shows it at work like any other. "Full error" shows when the file holds more
+// than the message, or when the message runs past the square. A frame drawn while its run is
+// filtered out has no size yet, so that check runs whenever it gets one.
 function errorPlate(run, card, frame) {
   const error = readError(card.error || '');
   frame.plate.title = error.summary || error.code;
@@ -301,23 +302,32 @@ function errorPlate(run, card, frame) {
     ? el('p', { class: 'message', text: error.summary })
     : el('p', { class: 'message quiet', text: 'The provider saved no error text.' });
   const parts = [el('p', { class: 'code', text: error.code }), message];
-  if (!error.full) return parts;
-  const more = el('button', { type: 'button', class: 'more', 'aria-expanded': 'false', 'data-key': 'more', text: 'Full error' });
-  more.addEventListener('click', () => {
-    const open = frame.node.classList.toggle('expanded');
-    more.setAttribute('aria-expanded', String(open));
-    more.textContent = open ? 'Show less' : 'Full error';
-  });
-  parts.push(el('pre', { class: 'full-error', text: error.full }), more);
-  if (error.full === error.summary) {
-    more.hidden = true;
-    const sized = new ResizeObserver(() => {
-      if (message.scrollHeight <= message.clientHeight + 1) return;
-      sized.disconnect();
-      more.hidden = false;
-    });
-    sized.observe(message);
+  const foot = el('div', { class: 'error-foot' });
+  if (card.retryable) {
+    const retry = el('button', { type: 'button', class: 'retry', 'data-key': 'retry-frame', 'aria-label': 'Retry ' + providerName(card.name) }, el('span', { text: 'Retry' }));
+    retry.addEventListener('click', () => post('retry/' + [run.id, card.name].map(encodeURIComponent).join('/'), retry, frame.note));
+    foot.append(retry);
   }
+  if (error.full) {
+    const more = el('button', { type: 'button', class: 'more', 'aria-expanded': 'false', 'data-key': 'more', text: 'Full error' });
+    more.addEventListener('click', () => {
+      const open = frame.node.classList.toggle('expanded');
+      more.setAttribute('aria-expanded', String(open));
+      more.textContent = open ? 'Show less' : 'Full error';
+    });
+    parts.push(el('pre', { class: 'full-error', text: error.full }));
+    foot.append(more);
+    if (error.full === error.summary) {
+      more.hidden = true;
+      const sized = new ResizeObserver(() => {
+        if (message.scrollHeight <= message.clientHeight + 1) return;
+        sized.disconnect();
+        more.hidden = false;
+      });
+      sized.observe(message);
+    }
+  }
+  if (foot.childElementCount) parts.push(foot);
   return parts;
 }
 
