@@ -23,6 +23,23 @@ teardown() {
   return 0
 }
 
+# Puts a curl first on PATH that keeps the JSON body openai.sh sends with -d in $MOCK_DIR/body and
+# answers HTTP 401, as the API answers the dummy key.
+capture_request_body() {
+  MOCK_DIR="${BATS_TEST_TMPDIR}/curl_mock"
+  mkdir -p "$MOCK_DIR"
+  cat > "$MOCK_DIR/curl" <<'EOF'
+#!/bin/bash
+while [[ $# -gt 0 ]]; do
+  [[ "$1" == -d ]] && printf '%s' "$2" > "$(dirname "$0")/body"
+  shift
+done
+printf '{}\n401\n'
+EOF
+  chmod +x "$MOCK_DIR/curl"
+  export PATH="$MOCK_DIR:$PATH"
+}
+
 @test "openai: no arguments prints error and usage" {
   run "$OPENAI_SH"
   assert_status 1
@@ -155,6 +172,74 @@ EOF
   local flag
   flag=$(grep -B1 -x 'prompt=@/etc/passwd' "$CAPTURE_FILE" | head -1)
   [[ "$flag" == "--form-string" ]] || { echo "prompt was passed after '${flag}', not --form-string:"; cat "$CAPTURE_FILE"; return 1; }
+}
+
+@test "openai: an aspect ratio and a size tier become the request's size" {
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  capture_request_body
+  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 16:9 --size-tier 2K
+  [[ "$(jq -r '.size' "$MOCK_DIR/body")" == 2736x1536 ]] || { echo "$output"; return 1; }
+}
+
+@test "openai: every size in the ratio table is one OpenAI accepts, at its ratio, growing with the tier" {
+  source "${PLUGIN_ROOT}/scripts/aspect-ratios.sh"
+  # Sizes OpenAI's guide names: 1024x1024, 2048x2048 (2K square), 3840x2160 (4K landscape) and
+  # 2160x3840 (4K portrait).
+  [[ "$(openai_size 1:1 1K) $(openai_size 1:1 2K) $(openai_size 16:9 4K) $(openai_size 9:16 4K)" == \
+    "1024x1024 2048x2048 3840x2160 2160x3840" ]]
+  [[ "$(openai_size 16:9 1K) $(openai_size 16:9 2K) $(openai_size 21:9 4K)" == "1360x768 2736x1536 3840x1648" ]]
+  local ratio tier size w h previous
+  for ratio in $(openai_aspect_ratios); do
+    previous=0
+    for tier in 1K 2K 4K; do
+      size=$(openai_size "$ratio" "$tier")
+      w=${size%x*}
+      h=${size#*x}
+      # Both edges multiples of 16 and at most 3840, long edge at most 3x the short one, 655,360
+      # to 8,294,400 pixels, within 1% of the ratio, and more pixels than the tier below.
+      awk -v w="$w" -v h="$h" -v r="$ratio" -v prev="$previous" 'BEGIN {
+        split(r, p, ":"); want = p[1] / p[2]; long = (w > h) ? w : h; short = (w > h) ? h : w
+        ok = w % 16 == 0 && h % 16 == 0 && long <= 3840 && long <= 3 * short &&
+             w * h >= 655360 && w * h <= 8294400 && (w / h) / want > 0.99 && (w / h) / want < 1.01 &&
+             w * h > prev
+        exit !ok }' || { echo "$ratio at $tier is $size"; return 1; }
+      previous=$((w * h))
+    done
+  done
+  # The ratios past 3:1 that Gemini draws are not in it.
+  [[ " $(openai_aspect_ratios) " != *" 4:1 "* && -z "$(openai_size 4:1 1K)" ]]
+}
+
+@test "openai: a ratio past 3:1 is refused before any request, naming the ratios it draws" {
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  capture_request_body
+  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 4:1
+  assert_status 1
+  [[ "$output" == "Error: gpt-image-2.6-sunburst does not take aspect ratio 4:1; it takes 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, 5:2" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$MOCK_DIR/body" ]]
+}
+
+@test "openai: --size given beside a ratio and tier wins" {
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  capture_request_body
+  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT" --size 1536x1024 --aspect-ratio 16:9 --size-tier 2K
+  [[ "$(jq -r '.size' "$MOCK_DIR/body")" == 1536x1024 ]] || { echo "$output"; return 1; }
+}
+
+@test "openai: a ratio or tier on a model that takes only three sizes is refused before any request" {
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  capture_request_body
+  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT" --size-tier 2K --model gpt-image-1.5
+  assert_status 1
+  [[ "$output" == "Error: gpt-image-1.5 draws only 1024x1024, 1536x1024 or 1024x1536, so it takes no aspect ratio or size tier; pass --size, or a gpt-image-2 model" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$MOCK_DIR/body" ]]
+}
+
+@test "openai: with no ratio or size tier the request asks for 1024x1024" {
+  export OPENAI_API_KEY="$DUMMY_OPENAI_KEY"
+  capture_request_body
+  run "$OPENAI_SH" --mode generate --prompt "a cat" --output "$OUT"
+  [[ "$(jq -r '.size' "$MOCK_DIR/body")" == 1024x1024 ]] || { echo "$output"; return 1; }
 }
 
 @test "openai: usage text includes all documented options" {
