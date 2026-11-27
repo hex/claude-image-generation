@@ -1265,7 +1265,7 @@ retry_frame() {
   [[ "$(cat "$IMAGE_GALLERY_DIR/runs/$a/status")" == "$(printf 'gemini\terror\t\tmodel-a\t')" && -e "$IMAGE_GALLERY_DIR/runs/$a/.done" ]]
 }
 
-@test "a second Retry of a frame while its first is starting is refused, so the provider is paid once" {
+@test "while a frame's Retry is starting, a second click and a delete of its run are refused, so the provider is paid once" {
   answer_provider_with "$GEMINI_IMAGE"
   local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 real_bash i first
   write_run "$a" "$out" 'gemini\terror\t\tmodel-a\t\n' done
@@ -1286,6 +1286,9 @@ retry_frame() {
   done
   [[ "$(retry_frame "$a" gemini)" == \
     "{\"error\": \"a run saving to $out/hero-<provider>.png is already starting; try again in a second\"} 409" ]]
+  # Nor can the run be deleted before its run-all holds it.
+  [[ "$(delete_runs "{\"runs\": {\"$a\": []}}")" == \
+    "{\"deleted\": [], \"kept\": [{\"id\": \"$a\", \"error\": \"run $a is starting a retry\"}], \"error\": \"run $a is starting a retry\"} 409" ]]
   touch "$MOCK_DIR/go"
   wait "$first"
   [[ "$(cat "$MOCK_DIR/first.answer")" == "{\"run\": \"$a\"} 200" ]] || { cat "$MOCK_DIR/first.answer"; return 1; }
