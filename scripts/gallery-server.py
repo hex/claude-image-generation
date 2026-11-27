@@ -978,10 +978,10 @@ class Gallery:
 
     def launch_run_all(self, argv, cwd, base, providers, launch, stdin=subprocess.DEVNULL):
         """Starts run-all.sh with argv in cwd, its stdin as given, saving each of providers to
-        <base>-<provider>.png, and returns it with the file its output goes to. It runs as resend_environment makes it, in a
-        session of its own, its images readable by this user only, and the server reaps it. Raises
-        Refusal, starting nothing, while another run-all.sh the server started saves to base, or
-        when any of those files already exists."""
+        <base>-<provider>.png, and returns it with the file its output goes to. It runs as
+        resend_environment makes it, in a session of its own, its images readable by this user only,
+        and the server reaps it. Raises Refusal, starting nothing, while another run-all.sh the server
+        started saves to base, or when any of those files already exists."""
         with self.resend_lock:
             outputs = ["%s-%s.png" % (base, name) for name in providers]
             if base in self.resends:
