@@ -1297,3 +1297,21 @@ retry_frame() {
   [[ "$(cat "$MOCK_DIR/calls")" == 1 && -f "$out/hero-gemini.png" ]]
   [[ "$(ls "$IMAGE_GALLERY_DIR/resend-logs" | wc -l | tr -d ' ')" == 1 ]]
 }
+
+@test "Delete run removes the image a frame's Retry saved, which the run's records name" {
+  answer_provider_with "$GEMINI_IMAGE"
+  local out="${BATS_TEST_TMPDIR}/out" a=20261125T100000Z-00000000a1 answer
+  printf 'png' > "$out/hero-openai.png"
+  write_run "$a" "$out" "gemini\terror\t\tmodel-a\t\nopenai\tcomplete\t1000\tmodel-b\t$out/hero-openai.png\n" done
+  record_arguments "$a" "$out/hero"
+  start_gallery
+  wait_for_snapshot '.runs[0].providers[0].retryable'
+  [[ "$(retry_frame "$a" gemini)" == "{\"run\": \"$a\"} 200" ]]
+  wait_for_snapshot '.runs[0].status == "done" and .runs[0].providers[0].state == "complete"'
+  [[ "$(jq -c '[.runs[0].files[] | [.path, .kept]]' <<< "$SNAPSHOT")" == \
+    "[[\"$out/hero-gemini.png\",null],[\"$out/hero-openai.png\",null]]" ]] || { echo "$SNAPSHOT"; return 1; }
+  answer=$(delete_runs "$(listing "$a")")
+  [[ "$answer" == "{\"deleted\": [{\"id\": \"$a\", \"removed\": [\"$out/hero-gemini.png\", \"$out/hero-openai.png\"], \"missing\": [], \"kept_files\": []}], \"kept\": []} 200" ]] || {
+    echo "$answer"; return 1; }
+  [[ -z "$(ls "$out")" && ! -e "$IMAGE_GALLERY_DIR/runs/$a" ]]
+}
