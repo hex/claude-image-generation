@@ -56,6 +56,8 @@ HOLDER_CHECK_SECONDS = 10
 IN_FLIGHT = ("waiting", "querying", "retrying")
 # The providers run-all.sh runs, which a resend may choose from.
 RESEND_PROVIDERS = ("gemini", "openai", "xai", "openrouter")
+# The size tiers the generate tool takes (hooks/argv.ts), which a resend keeps to.
+SIZE_TIERS = ("1K", "2K", "4K")
 # The generate tool's cap on a prompt (hooks/argv.ts), which a resend keeps to: a prompt travels as
 # one program argument down to curl.
 PROMPT_LIMIT_BYTES = 100000
@@ -378,8 +380,9 @@ def read_meta(run_dir):
 
 def check_arguments(arguments):
     """Raises RunRejected naming the field unless arguments is what run-all.sh records of how it was
-    started: its mode, its output base and input images as absolute paths, and a string of extra
-    arguments for each provider. A run that recorded none has no arguments field at all."""
+    started: its mode, its output base and input images as absolute paths, a string of extra
+    arguments for each provider, and the aspect ratio and size tier it was given, each left out when
+    it was given none. A run that recorded none has no arguments field at all."""
     def bad(field, value, wanted):
         return RunRejected("meta.json's arguments.%s is %s, not %s" % (field, json.dumps(value)[:80], wanted))
     if not isinstance(arguments, dict):
@@ -398,6 +401,52 @@ def check_arguments(arguments):
     if (not isinstance(extras, dict) or sorted(extras) != sorted(RESEND_PROVIDERS)
             or not all(isinstance(value, str) for value in extras.values())):
         raise bad("extras", extras, "a string for each of %s" % ", ".join(RESEND_PROVIDERS))
+    if "aspect_ratio" in arguments and not is_aspect_ratio(arguments["aspect_ratio"]):
+        raise bad("aspect_ratio", arguments["aspect_ratio"], "a ratio such as 16:9")
+    if "size" in arguments and arguments["size"] not in SIZE_TIERS:
+        raise bad("size", arguments["size"], "one of %s" % ", ".join(SIZE_TIERS))
+
+
+# The flags in a provider's extra arguments that set each part of a run's shape, the aspect ratio and
+# the size tier. openai.sh's --size names a WxH, which beats both.
+SHAPE_FLAGS = {"aspect_ratio": ("--aspect-ratio",), "size": ("--image-size", "--resolution", "--size-tier")}
+
+
+def extra_words(extra):
+    """The words run-all.sh hands a provider for its extra arguments: `read -ra` reads the first line
+    and splits it on spaces and tabs."""
+    return [word for word in re.split(r"[ \t]+", extra.split("\n", 1)[0]) if word]
+
+
+def extras_shape(extras):
+    """The aspect ratio and size tier a run's extra arguments ask its providers for, each None unless
+    every flag that sets it names the same value, and one a resend takes: --aspect-ratio for the ratio,
+    and --image-size, --resolution (xai's lowercase 1k or 2k) or --size-tier for the size."""
+    def agreed(values, valid):
+        return values.pop() if len(values) == 1 and valid(next(iter(values))) else None
+    ratios, sizes = set(), set()
+    for extra in extras.values():
+        words = extra_words(extra)
+        for flag, value in zip(words, words[1:]):
+            if flag in SHAPE_FLAGS["aspect_ratio"]:
+                ratios.add(value)
+            elif flag in SHAPE_FLAGS["size"]:
+                sizes.add(value.upper() if flag == "--resolution" else value)
+    return agreed(ratios, is_aspect_ratio), agreed(sizes, lambda size: size in SIZE_TIERS)
+
+
+def run_shape(arguments):
+    """The aspect ratio and size tier the page's editor shows for a run's arguments: each the run's
+    own, or, when it recorded none, the one its extra arguments ask for."""
+    from_extras = extras_shape(arguments["extras"])
+    return arguments.get("aspect_ratio", from_extras[0]), arguments.get("size", from_extras[1])
+
+
+def is_aspect_ratio(value):
+    """Whether value is an aspect ratio the generate tool takes: W:H, each side a whole or decimal
+    number above zero, such as 16:9 or 19.5:9."""
+    sides = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?):([0-9]+(?:\.[0-9]+)?)", value) if isinstance(value, str) else None
+    return sides is not None and float(sides[1]) > 0 and float(sides[2]) > 0
 
 
 def retry_refusal(run_id, meta, providers, unreadable, held, name):
@@ -495,6 +544,8 @@ def read_run(run_dir, held):
         "files": [{"path": path, "provider": name} for name, path in unique_images(recorded_images(providers))],
         "input_images": meta["arguments"]["input_images"] if "arguments" in meta else [],
         "resendable": "arguments" in meta,
+        "aspect_ratio": run_shape(meta["arguments"])[0] if "arguments" in meta else None,
+        "size": run_shape(meta["arguments"])[1] if "arguments" in meta else None,
     }
 
 
@@ -661,13 +712,40 @@ def check_places(run_id, meta):
             raise Refusal(409, "run %s's input image %s is gone" % (run_id, path))
 
 
-def run_all_argv(arguments, prompt, base, providers):
+def resent_extras(arguments, shape):
+    """The run's extra arguments for a resend of the given shape, so the editor's choice wins for every
+    provider: a ratio or size it sends drops the extras' flags for that part, as does its default for a
+    part it showed the run's value of, and either value drops openai's --size. A part the resend leaves
+    out, or whose default stands for a value the editor did not show, keeps the extras' own."""
+    shown = dict(zip(SHAPE_FLAGS, run_shape(arguments)))
+    flags = set()
+    for part, value in shape.items():
+        if value is not None or shown[part] is not None:
+            flags.update(SHAPE_FLAGS[part])
+    extras = {}
+    for name, extra in arguments["extras"].items():
+        dropped = flags | ({"--size"} if name == "openai" and any(v is not None for v in shape.values()) else set())
+        words, kept = iter(extra_words(extra)), []
+        for word in words:
+            if word in dropped:
+                next(words, None)
+            else:
+                kept.append(word)
+        extras[name] = " ".join(kept) if dropped else extra
+    return extras
+
+
+def run_all_argv(arguments, prompt, base, providers, aspect_ratio, size):
     """The command that runs run-all.sh with a run's recorded arguments, prompt and providers, saving
-    under base."""
+    under base, and the aspect ratio and size tier given, each None for the providers' default."""
     argv = ["bash", str(SCRIPT.parent / "run-all.sh"), "--mode", arguments["mode"], "--prompt", prompt,
             "--output-base", base, "--providers", ",".join(providers)]
     for path in arguments["input_images"]:
         argv += ["--input-image", path]
+    if aspect_ratio is not None:
+        argv += ["--aspect-ratio", aspect_ratio]
+    if size is not None:
+        argv += ["--size", size]
     for name in providers:
         if arguments["extras"][name]:
             argv += ["--%s-extra" % name, arguments["extras"][name]]
@@ -924,9 +1002,9 @@ class Gallery:
         except OSError as e:
             raise Refusal(409, "run %s cannot be read: %s: %s" % (run_id, e.filename, e.strerror))
 
-    def resend(self, run_id, prompt, providers):
-        """Starts run-all.sh again for a run that recorded its arguments, with prompt and providers in
-        place of its own, saving in the folder of the run's output base under a fresh image-<stamp>
+    def resend(self, run_id, prompt, providers, shape):
+        """Starts run-all.sh again for a run that recorded its arguments, with prompt, providers, and the
+        shape parse_resend read in place of its own, saving in the folder of the run's output base under a fresh image-<stamp>
         base. Answers (HTTP status, body) as await_run does, or with why none was started."""
         try:
             meta = self.run_meta(run_id)[1]
@@ -937,8 +1015,9 @@ class Gallery:
             base = os.path.join(os.path.dirname(arguments["output_base"]), "image-" + time.strftime("%Y%m%d-%H%M%S"))
             launch = secrets.token_hex(8)
             started = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(time.time() - 1))
-            child, log_path = self.launch_run_all(run_all_argv(arguments, prompt, base, providers), meta["cwd"], base,
-                                                  providers, launch)
+            argv = run_all_argv(dict(arguments, extras=resent_extras(arguments, shape)), prompt, base, providers,
+                                shape.get("aspect_ratio"), shape.get("size"))
+            child, log_path = self.launch_run_all(argv, meta["cwd"], base, providers, launch)
         except Refusal as e:
             return e.code, {"error": str(e)}
         return self.await_run(child, log_path, lambda: self.resent_run(launch, started), {"pending": True, "launch": launch})
@@ -964,7 +1043,8 @@ class Gallery:
                 check_places(run_id, meta)
                 arguments = meta["arguments"]
                 base = arguments["output_base"]
-                argv = run_all_argv(arguments, meta["prompt"], base, [name]) + ["--gallery-run", run_id]
+                argv = run_all_argv(arguments, meta["prompt"], base, [name], arguments.get("aspect_ratio"),
+                                    arguments.get("size")) + ["--gallery-run", run_id]
                 # run-all.sh waits behind a line on its stdin, which the server writes once the run is held
                 # for it. The pipe closing with no line, when the run cannot be held or the server stops,
                 # ends it before it calls the provider. exec keeps the pid the token names.
@@ -1380,14 +1460,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Starts a run again from the page's editor. The body is JSON naming the prompt and the
         providers; the answer names the new run, or why none started."""
         try:
-            prompt, providers = parse_resend(self.read_body(RESEND_BODY_LIMIT, "resend"))
+            prompt, providers, shape = parse_resend(self.read_body(RESEND_BODY_LIMIT, "resend"))
         except ValueError as e:
             self.send_json(400, {"error": str(e)})
             return
         except BodyRefused as e:
             self.send_json(e.code, {"error": str(e)})
             return
-        code, body = self.gallery.resend(run_id, prompt, providers)
+        code, body = self.gallery.resend(run_id, prompt, providers, shape)
         self.send_json(code, body)
 
     def read_body(self, limit, action):
@@ -1504,15 +1584,19 @@ def parse_delete_frame(body):
 
 
 def parse_resend(body):
-    """The prompt and providers a resend's JSON body names, or ValueError saying what is wrong with
-    them. The same rules as the generate tool's: a prompt that is not blank, has no NUL and fits in
-    PROMPT_LIMIT_BYTES, and one or more of RESEND_PROVIDERS, each once."""
+    """The prompt, providers and shape a resend's JSON body names, or ValueError saying what is wrong
+    with them. The same rules as the generate tool's: a prompt that is not blank, has no NUL and fits
+    in PROMPT_LIMIT_BYTES, one or more of RESEND_PROVIDERS, each once, and an aspect ratio and a size
+    tier, each the tool's or null for the providers' default, or left out. The shape holds the
+    aspect_ratio and size the body gives, null ones too, and leaves out those it does not."""
     try:
         request = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as e:
         raise ValueError("the body is not JSON: %s" % e)
-    if not isinstance(request, dict) or sorted(request) != ["prompt", "providers"]:
-        raise ValueError("the body must be an object with prompt and providers, got %s" % body[:80].decode("utf-8", "replace"))
+    if (not isinstance(request, dict) or not {"prompt", "providers"} <= set(request)
+            or not set(request) <= {"prompt", "providers", "aspect_ratio", "size"}):
+        raise ValueError("the body must be an object with prompt and providers, and aspect_ratio and size if any, got %s"
+                         % body[:80].decode("utf-8", "replace"))
     prompt, providers = request["prompt"], request["providers"]
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("the prompt is blank")
@@ -1532,7 +1616,13 @@ def parse_resend(body):
             raise ValueError("unknown provider %s; choose from %s" % (json.dumps(name), ", ".join(RESEND_PROVIDERS)))
     if len(set(providers)) != len(providers):
         raise ValueError("a provider is named twice; each provider runs once and saves one file")
-    return prompt, providers
+    shape = {part: request[part] for part in SHAPE_FLAGS if part in request}
+    aspect_ratio, size = shape.get("aspect_ratio"), shape.get("size")
+    if aspect_ratio is not None and not is_aspect_ratio(aspect_ratio):
+        raise ValueError("the aspect ratio must be W:H with sides above zero, such as 16:9, got %s" % json.dumps(aspect_ratio)[:80])
+    if size is not None and size not in SIZE_TIERS:
+        raise ValueError("the size must be %s, got %s" % (", ".join(SIZE_TIERS), json.dumps(size)[:80]))
+    return prompt, providers, shape
 
 
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):

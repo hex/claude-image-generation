@@ -10,6 +10,7 @@ source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
 source "${SCRIPT_DIR}/output-image.sh"
 source "${SCRIPT_DIR}/model-fallback.sh"
+source "${SCRIPT_DIR}/aspect-ratios.sh"
 
 readonly PROVIDER_NAME="gemini"
 
@@ -22,11 +23,15 @@ Options:
   --prompt            Text prompt describing the image (required)
   --output            Output file path (required)
   --input-image       Input image path for edit mode (required for edit, repeatable)
-  --aspect-ratio      Aspect ratio (default: 1:1)
+  --aspect-ratio      Aspect ratio (default: 1:1); one the model does not draw is refused
+                      before the request
                       Standard: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 4:5, 5:4, 21:9
-                      Extreme (3.1 Flash only): 1:4, 4:1, 1:8, 8:1
+                      Extreme (Nano Banana 2 models only): 1:4, 4:1, 1:8, 8:1
   --image-size        Output resolution: 512, 1K, 2K, 4K (UPPERCASE required)
-                      512 requires gemini-3.1-flash-image (Pro supports 1K/2K/4K)
+                      512 requires gemini-3.1-flash-image (Pro supports 1K/2K/4K);
+                      gemini-2.5-flash-image takes none and is refused one before the request
+  --size-tier         Size tier run-all.sh hands every provider: 1K, 2K or 4K; sent as
+                      --image-size, which wins when both are given
   --thinking-level    Thinking level: minimal, High (default: minimal)
   --image-only        Return only image, no text description (responseModalities: IMAGE)
   --search-grounding  Enable Google Search grounding (tools: google_search)
@@ -45,8 +50,9 @@ MODE=""
 PROMPT=""
 OUTPUT=""
 INPUT_IMAGES=()
-ASPECT_RATIO="1:1"
+ASPECT_RATIO=""
 IMAGE_SIZE=""
+SIZE_TIER=""
 THINKING_LEVEL=""
 IMAGE_ONLY=""
 SEARCH_GROUNDING=""
@@ -61,6 +67,7 @@ while [[ $# -gt 0 ]]; do
     --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
     --image-size) IMAGE_SIZE="$2"; shift 2 ;;
+    --size-tier) SIZE_TIER="$2"; shift 2 ;;
     --thinking-level) THINKING_LEVEL="$2"; shift 2 ;;
     --image-only) IMAGE_ONLY=1; shift ;;
     --search-grounding) SEARCH_GROUNDING=1; shift ;;
@@ -68,6 +75,14 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
+
+if [[ -n "$SIZE_TIER" ]]; then
+  case "$SIZE_TIER" in
+    1K|2K|4K) ;;
+    *) echo "Error: --size-tier must be 1K, 2K or 4K, got '${SIZE_TIER}'" >&2; exit 1 ;;
+  esac
+  IMAGE_SIZE="${IMAGE_SIZE:-$SIZE_TIER}"
+fi
 
 if [[ -n "$IMAGE_SIZE" ]]; then
   case "$IMAGE_SIZE" in
@@ -131,7 +146,7 @@ build_request_body() {
   fi
 
   local image_config
-  image_config=$(jq -n --arg aspect "$ASPECT_RATIO" '{"aspectRatio": $aspect}')
+  image_config=$(jq -n --arg aspect "${ASPECT_RATIO:-1:1}" '{"aspectRatio": $aspect}')
   if [[ -n "$IMAGE_SIZE" ]]; then
     image_config=$(echo "$image_config" | jq --arg size "$IMAGE_SIZE" '. + {"imageSize": $size}')
   fi
@@ -163,7 +178,16 @@ build_request_body() {
 
 REQUEST_BODY=$(build_request_body)
 
+# check_request_fits <model> — exits 1 naming the ratios <model> draws when it does not draw the
+# asked one, or when it takes no image size and one is asked. Run for the model the request goes to
+# first, and for a fallback before it is sent.
+check_request_fits() {
+  [[ -z "$ASPECT_RATIO" ]] || check_aspect_ratio "$1" "$ASPECT_RATIO" "$(gemini_aspect_ratios "$1")"
+  [[ -z "$IMAGE_SIZE" ]] || check_gemini_image_size "$1" "$IMAGE_SIZE"
+}
+
 use_remembered_fallback
+check_request_fits "$MODEL"
 echo "Calling Gemini API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 
@@ -179,7 +203,7 @@ send_request() {
     --data-binary @-
 }
 
-request_with_model_fallback send_request
+request_with_model_fallback send_request check_request_fits
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')

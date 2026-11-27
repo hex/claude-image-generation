@@ -60,13 +60,23 @@ describe('buildRun', () => {
     })
   })
 
-  test('an aspect ratio reaches the providers that take one, gemini and xai', async () => {
-    const run = buildRun({ prompt: 'x', outputBase: 'b', aspectRatio: '16:9' }, DEFAULTS, ROOT, STAMP)
+  test('an aspect ratio and a size tier reach run-all once, for every provider', async () => {
+    const run = buildRun({ prompt: 'x', outputBase: 'b', aspectRatio: '16:9', size: '2K' }, DEFAULTS, ROOT, STAMP)
     expect(run).toEqual({
       argv: ['bash', '/plugin/scripts/run-all.sh', '--mode', 'generate', '--prompt', 'x', '--output-base', 'b', '--providers', 'gemini,openai,xai',
-        '--gemini-extra', '--aspect-ratio 16:9', '--xai-extra', '--aspect-ratio 16:9'],
+        '--aspect-ratio', '16:9', '--size', '2K'],
       outputs: ['b-gemini.png', 'b-openai.png', 'b-xai.png'],
     })
+  })
+
+  test('a size other than 1K, 2K or 4K is refused', async () => {
+    expect(buildRun({ prompt: 'x', size: '3K' }, DEFAULTS, ROOT, STAMP))
+      .toEqual({ error: 'size must be 1K, 2K or 4K, got "3K"' })
+  })
+
+  test('an aspect ratio with a decimal side, as xAI takes, runs', async () => {
+    const run = buildRun({ prompt: 'x', providers: ['xai'], outputBase: 'b', aspectRatio: '19.5:9' }, DEFAULTS, ROOT, STAMP)
+    expect('error' in run ? run.error : run.argv.slice(-2)).toEqual(['--aspect-ratio', '19.5:9'])
   })
 
   test('an aspect ratio that is not W:H is refused, since run-all splits extras on spaces', async () => {
@@ -181,6 +191,42 @@ describe('generate tool', () => {
       result: 'saved art/hero-openai.png\nmissing art/hero-xai.png\nrun-all.sh exited 1\n\nstderr:\nxAI API returned HTTP 401: bad key',
     })
     expect(runs).toEqual([['bash', expect.any(String), '--mode', 'generate', '--prompt', 'x', '--output-base', 'art/hero', '--providers', 'openai,xai']])
+  })
+
+  test('the tool offers the model an aspect ratio and a size of 1K, 2K or 4K', async ($, on) => {
+    const schemas: unknown[] = []
+    on('tool.register', async ($, e) => {
+      schemas.push(e.inputSchema)
+      return { value: { tool: e.name } }
+    })
+    on('session.start', async ($, e) => ({ cwd: e.cwd }))
+
+    await $.session.start({ cwd: '/work', surface: null, isInteractive: false })
+
+    expect(schemas).toEqual([expect.objectContaining({
+      properties: expect.objectContaining({
+        aspectRatio: expect.objectContaining({ type: 'string' }),
+        size: expect.objectContaining({ type: 'string', enum: ['1K', '2K', '4K'] }),
+      }),
+      additionalProperties: false,
+    })])
+  })
+
+  test('the tool takes an aspect ratio and a size and hands both to run-all', async ($, on) => {
+    mock.clock(on)
+    mock.env(on, {})
+    const runs: (readonly string[])[] = []
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async ($, e) => ({ deny: `$.fs.stat(${e.path}) failed: ENOENT` }))
+    on('process.run', async ($, e) => {
+      runs.push(e.argv)
+      return { value: { exitCode: 1, stdout: '', stderr: '' } }
+    })
+
+    await $.tool.call({ tool: TOOL, prompt: 'x', providers: ['openrouter'], outputBase: 'art/wide', aspectRatio: '16:9', size: '2K' })
+
+    expect(runs).toEqual([['bash', expect.any(String), '--mode', 'generate', '--prompt', 'x', '--output-base', 'art/wide', '--providers', 'openrouter',
+      '--aspect-ratio', '16:9', '--size', '2K']])
   })
 
   test("the run shows on the /config display unless Claude Code's environment sets IMAGE_DISPLAY", async ($, on) => {

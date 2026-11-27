@@ -10,6 +10,7 @@ source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
 source "${SCRIPT_DIR}/output-image.sh"
 source "${SCRIPT_DIR}/model-fallback.sh"
+source "${SCRIPT_DIR}/aspect-ratios.sh"
 
 readonly PROVIDER_NAME="openai"
 
@@ -25,6 +26,10 @@ Options:
   --size              Image size: auto, 1024x1024, 1536x1024, 1024x1536 (default: 1024x1024);
                       gpt-image-2, gpt-image-2.5-* and gpt-image-2.6-sunburst also take a
                       custom WxH with edges multiples of 16
+  --aspect-ratio      Aspect ratio, drawn as the WxH that --size-tier names for it (1K when no
+                      tier is given); gpt-image-2, 2.5 and 2.6 models only. --size wins over both
+  --size-tier         Size tier run-all.sh hands every provider: 1K, 2K or 4K (1:1 when no
+                      ratio is given)
   --quality           Quality: auto, low, medium, high (default: high); xhigh and max on
                       gpt-image-2.5 and 2.6 models
   --background        Background: auto, transparent, opaque (default: auto)
@@ -50,7 +55,9 @@ MODE=""
 PROMPT=""
 OUTPUT=""
 INPUT_IMAGES=()
-SIZE="1024x1024"
+SIZE=""
+ASPECT_RATIO=""
+SIZE_TIER=""
 QUALITY="high"
 BACKGROUND="auto"
 OUTPUT_FORMAT="png"
@@ -67,6 +74,8 @@ while [[ $# -gt 0 ]]; do
     --output) OUTPUT="$2"; shift 2 ;;
     --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --size) SIZE="$2"; shift 2 ;;
+    --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
+    --size-tier) SIZE_TIER="$2"; shift 2 ;;
     --quality) QUALITY="$2"; shift 2 ;;
     --background) BACKGROUND="$2"; shift 2 ;;
     --output-format) OUTPUT_FORMAT="$2"; shift 2 ;;
@@ -77,6 +86,13 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
+
+if [[ -n "$SIZE_TIER" ]]; then
+  case "$SIZE_TIER" in
+    1K|2K|4K) ;;
+    *) echo "Error: --size-tier must be 1K, 2K or 4K, got '${SIZE_TIER}'" >&2; exit 1 ;;
+  esac
+fi
 
 case "$OUTPUT_FORMAT" in
   png|jpeg|webp) ;;
@@ -141,7 +157,32 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
+# A ratio or tier becomes a size from the table, unless --size names one.
+SIZE_FROM_TABLE=""
+if [[ -z "$SIZE" && ( -n "$ASPECT_RATIO" || -n "$SIZE_TIER" ) ]]; then
+  SIZE_FROM_TABLE=1
+fi
+
+# check_request_fits <model> — exits 1 when the size is to come from the table and <model> takes
+# none of its sizes, or not the asked ratio's. Run for the model the request goes to first, and
+# for a fallback before it is sent.
+check_request_fits() {
+  [[ -n "$SIZE_FROM_TABLE" ]] || return 0
+  case "$1" in
+    gpt-image-1*|chatgpt-image-*|dall-e-*)
+      echo "Error: ${1} draws only 1024x1024, 1536x1024 or 1024x1536, so it takes no aspect ratio or size tier; pass --size, or a gpt-image-2 model" >&2
+      exit 1 ;;
+  esac
+  check_aspect_ratio "$1" "${ASPECT_RATIO:-1:1}" "$(openai_aspect_ratios)"
+}
+
 use_remembered_fallback
+check_request_fits "$MODEL"
+if [[ -n "$SIZE_FROM_TABLE" ]]; then
+  SIZE=$(openai_size "${ASPECT_RATIO:-1:1}" "${SIZE_TIER:-1K}")
+  echo "Drawing ${SIZE} for ${ASPECT_RATIO:-1:1} at ${SIZE_TIER:-1K}" >&2
+fi
+SIZE="${SIZE:-1024x1024}"
 echo "Calling OpenAI API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 
@@ -214,7 +255,7 @@ send_request() {
   fi
 }
 
-request_with_model_fallback send_request
+request_with_model_fallback send_request check_request_fits
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')

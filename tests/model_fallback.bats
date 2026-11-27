@@ -157,6 +157,32 @@ run_provider() {
   assert_output_not_contains "00000000-0000-0000-0000-000000000000"
 }
 
+@test "xai: a fallback that does not draw the asked ratio is refused before it is paid" {
+  stub_curl_answers xai "$FIXTURES/unavailable/xai-retired-404.json" ok
+  run_provider xai --aspect-ratio 21:9
+
+  assert_status 1
+  assert_calls 1
+  assert_sent 1 grok-imagine-image-2.0
+  [[ "${lines[${#lines[@]}-1]}" == "grok-imagine-image-2.0 is unavailable to this key (xai, HTTP 404), and its fallback cannot take this request: grok-imagine-image does not take aspect ratio 21:9; it takes 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, auto" ]] || {
+    echo "$output"; return 1; }
+  [[ ! -e "$OUT" ]]
+}
+
+@test "xai: a remembered fallback that does not draw the asked ratio is refused before any request" {
+  stub_curl_answers xai "$FIXTURES/unavailable/xai-retired-404.json" ok
+  run_provider xai
+  assert_status 0
+
+  reset_stub xai ok
+  run_provider xai --aspect-ratio 5:2
+
+  assert_status 1
+  assert_calls 0
+  [[ "${lines[${#lines[@]}-1]}" == "Error: grok-imagine-image does not take aspect ratio 5:2; it takes 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, auto" ]] || {
+    echo "$output"; return 1; }
+}
+
 @test "openrouter: an unavailable default model is retried once with the fallback, which draws" {
   stub_curl_answers openrouter "$FIXTURES/unavailable/openrouter-deprecated-404.json" ok
   run_provider openrouter

@@ -115,11 +115,57 @@ setup() {
   [[ "$sent" == "5" ]] || { echo "edit request carried '$sent' images, want 5"; return 1; }
 }
 
+@test "xai: a single-image edit says it ignores the aspect ratio, and a two-image edit takes it" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  local img="${PLUGIN_ROOT}/tests/fixtures/oversized.png"
+  run "$XAI_SH" --mode edit --prompt "make it blue" --output "$OUT" --input-image "$img" --aspect-ratio 16:9
+  assert_output_contains "xAI keeps the input image's shape on a single-image edit, so it ignores aspect ratio 16:9"
+  run "$XAI_SH" --mode edit --prompt "combine these" --output "$OUT" --input-image "$img" --input-image "$img" --aspect-ratio 16:9
+  assert_output_not_contains "single-image edit"
+  [[ "$(jq -r '.aspect_ratio' "$PROVIDER_API_STUB_DIR/body")" == 16:9 ]] || { echo "$output"; return 1; }
+}
+
 @test "xai: --quality rejects a value the API does not know" {
   export XAI_API_KEY="$DUMMY_XAI_KEY"
   run "$XAI_SH" --mode generate --prompt "a cat" --output "$OUT" --quality high
   assert_status 1
   assert_output_contains "--quality must be 'low', 'medium' or 'auto'"
+}
+
+@test "xai: an aspect ratio and a size tier reach the request as aspect_ratio and resolution" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  run "$XAI_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 16:9 --size-tier 2K
+  [[ "$(jq -c '[.aspect_ratio, .resolution]' "$PROVIDER_API_STUB_DIR/body")" == '["16:9","2k"]' ]] || { echo "$output"; return 1; }
+}
+
+@test "xai: a 4K size tier draws at xAI's largest, 2k, and says so" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  run "$XAI_SH" --mode generate --prompt "a cat" --output "$OUT" --size-tier 4K
+  [[ "$(jq -r '.resolution' "$PROVIDER_API_STUB_DIR/body")" == 2k ]] || { echo "$output"; return 1; }
+  assert_output_contains "xAI draws at most 2k; drawing 2k for the 4K size tier"
+}
+
+@test "xai: a ratio the model does not draw is refused before any request, naming the ones it does" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  run "$XAI_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 4:5
+  assert_status 1
+  [[ "$output" == "Error: grok-imagine-image-2.0 does not take aspect ratio 4:5; it takes 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2, 19.5:9, 9:19.5, 20:9, 9:20, 21:9, 5:2, auto" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$PROVIDER_API_STUB_DIR/url" ]] || { echo "a request went to $(cat "$PROVIDER_API_STUB_DIR/url")"; return 1; }
+}
+
+@test "xai: --resolution given beside a size tier wins, and a hand-run 4k is still refused" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  run "$XAI_SH" --mode generate --prompt "a cat" --output "$OUT" --resolution 1k --size-tier 2K
+  [[ "$(jq -r '.resolution' "$PROVIDER_API_STUB_DIR/body")" == 1k ]] || { echo "$output"; return 1; }
+  run "$XAI_SH" --mode generate --prompt "a cat" --output "$OUT" --resolution 4k
+  assert_status 1
+  assert_output_contains "Error: --resolution must be '1k' or '2k' (lowercase required)"
+}
+
+@test "xai: with no ratio or size tier the request leaves both to the model" {
+  export XAI_API_KEY="$DUMMY_XAI_KEY"
+  run "$XAI_SH" --mode generate --prompt "a cat" --output "$OUT"
+  [[ "$(jq -c '[has("aspect_ratio"), has("resolution")]' "$PROVIDER_API_STUB_DIR/body")" == '[false,false]' ]] || { echo "$output"; return 1; }
 }
 
 @test "xai: usage text includes all documented options" {

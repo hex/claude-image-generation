@@ -10,6 +10,7 @@ source "${SCRIPT_DIR}/retry.sh"
 source "${SCRIPT_DIR}/input-images.sh"
 source "${SCRIPT_DIR}/output-image.sh"
 source "${SCRIPT_DIR}/model-fallback.sh"
+source "${SCRIPT_DIR}/aspect-ratios.sh"
 
 readonly PROVIDER_NAME="xai"
 
@@ -22,11 +23,14 @@ Options:
   --prompt        Text prompt describing the image (required)
   --output        Output file path (required)
   --input-image   Input image path for edit mode (required for edit, repeatable, max 5)
-  --aspect-ratio  Aspect ratio (default: none — model picks)
+  --aspect-ratio  Aspect ratio (default: none — model picks); one the model does not draw
+                  is refused before the request
                   1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2,
                   19.5:9, 9:19.5, 20:9, 9:20, 21:9, 5:2, auto
                   Note: single-image edits ignore aspect_ratio (output matches input)
   --resolution    Output resolution: 1k or 2k (LOWERCASE required)
+  --size-tier     Size tier run-all.sh hands every provider: 1K, 2K or 4K; sent as
+                  --resolution, which wins when both are given
   --quality       low, medium or auto (grok-imagine-image-2.0 only; omitted means auto,
                   which the API serves as low for generation and medium for edits)
   --model         xAI model (default: grok-imagine-image-2.0)
@@ -45,6 +49,7 @@ OUTPUT=""
 INPUT_IMAGES=()
 ASPECT_RATIO=""
 RESOLUTION=""
+SIZE_TIER=""
 QUALITY=""
 MODEL="${XAI_IMAGE_MODEL:-grok-imagine-image-2.0}"
 FALLBACK_MODEL=$(model_fallback_for_default "$PROVIDER_NAME")
@@ -57,11 +62,26 @@ while [[ $# -gt 0 ]]; do
     --input-image) INPUT_IMAGES+=("$2"); shift 2 ;;
     --aspect-ratio) ASPECT_RATIO="$2"; shift 2 ;;
     --resolution) RESOLUTION="$2"; shift 2 ;;
+    --size-tier) SIZE_TIER="$2"; shift 2 ;;
     --quality) QUALITY="$2"; shift 2 ;;
     --model) MODEL="$2"; FALLBACK_MODEL=""; shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
+
+if [[ -n "$SIZE_TIER" ]]; then
+  case "$SIZE_TIER" in
+    1K|2K|4K) ;;
+    *) echo "Error: --size-tier must be 1K, 2K or 4K, got '${SIZE_TIER}'" >&2; exit 1 ;;
+  esac
+  if [[ -z "$RESOLUTION" ]]; then
+    case "$SIZE_TIER" in
+      1K) RESOLUTION=1k ;;
+      2K) RESOLUTION=2k ;;
+      4K) RESOLUTION=2k; echo "xAI draws at most 2k; drawing 2k for the 4K size tier" >&2 ;;
+    esac
+  fi
+fi
 
 if [[ -n "$RESOLUTION" ]]; then
   case "$RESOLUTION" in
@@ -106,7 +126,18 @@ if [[ ! -d "$OUTPUT_DIR" ]]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
+# check_request_fits <model> — exits 1 naming the ratios <model> draws when it does not draw the
+# asked one. Run for the model the request goes to first, and for a fallback before it is sent.
+check_request_fits() {
+  [[ -z "$ASPECT_RATIO" ]] || check_aspect_ratio "$1" "$ASPECT_RATIO" "$(xai_aspect_ratios "$1")"
+}
+
 use_remembered_fallback
+check_request_fits "$MODEL"
+# xAI draws a single-image edit at the input image's shape, whatever aspect_ratio asks.
+if [[ -n "$ASPECT_RATIO" && "$MODE" == edit && ${#INPUT_IMAGES[@]} -eq 1 ]]; then
+  echo "xAI keeps the input image's shape on a single-image edit, so it ignores aspect ratio ${ASPECT_RATIO}" >&2
+fi
 echo "Calling xAI API (model: ${MODEL}, mode: ${MODE})..." >&2
 display_pane_begin "$PROVIDER_NAME" "$MODEL" "$PROMPT"
 
@@ -162,7 +193,7 @@ send_request() {
       --data-binary @-
 }
 
-request_with_model_fallback send_request
+request_with_model_fallback send_request check_request_fits
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')

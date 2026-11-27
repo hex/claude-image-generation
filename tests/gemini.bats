@@ -97,6 +97,48 @@ setup() {
   assert_output_contains "at most 14"
 }
 
+@test "gemini: an aspect ratio and a size tier reach the request's imageConfig" {
+  export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 16:9 --size-tier 2K
+  local config
+  config=$(jq -c '.generationConfig.imageConfig' "$PROVIDER_API_STUB_DIR/body") || { echo "$output"; return 1; }
+  [[ "$config" == '{"aspectRatio":"16:9","imageSize":"2K"}' ]] || { echo "imageConfig: $config"; echo "$output"; return 1; }
+}
+
+@test "gemini: --image-size given beside a size tier wins" {
+  export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT" --image-size 4K --size-tier 2K
+  [[ "$(jq -r '.generationConfig.imageConfig.imageSize' "$PROVIDER_API_STUB_DIR/body")" == 4K ]] || { echo "$output"; return 1; }
+}
+
+@test "gemini: a ratio the model does not draw is refused before any request, naming the ones it does" {
+  export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 4:1
+  assert_status 1
+  [[ "$output" == "Error: gemini-3-pro-image does not take aspect ratio 4:1; it takes 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$PROVIDER_API_STUB_DIR/url" ]] || { echo "a request went to $(cat "$PROVIDER_API_STUB_DIR/url")"; return 1; }
+  # The Nano Banana 2 models draw the extreme ratios.
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT" --aspect-ratio 4:1 --model gemini-nano-banana-2.1
+  [[ "$(jq -r '.generationConfig.imageConfig.aspectRatio' "$PROVIDER_API_STUB_DIR/body")" == 4:1 ]] || { echo "$output"; return 1; }
+}
+
+@test "gemini: a size for a model that takes none is refused before any request, naming the model" {
+  export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT" --size-tier 1K --model gemini-2.5-flash-image
+  assert_status 1
+  [[ "$output" == "Error: gemini-2.5-flash-image takes no image size (it draws 1K only), got 1K" ]] || { echo "$output"; return 1; }
+  [[ ! -e "$PROVIDER_API_STUB_DIR/url" ]] || { echo "a request went to $(cat "$PROVIDER_API_STUB_DIR/url")"; return 1; }
+  # With no size it draws as before.
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT" --model gemini-2.5-flash-image
+  [[ "$(jq -c '.generationConfig.imageConfig' "$PROVIDER_API_STUB_DIR/body")" == '{"aspectRatio":"1:1"}' ]] || { echo "$output"; return 1; }
+}
+
+@test "gemini: with no ratio or size tier the request asks for 1:1 and leaves the size to the API" {
+  export GEMINI_API_KEY="$DUMMY_GEMINI_KEY"
+  run "$GEMINI_SH" --mode generate --prompt "a cat" --output "$OUT"
+  [[ "$(jq -c '.generationConfig.imageConfig' "$PROVIDER_API_STUB_DIR/body")" == '{"aspectRatio":"1:1"}' ]] || { echo "$output"; return 1; }
+}
+
 @test "gemini: usage text includes all documented options" {
   run "$GEMINI_SH"
   assert_status 1
