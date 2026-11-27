@@ -5,7 +5,7 @@ Claude Code plugin for generating and editing images using Google Gemini, OpenAI
 ## Features
 
 - **Text-to-image generation** with Google Gemini, OpenAI GPT Image 2, xAI Grok Image, or any image model on OpenRouter
-- **OpenRouter gateway** — reach any OpenRouter image model (Gemini, GPT Image, Grok Imagine and more) through one key: chat completions for models that also output text, OpenRouter's images endpoint for models that output only images
+- **OpenRouter gateway** — reach any OpenRouter image model (Gemini, GPT Image, Grok Imagine and more) through one key: chat completions, or OpenRouter's images endpoint for a model that chat completions turns away
 - **Image editing** with text instructions (all providers)
 - **Multi-image input** — repeatable `--input-image` for multi-image edits (all providers) and Gemini reference-based generation
 - **Parallel generation** across all providers via `scripts/run-all.sh`, shown as one run: a section with one frame per provider on the browser gallery, or one shared streaming pane with council-style colored banners and a `waiting on` line naming the pending providers (animated until the first image renders, then written once under each block)
@@ -155,7 +155,7 @@ xAI has also retired `grok-imagine-image-quality`, the quality mode launched 202
 
 ### Available OpenRouter Models
 
-OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. The Gemini models also output text and go to chat completions; `openai/gpt-image-*`, `x-ai/grok-imagine-image-2.0` and the other models that output only images go to OpenRouter's images endpoint (see [openrouter.sh](#openroutersh)). A few:
+OpenRouter is a gateway, so `--model` (or `OPENROUTER_IMAGE_MODEL`) accepts any OpenRouter slug that supports image output. The Gemini models draw through chat completions. Chat completions answers `openai/gpt-image-2` and `x-ai/grok-imagine-image-2.0` with HTTP 404, and the script sends them on to OpenRouter's images endpoint (see [openrouter.sh](#openroutersh)). A few:
 
 | Model | Characteristics |
 |-------|-----------------|
@@ -207,7 +207,7 @@ What the script asks each provider:
 - **Gemini**: `GET /v1beta/models?pageSize=1000`. Gemini answers a bad key with HTTP 400, and other faults too, so a 400 counts as a rejected key only when `error.details[].reason` is `API_KEY_INVALID`.
 - **OpenAI**: `GET /v1/models`.
 - **xAI**: `GET /v1/image-generation-models`. The model may match an id or one of its aliases. xAI also answers a bad key with HTTP 400, which counts as rejected only when the error text names the API key.
-- **OpenRouter**: `GET /api/v1/key` proves the key, since the model list answers without one, then `GET /api/v1/models`. The model has to list `image` among its output modalities.
+- **OpenRouter**: `GET /api/v1/key` proves the key, since the model list answers without one, then `GET /api/v1/models?output_modalities=image`, the list that also holds the models that output only images. The model has to list `image` among its output modalities.
 
 The script reads each default model and its override variable from the provider script's own `MODEL="${VAR:-default}"` line, so the two can't disagree. When that line is missing, or jq is not installed, it stops with an error and exits 1; otherwise it exits 0, whatever the rows say.
 
@@ -410,7 +410,7 @@ bash scripts/xai.sh \
 
 #### openrouter.sh
 
-OpenRouter is a gateway to many image models through a single key, so `--model` accepts any OpenRouter model slug that supports image output. Before its request the script reads OpenRouter's public image model list (`GET /api/v1/models?output_modalities=image`, sent without the key). A model the list shows with `image` and no `text` among its output modalities goes to `POST /api/v1/images`. Any other model, the default and a slug missing from the list included, goes to `POST /api/v1/chat/completions`. When the script cannot read the list, it exits with code 1 before any paid request.
+OpenRouter is a gateway to many image models through a single key, so `--model` accepts any OpenRouter model slug that supports image output. The script sends each request to `POST /api/v1/chat/completions`. When that answers HTTP 404 with one of the two messages OpenRouter gives a model it serves only on its images endpoint, the script prints a line saying so and sends the same request once to `POST /api/v1/images`, with any input images as `input_references`. The two messages, seen on 2026-11-26, are `<model> is an image generation model and cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead.` (`openai/gpt-image-2`) and `No endpoints found that support the requested output modalities: image, text` (`x-ai/grok-imagine-image-2.0`). OpenRouter also sends the second one for a model with no image output, and the images request for that model then fails with its own error. When the default model gets either answer, the script first falls back to `google/gemini-3.1-flash-image` on chat completions, as for any 404 (see [Model fallback](#model-fallback)).
 
 ```bash
 # Generate (default model: google/gemini-nano-banana-2.1)

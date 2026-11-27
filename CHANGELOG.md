@@ -8,7 +8,8 @@ cover the versions up to 2026.9.1.
 ## Unreleased
 
 ### Fixed
-- `openrouter.sh` draws with OpenRouter's models that output only images, such as `openai/gpt-image-2` and `x-ai/grok-imagine-image-2.0`. OpenRouter's chat completions endpoint answered them with HTTP 404. Before its request the script now reads OpenRouter's public image model list, which needs no key and costs nothing, and sends such a model to `/api/v1/images`, with any input images as `input_references`. Every other model, the default included, keeps its chat completions request. When the script cannot read the list, it exits 1 before any paid request.
+- `openrouter.sh` draws with OpenRouter's models that output only images, such as `openai/gpt-image-2` and `x-ai/grok-imagine-image-2.0`, which chat completions answers with HTTP 404. Every request still goes to chat completions first. When that answer is HTTP 404 with the message OpenRouter gives such a model, the script sends the same request once to `/api/v1/images`, with any input images as `input_references`. The default model's fallback to `google/gemini-3.1-flash-image` runs before that step, so a run with the default model sends the same requests as before.
+- `/claude-image-generation:status` reads OpenRouter's image output list (`/api/v1/models?output_modalities=image`). The unfiltered list leaves out the models that output only images, so the status row called `openai/gpt-image-2` unlisted.
 
 ## 2026.11.2 - 2026-11-26
 
