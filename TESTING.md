@@ -354,7 +354,7 @@ wait
 1. Hover over an image of a finished run, or tab to it, and click the trash button beside the reveal and full-size buttons (screen readers read `Delete the Gemini image`)
 2. Check the dialog: the title `Delete the Gemini image?`, the body `Removes it from this run and deletes 1 image from disk. This can’t be undone.`, the file's path listed under it, and the focus on **Cancel**
 3. Click **Delete**
-4. Quit Claude Code and stop the gallery server (`pkill -f 'gallery-server.py serve'`), then start a new run so the page opens again
+4. Quit Claude Code and stop the gallery server (`LC_ALL=C pkill -f 'gallery-server.py serve'`), then start a new run so the page opens again
 
 **Expected:** After step 3 the frame shows Deleted, the run's other frames keep their images, and the file no longer exists on disk. After step 4 the frame still shows Deleted. The run's own trash button no longer lists that file. An image of a run still generating has no trash button.
 
@@ -384,7 +384,7 @@ wait
 1. Unset one provider's API key in the shell that starts Claude Code (`unset XAI_API_KEY`), start it, and run `/generate-image a paper boat`. Close the gallery page while it runs, so the run makes no **Retry failed** offer
 2. Open the page again and check the run's xAI frame: `xai exited 1 before reporting a result; its error output says why` with a **Retry** button under it. Tab to the button: a screen reader reads `Retry xAI, button`
 3. Create the file the frame would save, `touch <output base>-xai.png`, and click **Retry**
-4. Run `rm <output base>-xai.png`. Give the gallery server the key: stop it (`pkill -f 'gallery-server.py serve'`), start Claude Code with the key set, and run `/generate-image a paper cup`, which starts the server again. Then click **Retry** on the first run's xAI frame twice in quick succession
+4. Run `rm <output base>-xai.png`. Give the gallery server the key: stop it (`LC_ALL=C pkill -f 'gallery-server.py serve'`), start Claude Code with the key set, and run `/generate-image a paper cup`, which starts the server again. Then click **Retry** on the first run's xAI frame twice in quick succession
 5. Click the run's trash button
 
 **Expected:**
