@@ -257,13 +257,10 @@ function imagePlate(run, card, frame) {
   image.src = url;
   const view = el('button', { type: 'button', class: 'view', 'data-key': 'view' }, image);
   view.addEventListener('click', () => openLoupe(run.id, card.name));
-  const actions = el('div', { class: 'actions slab' }, revealButton(() => url, frame.note), fullSizeLink(url));
-  if (run.status !== 'live') {
-    const trash = el('button', { type: 'button', class: 'act', 'aria-label': 'Delete the ' + providerName(card.name) + ' image', 'data-key': 'delete-frame' }, icon('trash'));
-    trash.addEventListener('click', () => askToDeleteFrame(strips.get(run.id).run, card.name));
-    actions.append(trash);
-  }
-  return [view, actions];
+  // The delete button hides while the run is working (app.css), so a run ending redraws no frame.
+  const trash = el('button', { type: 'button', class: 'act frame-delete', 'aria-label': 'Delete the ' + providerName(card.name) + ' image', 'data-key': 'delete-frame' }, icon('trash'));
+  trash.addEventListener('click', () => askToDeleteFrame(strips.get(run.id).run, card.name));
+  return [view, el('div', { class: 'actions slab' }, revealButton(() => url, frame.note), fullSizeLink(url), trash)];
 }
 
 // A JSON string's contents as text; as written, when they do not parse.
@@ -494,8 +491,7 @@ function updateStrip(entry, run) {
   let previous = null;
   for (const card of inColumns(run.providers)) {
     seen.add(card.name);
-    // Whether the run is live decides a frame's delete button, so it is part of what the frame shows.
-    const key = JSON.stringify([card, run.status === 'live']);
+    const key = JSON.stringify(card);
     let frame = entry.frames.get(card.name);
     if (!frame || frame.key !== key) {
       const node = frameNode(run, card, entry);
